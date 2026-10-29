@@ -54,6 +54,23 @@ is measured is solid, and anything you remove goes to the Trash, with Undo.
   </tr>
 </table>
 
+### In the menu bar
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/media/menu-bar.png" alt="Samo in the menu bar: the probe icon with the CPU load beside it, and the quick panel open beneath it showing CPU, memory, free disk and reclaimable space, the busiest process, memory pressure, network rates and the folder being watched"></td>
+    <td>
+      <p><b>The probe is the status.</b> Samo sits in the menu bar with the CPU load beside it, and its eyes are
+      the real state: dots when idle, a sweeping bar while it measures, an X when a scan failed.</p>
+      <p><b>One click for the quick panel.</b> The same readout as the app, the busiest process, memory
+      pressure, the network and the folder being watched. Click a figure to open that page; click anywhere
+      else to close it.</p>
+      <p><b>Always there.</b> Close the window and Samo keeps running up here; <b>Open Samo</b> or
+      <b>⌘0</b> brings it back.</p>
+    </td>
+  </tr>
+</table>
+
 ## Install
 
 You need macOS 11 or later, the Xcode Command Line Tools (`xcode-select --install`) and
