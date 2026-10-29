@@ -1,0 +1,6 @@
+# Gate and architecture specification files owned by KJ
+/xtask/ @KJ-AIML
+/crates/samo-blueprint/src/spec.rs @KJ-AIML
+/crates/samo-store/migrations/ @KJ-AIML
+/CODEOWNERS @KJ-AIML
+/.github/workflows/ci.yml @KJ-AIML

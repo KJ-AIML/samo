@@ -1,0 +1,2 @@
+# System directory tables exempt from tenant_id requirement
+allowlisted_tables = ["tenants"]

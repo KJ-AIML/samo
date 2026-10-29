@@ -1,0 +1,4 @@
+-- Talvyn role reference (ADR-001 baseline documentation)
+-- Samo uses embedded SQLite WAL for personal macOS operation, while preserving
+-- TenantTx isolation and tenant_id scoping across all non-directory tables.
+-- Roles in Postgres deployments: migration_owner, app_runtime, app_worker.

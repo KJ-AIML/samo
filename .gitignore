@@ -1,0 +1,9 @@
+/target
+/ui/node_modules
+/ui/dist
+*.db
+*.db-shm
+*.db-wal
+.DS_Store
+/ui/*.tsbuildinfo
+__pycache__/

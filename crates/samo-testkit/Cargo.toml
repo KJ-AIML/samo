@@ -1,0 +1,16 @@
+[package]
+name = "samo-testkit"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+samo-primitives.workspace = true
+samo-blueprint.workspace = true
+samo-domain.workspace = true
+samo-store.workspace = true
+tempfile.workspace = true
+tokio.workspace = true

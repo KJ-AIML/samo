@@ -1,0 +1,13 @@
+[package]
+name = "samo-domain"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+samo-primitives.workspace = true
+samo-blueprint.workspace = true
+serde.workspace = true

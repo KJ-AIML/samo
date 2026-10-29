@@ -1,0 +1,19 @@
+[package]
+name = "samo-macos"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+samo-primitives.workspace = true
+samo-blueprint.workspace = true
+samo-domain.workspace = true
+serde.workspace = true
+sysinfo.workspace = true
+chrono.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

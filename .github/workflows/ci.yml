@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check formatting and clippy
+        run: |
+          cargo fmt --all -- --check
+          cargo clippy --workspace --all-targets -- -D warnings
+
+  db:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run xtask verify (layers, purity, rls, commands-complete, tests)
+        run: cargo run -p xtask -- verify
+
+  ci-ok:
+    runs-on: ubuntu-latest
+    needs: [check, db]
+    steps:
+      - run: echo "All CI gates passed"

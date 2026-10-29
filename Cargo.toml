@@ -1,0 +1,60 @@
+[workspace]
+resolver = "2"
+members = [
+    "xtask",
+    "crates/samo-primitives",
+    "crates/samo-blueprint",
+    "crates/samo-domain",
+    "crates/samo-store",
+    "crates/samo-engine",
+    "crates/samo-macos",
+    "crates/samo-testkit",
+    "apps/samo-server",
+    "apps/samo-cli",
+    "apps/samo-gpui",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+authors = ["KJ <kj@talvyn.dev>"]
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"
+dbg_macro = "deny"
+
+[workspace.dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "2.0"
+tokio = { version = "1.43", features = ["full"] }
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite", "macros", "migrate"] }
+axum = { version = "0.8", features = ["macros"] }
+tower-http = { version = "0.6", features = ["cors", "fs"] }
+futures = "0.3"
+sysinfo = "0.33"
+uuid = { version = "1.12", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+tempfile = "3.15"
+gpui = { version = "0.2.2", default-features = false, features = ["font-kit", "runtime_shaders"] }
+tray-icon = { version = "0.26", default-features = false }
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSScreen", "objc2-core-foundation"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSProcessInfo"] }
+
+samo-primitives = { path = "crates/samo-primitives" }
+samo-blueprint = { path = "crates/samo-blueprint" }
+samo-domain = { path = "crates/samo-domain" }
+samo-store = { path = "crates/samo-store" }
+samo-engine = { path = "crates/samo-engine" }
+samo-macos = { path = "crates/samo-macos" }
+samo-testkit = { path = "crates/samo-testkit" }

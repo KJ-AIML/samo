@@ -1,0 +1,28 @@
+[package]
+name = "samo-server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+samo-primitives.workspace = true
+samo-blueprint.workspace = true
+samo-domain.workspace = true
+samo-store.workspace = true
+samo-engine.workspace = true
+samo-macos.workspace = true
+axum.workspace = true
+tower-http.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+futures.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+samo-testkit.workspace = true
+tempfile.workspace = true

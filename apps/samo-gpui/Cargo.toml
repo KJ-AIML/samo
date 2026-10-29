@@ -1,0 +1,21 @@
+[package]
+name = "samo-gpui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+samo-primitives.workspace = true
+samo-blueprint.workspace = true
+samo-domain.workspace = true
+samo-macos.workspace = true
+gpui.workspace = true
+chrono.workspace = true
+futures.workspace = true
+tray-icon.workspace = true
+objc2.workspace = true
+objc2-app-kit.workspace = true
+objc2-foundation.workspace = true
