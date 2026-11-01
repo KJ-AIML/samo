@@ -118,15 +118,27 @@ pub fn apply(prev: Option<&SessionFile>, ev: &HookEvent, now_ms: i64) -> Apply {
             (State::Done, "interrupted".into(), false, None)
         }
         "PostToolUseFailure" => (State::Working, String::new(), false, turn_started()),
-        "PermissionRequest" => {
-            let tool = ev.tool_name.as_deref().unwrap_or("a tool");
-            (
+        // Claude Code asks permission for its own question and plan tools too; say what they really are.
+        "PermissionRequest" => match ev.tool_name.as_deref() {
+            Some("AskUserQuestion") => {
+                (State::NeedsYou, "a question".into(), false, turn_started())
+            }
+            Some("ExitPlanMode") => (
                 State::NeedsYou,
-                format!("permission: {tool}"),
+                "a plan to review".into(),
                 false,
                 turn_started(),
-            )
-        }
+            ),
+            tool => {
+                let tool = tool.unwrap_or("a tool");
+                (
+                    State::NeedsYou,
+                    format!("permission: {tool}"),
+                    false,
+                    turn_started(),
+                )
+            }
+        },
         "Notification" => match ev.notification_type.as_deref() {
             // A backstop for PermissionRequest; keep the more exact reason if it already came.
             Some("permission_prompt")
@@ -382,6 +394,22 @@ mod tests {
         assert_eq!(
             apply(Some(&w), &fixture("session_end"), 10_000),
             Apply::Remove
+        );
+
+        // A permission request for Claude Code's own question and plan tools reads as what it is.
+        let ask = HookEvent {
+            tool_name: Some("AskUserQuestion".into()),
+            ..fixture("permission_request")
+        };
+        assert!(
+            matches!(apply(Some(&w), &ask, 10_000), Apply::Write(f) if f.reason == "a question")
+        );
+        let plan = HookEvent {
+            tool_name: Some("ExitPlanMode".into()),
+            ..fixture("permission_request")
+        };
+        assert!(
+            matches!(apply(Some(&w), &plan, 10_000), Apply::Write(f) if f.reason == "a plan to review")
         );
 
         // The backstop notification doesn't blur an exact permission reason.
