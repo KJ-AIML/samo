@@ -1,0 +1,29 @@
+id = "shots"
+name = "Shots"
+version = "0.1.0"
+protocol = 1
+min_samo = "0.3.0"
+helper = "bin/samo-shots"
+summary = "Screenshots: capture an area, a window or the screen, then copy, save or pin it"
+windows = "Opens its own windows: the capture overlay, pinned shots and its settings"
+permissions = ["screen-recording"]
+min_macos = "14.0"
+
+[limits]
+memory_mb = 800
+cpu_pct = 60
+
+[[changes]]
+what = "Saves your screenshots, where you choose"
+where = "~/Pictures/Shots"
+undo = "Uninstall leaves them; delete them yourself if you like"
+
+[[changes]]
+what = "Listens for ⌘⇧1 and ⌘⇧2 while it is on"
+where = "Your keyboard shortcuts"
+undo = "Off or Uninstall lets them go"
+
+[[changes]]
+what = "Asks macOS to let it record the screen"
+where = "System Settings → Privacy & Security → Screen Recording (as Shots)"
+undo = "Turn Shots off there; Uninstall doesn't change it"

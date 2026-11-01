@@ -115,8 +115,8 @@ const SWIFT_NETWORK: &[&str] = &[
 ];
 /// The one file that may spawn (Shots' worker), and the one that may build a URL from a string (a QR code's link,
 /// handed to the browser).
-const SPAWN_FILE: &str = "/Sources/SamoShots/App/Spawn.swift";
-const LINK_FILE: &str = "/Sources/SamoShots/Recognize/Links.swift";
+const SPAWN_FILE: &str = "/App/Spawn.swift";
+const LINK_FILE: &str = "/Recognize/Links.swift";
 
 /// `word` in `text`, not as part of a longer name (`Process`, but not `ProcessInfo`).
 fn has_word(text: &str, word: &str) -> bool {
@@ -303,7 +303,7 @@ ureq = { version = "3", default-features = false }
         let spawn = "posix_spawn(&pid, path, nil, &attrs, argv, envp)";
         let link = "if let url = URL(string: text) { NSWorkspace.shared.open(url) }";
         assert!(
-            check_swift_source("extensions/shots/Sources/SamoShots/App/Spawn.swift", spawn).is_ok()
+            check_swift_source("extensions/shots/Sources/ShotsCore/App/Spawn.swift", spawn).is_ok()
         );
         assert!(
             check_swift_source("extensions/shots/Sources/SamoShots/App/Main.swift", spawn).is_err()
