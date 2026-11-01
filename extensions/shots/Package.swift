@@ -1,6 +1,7 @@
 // swift-tools-version:5.9
 // Shots (ADR-004): a screenshot extension for Samo. `ShotsCore` holds everything that can be tested without a
-// screen; `SamoShots` is the helper Samo runs.
+// screen; `ShotsUI` holds the windows the tests drive without showing them (the editor); `SamoShots` is the helper
+// Samo runs.
 import PackageDescription
 
 let infoPlist = Context.packageDirectory + "/Sources/SamoShots/Info.plist"
@@ -13,9 +14,10 @@ let package = Package(
     ],
     targets: [
         .target(name: "ShotsCore", path: "Sources/ShotsCore"),
+        .target(name: "ShotsUI", dependencies: ["ShotsCore"], path: "Sources/ShotsUI"),
         .executableTarget(
             name: "SamoShots",
-            dependencies: ["ShotsCore"],
+            dependencies: ["ShotsCore", "ShotsUI"],
             path: "Sources/SamoShots",
             exclude: ["Info.plist"],
             // Its own Info.plist, so macOS treats the worker as its own app, "Shots", for Screen Recording.
@@ -26,7 +28,7 @@ let package = Package(
                 ]),
             ]
         ),
-        .testTarget(name: "SamoShotsTests", dependencies: ["ShotsCore"], path: "Tests/SamoShotsTests"),
+        .testTarget(name: "SamoShotsTests", dependencies: ["ShotsCore", "ShotsUI"], path: "Tests/SamoShotsTests"),
     ],
     swiftLanguageVersions: [.v5]
 )

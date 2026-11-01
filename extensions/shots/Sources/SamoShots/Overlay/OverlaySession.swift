@@ -4,6 +4,7 @@
 import AppKit
 import ScreenCaptureKit
 import ShotsCore
+import ShotsUI
 
 final class OverlaySession {
     private var panels: [OverlayPanel] = []

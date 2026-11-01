@@ -4,6 +4,7 @@
 import AppKit
 import ImageIO
 import ShotsCore
+import ShotsUI
 
 final class ShotsApp {
     private(set) var settings: Settings

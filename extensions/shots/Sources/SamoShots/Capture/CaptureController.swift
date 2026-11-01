@@ -4,6 +4,7 @@
 import AppKit
 import ScreenCaptureKit
 import ShotsCore
+import ShotsUI
 
 final class CaptureController {
     enum Mode {

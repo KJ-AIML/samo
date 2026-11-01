@@ -3,6 +3,7 @@
 
 import AppKit
 import ShotsCore
+import ShotsUI
 
 final class PinPanel: NSPanel {
     override var canBecomeKey: Bool { true }

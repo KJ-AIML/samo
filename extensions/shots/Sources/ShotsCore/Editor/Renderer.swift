@@ -18,6 +18,10 @@ public struct Layout: Equatable {
     public var cornerRadius: CGFloat
     public var shadowBlur: CGFloat
 
+    /// Nothing laid out yet.
+    public static let empty = Layout(size: .zero, offset: .zero, shotRect: .zero, padding: 0, cornerRadius: 0,
+                                     shadowBlur: 0)
+
     /// A point in the shot, in the export.
     public func toExport(_ p: CGPoint) -> CGPoint {
         CGPoint(x: p.x + offset.dx, y: p.y + offset.dy)

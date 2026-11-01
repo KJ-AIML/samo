@@ -8,6 +8,20 @@ public struct RGBA: Equatable {
     public var b: Double
     public var a: Double
 
+    public init(r: Double, g: Double, b: Double, a: Double) {
+        self.r = r
+        self.g = g
+        self.b = b
+        self.a = a
+    }
+
+    /// An AppKit colour, in sRGB.
+    public init?(_ color: NSColor) {
+        guard let c = color.usingColorSpace(.sRGB) else { return nil }
+        self.init(r: Double(c.redComponent), g: Double(c.greenComponent), b: Double(c.blueComponent),
+                  a: Double(c.alphaComponent))
+    }
+
     static func hex(_ v: UInt32) -> RGBA {
         RGBA(r: Double((v >> 16) & 0xFF) / 255, g: Double((v >> 8) & 0xFF) / 255, b: Double(v & 0xFF) / 255, a: 1)
     }

@@ -4,12 +4,12 @@
 import AppKit
 import ShotsCore
 
-enum Note {
+public enum Note {
     private static var current: NSPanel?
 
-    static func show(_ words: String, problem: Bool) {
+    public static func show(_ words: String, problem: Bool) {
         current?.orderOut(nil)
-        let palette = Palette.current(NSApp.effectiveAppearance)
+        let palette = Palette.current(NSApplication.shared.effectiveAppearance)
         let attrs: [NSAttributedString.Key: Any] = [
             .font: Fonts.body(Metrics.textBody, weight: .medium),
             .foregroundColor: problem ? palette.signalText.color : palette.glassText.color,
