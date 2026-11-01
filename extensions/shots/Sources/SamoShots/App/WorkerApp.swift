@@ -7,7 +7,7 @@ import ShotsCore
 final class WorkerApp: NSObject, NSApplicationDelegate {
     private let shared: Bool
     private let executable: String
-    private var session: Session?
+    private var app: ShotsApp?
 
     private init(shared: Bool, executable: String) {
         self.shared = shared
@@ -25,15 +25,12 @@ final class WorkerApp: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Fonts.register(directory: Fonts.directory(forExecutable: URL(fileURLWithPath: executable)))
-        let session = Session(
-            out: LineWriter(handle: .standardOutput),
-            shared: shared,
-            handlers: Session.Handlers(page: {
-                [.section(title: "SHOTS", about: nil), .note(text: "Starting…", kind: .plain)]
-            })
-        )
-        self.session = session
-        session.start()
+        let dataDir = ProcessInfo.processInfo.environment["SAMO_EXT_DATA_DIR"].map { URL(fileURLWithPath: $0) }
+            ?? FileManager.default.temporaryDirectory.appendingPathComponent("samo-shots")
+        let app = ShotsApp(dataDir: dataDir, shared: shared)
+        self.app = app
+        app.start(out: LineWriter(handle: .standardOutput))
+        guard let session = app.session else { return }
         LineReader.start(
             handle: .standardInput,
             onLine: { line in
