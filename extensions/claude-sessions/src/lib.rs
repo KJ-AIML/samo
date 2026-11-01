@@ -8,9 +8,11 @@
 
 pub mod ancestry;
 pub mod hook;
+pub mod limits;
 pub mod paths;
 pub mod sessions;
 pub mod settings;
 pub mod settings_io;
+pub mod statusline;
 pub mod transcripts;
 pub mod usage;

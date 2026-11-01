@@ -14,6 +14,10 @@ fn main() -> ExitCode {
             samo_claude::hook::run();
             ExitCode::SUCCESS
         }
+        "statusline" => {
+            samo_claude::statusline::run();
+            ExitCode::SUCCESS
+        }
         _ => {
             eprintln!("usage: samo-claude hook|statusline|serve|on|off|uninstall");
             ExitCode::from(2)
