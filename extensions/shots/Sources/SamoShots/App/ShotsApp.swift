@@ -2,6 +2,7 @@
 // Samo. Everything here runs on the main thread.
 
 import AppKit
+import ImageIO
 import ShotsCore
 
 final class ShotsApp {
@@ -45,6 +46,7 @@ final class ShotsApp {
         )
         registerShortcuts()
         session.start()
+        session.out.send(Page.badge(recent))
     }
 
     private func registerShortcuts() {
@@ -67,38 +69,74 @@ final class ShotsApp {
             recent.add(RecentShot(path: url.path, bytes: outcome.bytes, at: shot.takenAt))
             try? recent.save(dataDir: dataDir)
         }
-        session?.refresh()
+        refresh()
     }
 
     // MARK: From Samo
 
     private func setting(_ key: String, _ value: Bool) {
-        switch key {
-        case "sound": settings.sound = value
-        case "retina": settings.retina = value
-        default: return
+        if settings.apply(setting: key, value) {
+            try? settings.save(dataDir: dataDir)
         }
-        try? settings.save(dataDir: dataDir)
     }
 
     private func choice(_ key: String, _ value: String) {
-        switch key {
-        case "after": settings.after = Settings.After(rawValue: value) ?? settings.after
-        case "format": settings.format = Settings.Format(rawValue: value) ?? settings.format
-        default: return
+        if settings.apply(choice: key, value) {
+            try? settings.save(dataDir: dataDir)
         }
-        try? settings.save(dataDir: dataDir)
     }
 
     private func action(_ id: String, row: String?) {
+        if let row {
+            recentAction(id, path: row)
+            return
+        }
         switch id {
         case "area": capture?.start(.area, fromPage: true)
         case "window": capture?.start(.window, fromPage: true)
         case "screen": capture?.start(.screen, fromPage: true)
         case "allow": permission.request()
         case "open-settings": Links.openScreenRecordingSettings()
-        case "restart": NSApp.terminate(self); exit(restartExitCode)
+        case "restart":
+            shutdown()
+            exit(restartExitCode)
+        case "change-shortcuts", "change-folder": settingsWindow.show()
         default: break
+        }
+    }
+
+    /// Copy, Reveal or Pin on a recent shot, by its path.
+    private func recentAction(_ id: String, path: String) {
+        let url = URL(fileURLWithPath: path)
+        guard FileManager.default.fileExists(atPath: path) else {
+            recent.forgetMissing()
+            try? recent.save(dataDir: dataDir)
+            Note.show("That shot has been moved or deleted", problem: true)
+            return
+        }
+        switch id {
+        case "reveal":
+            NSWorkspace.shared.activateFileViewerSelecting([url])
+        case "copy":
+            if let data = try? Data(contentsOf: url), let image = NSImage(data: data),
+               let tiff = image.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff),
+               let png = rep.representation(using: .png, properties: [:]), SystemClipboard().put(png: png) {
+                Note.show("Copied", problem: false)
+            } else {
+                Note.show("Couldn't copy that shot", problem: true)
+            }
+        case "pin":
+            guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+                  let image = CGImageSourceCreateImageAtIndex(source, 0, nil)
+            else {
+                Note.show("Couldn't open that shot", problem: true)
+                return
+            }
+            let shot = Shot(image: image, scale: NSScreen.main?.backingScaleFactor ?? 2, takenAt: Date())
+            shot.savedTo = url
+            pins.open(shot)
+        default:
+            break
         }
     }
 
@@ -120,37 +158,43 @@ final class ShotsApp {
 
     // MARK: The page
 
+    private lazy var settingsWindow = SettingsWindow(
+        get: { [unowned self] in self.settings },
+        set: { [unowned self] new in
+            self.settings = new
+            try? new.save(dataDir: self.dataDir)
+            self.registerShortcuts()
+            self.refresh()
+        },
+        pauseShortcuts: { [unowned self] paused in
+            if paused {
+                HotKeys.shared.unregisterAll()
+            } else {
+                self.registerShortcuts()
+            }
+        }
+    )
+
+    func refresh() {
+        session?.refresh()
+        session?.out.send(Page.badge(recent))
+    }
+
     func page() -> [Widget] {
-        var page: [Widget] = [.section(title: "SCREEN RECORDING", about: nil)]
-        switch permission.state {
-        case .allowed:
-            page.append(.note(text: "Allowed for Shots.", kind: .plain))
-        case .notYet:
-            page.append(.note(text: "Shots needs Screen Recording to capture what's on screen. macOS asks once; "
-                + "nothing leaves your Mac.", kind: .plain))
-            page.append(.button(action: "allow", label: "Allow Screen Recording", kind: .plain))
-        case .askedRestart:
-            page.append(.note(text: "Allow Shots in System Settings → Privacy & Security → Screen Recording, then "
-                + "restart Shots.", kind: .plain))
-            page.append(.button(action: "open-settings", label: "Open System Settings", kind: .plain))
-            page.append(.button(action: "restart", label: "Restart Shots", kind: .plain))
-        }
-        if shared {
-            page.append(.note(text: "Screen Recording is shared with Samo: Shots couldn't start as its own app.",
-                              kind: .error))
-        }
-        page.append(.section(title: "CAPTURE", about: nil))
-        page.append(.button(action: "area", label: "Capture an area", kind: .plain))
-        page.append(.button(action: "window", label: "Capture a window", kind: .plain))
-        page.append(.button(action: "screen", label: "Capture the screen", kind: .plain))
-        page.append(.section(title: "RECENT", about: recent.shots.isEmpty ? nil : "\(recent.shots.count)"))
-        if recent.shots.isEmpty {
-            page.append(.note(text: "Shots you save appear here.", kind: .plain))
-        } else {
-            page.append(.rows(recent.shots.prefix(Recent.keep).map {
-                RowItem(lamp: .done, title: ($0.path as NSString).lastPathComponent)
-            }))
-        }
-        return page
+        let running = NSWorkspace.shared.runningApplications.compactMap(\.bundleIdentifier)
+        let symbolic = UserDefaults(suiteName: "com.apple.symbolichotkeys")?.dictionary(forKey: "AppleSymbolicHotKeys")
+        let clashes = Conflicts.clashes(
+            ours: settings.shortcuts,
+            macOS: Conflicts.macScreenshotShortcuts(symbolicHotKeys: symbolic),
+            apps: Conflicts.runningScreenshotApps(bundleIds: running)
+        )
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let desktopSynced = FileManager.default.fileExists(
+            atPath: home.appendingPathComponent("Library/Mobile Documents/com~apple~CloudDocs/Desktop").path
+        )
+        return Page.build(PageState(
+            access: permission.state, shared: shared, settings: settings, recent: recent, refused: refused,
+            clashes: clashes, folderInICloud: Page.inICloud(settings.folderURL, home: home, desktopSynced: desktopSynced)
+        ))
     }
 }

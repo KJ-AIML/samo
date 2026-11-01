@@ -27,3 +27,12 @@ undo = "Off or Uninstall lets them go"
 what = "Asks macOS to let it record the screen"
 where = "System Settings → Privacy & Security → Screen Recording (as Shots)"
 undo = "Turn Shots off there; Uninstall doesn't change it"
+
+[[settings]]
+key = "retina"
+label = "Full Retina resolution"
+default = true
+
+[[settings]]
+key = "sound"
+label = "Shutter sound"
