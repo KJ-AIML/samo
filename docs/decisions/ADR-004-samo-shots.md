@@ -1,7 +1,7 @@
 # ADR-004: Shots, a screenshot extension, and extensions with their own windows
 
 **Date:** 2026-11-01
-**Status:** Draft for KJ. The builder check is folded in, and KJ answered its two questions on 2026-11-01.
+**Status:** Accepted by KJ on 2026-11-01 ("Approved"), with the [call]s as written. The builder check is folded in, and KJ answered its two questions.
 **Product:** Samo (`samo`)
 **Builds on:** ADR-002 (extensions) and ADR-003 (the store). Their rules R5–R14 still hold. This ADR adds a kind of
 extension that opens its own windows, and the first one: **Shots**, a screenshot tool with Shottr's features.
