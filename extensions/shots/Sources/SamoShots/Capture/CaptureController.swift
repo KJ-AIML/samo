@@ -76,7 +76,7 @@ final class CaptureController {
                     self.end(note: nil, problem: false)
                     return
                 }
-                self.done(Shot(image: f.image, scale: f.scale, takenAt: started))
+                self.done(Shot(image: f.image, scale: f.scale, takenAt: started, origin: f.screen.frame.origin))
             case .area, .window:
                 let session = OverlaySession(
                     startIn: mode == .window ? .window : .area,
@@ -104,7 +104,8 @@ final class CaptureController {
             end(note: "Shots couldn't cut out that area", problem: true)
             return
         }
-        done(Shot(image: crop, scale: frozen.scale, takenAt: takenAt))
+        let origin = CGPoint(x: frozen.screen.frame.minX + rect.minX, y: frozen.screen.frame.minY + rect.minY)
+        done(Shot(image: crop, scale: frozen.scale, takenAt: takenAt, origin: origin))
     }
 
     private func window(_ window: SCWindow, scale: CGFloat, takenAt: Date) {
@@ -114,7 +115,9 @@ final class CaptureController {
                 self.end(note: "Shots couldn't capture that window", problem: true)
                 return
             }
-            self.done(Shot(image: image, scale: scale, takenAt: takenAt))
+            let primaryHeight = NSScreen.screens.first?.frame.height ?? 0
+            let origin = CGPoint(x: window.frame.minX, y: primaryHeight - window.frame.maxY)
+            self.done(Shot(image: image, scale: scale, takenAt: takenAt, origin: origin))
         }
     }
 

@@ -12,6 +12,9 @@ final class ShotsApp {
     let shared: Bool
     private(set) var session: Session?
     private var capture: CaptureController?
+    private let store = ShotStore()
+    private lazy var pins = Pins(store: store)
+    private var stopped = false
     /// Shortcuts macOS refused, by capture mode.
     private(set) var refused: Set<String> = []
 
@@ -36,7 +39,7 @@ final class ShotsApp {
             permission: permission,
             settings: { [unowned self] in self.settings },
             out: out,
-            openPin: { _ in },
+            openPin: { [unowned self] shot in self.pins.open(shot) },
             onPermission: { [unowned self] in self.session?.refresh() },
             onShot: { [unowned self] shot, outcome in self.captured(shot, outcome) }
         )
@@ -99,7 +102,19 @@ final class ShotsApp {
         }
     }
 
-    private func shutdown() {
+    /// Off, update, uninstall, or Samo quitting: nothing unsaved is lost, then shortcuts and windows go.
+    func shutdown() {
+        guard !stopped else { return }
+        stopped = true
+        let saved = store.saveUnsaved(settings: settings, disk: FileDisk())
+        if !saved.isEmpty {
+            for url in saved {
+                recent.add(RecentShot(path: url.path, bytes: 0, at: Date()))
+            }
+            try? recent.save(dataDir: dataDir)
+            session?.out.send(.log(event: "saved-unsaved", detail: saved.map(\.path).joined(separator: "\n")))
+        }
+        pins.closeAll()
         HotKeys.shared.unregisterAll()
     }
 

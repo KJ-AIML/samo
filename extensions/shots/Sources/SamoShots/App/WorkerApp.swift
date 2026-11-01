@@ -23,6 +23,10 @@ final class WorkerApp: NSObject, NSApplicationDelegate {
         exit(0)
     }
 
+    func applicationWillTerminate(_ notification: Notification) {
+        app?.shutdown()
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         Fonts.register(directory: Fonts.directory(forExecutable: URL(fileURLWithPath: executable)))
         let dataDir = ProcessInfo.processInfo.environment["SAMO_EXT_DATA_DIR"].map { URL(fileURLWithPath: $0) }

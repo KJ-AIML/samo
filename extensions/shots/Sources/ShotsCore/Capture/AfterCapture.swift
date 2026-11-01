@@ -43,11 +43,14 @@ public final class Shot {
     public let scale: CGFloat
     public let takenAt: Date
     public var savedTo: URL?
+    /// Where it was on screen (global points, AppKit's), so a pin opens where the shot was taken.
+    public var origin: CGPoint?
 
-    public init(image: CGImage, scale: CGFloat, takenAt: Date) {
+    public init(image: CGImage, scale: CGFloat, takenAt: Date, origin: CGPoint? = nil) {
         self.image = image
         self.scale = scale
         self.takenAt = takenAt
+        self.origin = origin
     }
 }
 
