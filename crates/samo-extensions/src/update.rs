@@ -5,7 +5,6 @@
 use crate::net::UserAction;
 use crate::store::{Store, StoreFail};
 use samo_domain::store::{SAMO_CAP, SamoRelease};
-use std::env;
 use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -75,12 +74,6 @@ pub fn can_update(current_exe: &Path) -> Result<AppBundle, CantUpdate> {
 pub struct PreparedUpdate {
     pub version: String,
     pub app_path: PathBuf,
-}
-
-/// `~/Library/Caches/Samo/Update/`, where updates are unpacked.
-pub fn staging_root() -> Option<PathBuf> {
-    let home = env::var_os("HOME").filter(|h| !h.is_empty())?;
-    Some(PathBuf::from(home).join("Library/Caches/Samo/Update"))
 }
 
 /// Downloads Samo `release` (hash-checked against the signed catalog) and checks it, without changing anything

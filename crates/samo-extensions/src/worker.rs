@@ -5,7 +5,7 @@
 use crate::Host;
 use crate::net::UserAction;
 use crate::store::{ImageKind, Store};
-use crate::update::{PreparedUpdate, can_update, prepare_update, staging_root};
+use crate::update::{PreparedUpdate, can_update, prepare_update};
 use samo_domain::store::{Catalog, FileRef, PACKAGE_CAP, newer};
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
@@ -343,7 +343,6 @@ fn update_samo(
     if !newer(&release.version, env!("CARGO_PKG_VERSION")) {
         return Err("You have the latest Samo".into());
     }
-    let root = staging_root().ok_or("Samo can't find your home folder")?;
-    prepare_update(store, &release, action, &root)
+    prepare_update(store, &release, action, &store.update_dir())
         .map_err(|e| format!("Couldn't get Samo {}: {e}", release.version))
 }

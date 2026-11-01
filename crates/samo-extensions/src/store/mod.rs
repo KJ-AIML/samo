@@ -145,6 +145,14 @@ impl Store {
         &self.url
     }
 
+    /// Where Samo's own updates are unpacked: `Update/` beside the store's cache (`~/Library/Caches/Samo/Update`).
+    pub fn update_dir(&self) -> PathBuf {
+        match self.cache_dir.parent() {
+            Some(parent) => parent.join("Update"),
+            None => self.cache_dir.join("Update"),
+        }
+    }
+
     fn memo(&self) -> std::sync::MutexGuard<'_, Option<Fetched>> {
         self.memo.lock().unwrap_or_else(|e| e.into_inner())
     }

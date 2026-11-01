@@ -267,7 +267,7 @@ fn phase2_end_to_end_demo() -> Fallible<()> {
     // Samo, with Claude Sessions installed from the dev folder.
     let dev = dev_package(dir.path())?;
     let root = ExtRoot::at(home.join("Library/Application Support/Samo/Extensions"));
-    let mut config = HostConfig::new("0.1.0");
+    let mut config = HostConfig::new("0.2.0");
     config.dev_dir = Some(dev.to_string_lossy().into_owned());
     config.home = Some(home.clone());
     config.wake_every = Duration::from_millis(10);

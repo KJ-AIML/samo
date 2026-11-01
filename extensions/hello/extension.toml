@@ -1,8 +1,8 @@
 id = "hello"
 name = "Hello"
-version = "0.1.0"
+version = "0.2.0"
 protocol = 1
-min_samo = "0.1.0"
+min_samo = "0.2.0"
 helper = "bin/samo-ext-hello"
 summary = "Samo's example extension: every widget, a badge and a pop-up"
 
