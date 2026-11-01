@@ -18,6 +18,7 @@ mod processes;
 mod projects;
 mod shell;
 mod storage;
+mod store_view;
 mod text_input;
 mod theme;
 
@@ -81,6 +82,11 @@ fn snapshot(hub: &Hub, layout: Layout) -> Option<Frame> {
             .get()
             .map(samo_extensions::Host::snapshot)
             .unwrap_or_default(),
+        store: hub
+            .store
+            .get()
+            .map(samo_extensions::worker::StoreWorker::view)
+            .unwrap_or_default(),
         layout,
     })
 }
@@ -96,7 +102,22 @@ fn start_extensions(hub: &Hub) {
         samo_extensions::HostConfig::new(env!("CARGO_PKG_VERSION")),
         Arc::new(move || waker.wake_ui()),
     );
+    if let Some(store) = samo_extensions::store::Store::from_env() {
+        let waker = hub.clone();
+        let _ = hub
+            .store
+            .set(start_store(store, &host, Arc::new(move || waker.wake_ui())));
+    }
     let _ = hub.ext.set(host);
+}
+
+/// The store at launch: it shows its cache, and goes online only when a click asks (R12).
+fn start_store(
+    store: samo_extensions::store::Store,
+    host: &samo_extensions::Host,
+    wake: Arc<dyn Fn() + Send + Sync>,
+) -> samo_extensions::worker::StoreWorker {
+    samo_extensions::worker::StoreWorker::start(store, host.clone(), wake)
 }
 
 /// Shows what extensions asked to pop up, unless you're already looking at that extension's page.
@@ -342,6 +363,8 @@ struct Frame {
     thermal: Option<hub::Thermal>,
     /// Installed extensions and what their helpers last said.
     ext: Arc<samo_extensions::ExtSnapshot>,
+    /// The store: its catalog (fetched or cached), images, and jobs.
+    store: samo_extensions::worker::StoreView,
     layout: Layout,
 }
 
@@ -395,6 +418,8 @@ struct SamoWorkspaceApp {
     /// How much history Overview's live charts show, and where the pointer is over each.
     live_span: live::Span,
     live_hover: [live::ChartHover; 3],
+    /// The store's list and detail page.
+    store_ui: extensions_page::StoreUi,
 }
 
 fn resolve_default_root() -> String {
@@ -502,6 +527,7 @@ impl SamoWorkspaceApp {
             proc_scroll: UniformListScrollHandle::new(),
             live_span: live::Span::TwoMin,
             live_hover: Default::default(),
+            store_ui: extensions_page::StoreUi::new(cx),
         }
     }
 
@@ -623,6 +649,14 @@ impl SamoWorkspaceApp {
         self.pending_confirm = None;
         Self::spawn_scan(&self.hub, root, true);
         cx.notify();
+    }
+
+    /// A click on a place in the sidebar or rail. Opening the store by a click may go online (R12).
+    fn nav_clicked(&mut self, section: NavSection, cx: &mut Context<Self>) {
+        match section {
+            NavSection::Extensions => self.store_opened_by_click(cx),
+            other => self.set_nav(other, cx),
+        }
     }
 
     fn set_nav(&mut self, section: NavSection, cx: &mut Context<Self>) {
@@ -841,6 +875,7 @@ impl Render for SamoWorkspaceApp {
                 .child("Samo lost track of its own state. Quit and open it again to recover.");
         };
 
+        self.sweep_store_images(window, cx);
         let page = match self.nav {
             NavSection::Overview => self.render_overview(&frame, cx),
             NavSection::Projects => self.render_projects(&frame, cx),
@@ -944,6 +979,69 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// R12, RF2: Samo starting, even on the store's page, shows the cache and makes no request.
+    #[test]
+    fn start_page_does_not_fetch() -> Result<(), String> {
+        use samo_testkit::store::{FakeStore, catalog, listing, png};
+        let shop = FakeStore::new()?;
+        let home = tempfile::tempdir().map_err(|e| e.to_string())?;
+        let icon = shop.put("hello-icon.png", &png(64, 64))?;
+        let pkg = shop.put("hello-0.1.0-macos-arm64.tar.gz", b"pkg")?;
+        let mut l = listing("hello", "0.1.0", pkg);
+        l.icon = Some(icon);
+        shop.publish(&catalog("2026-11-02T10:00:00Z", vec![l]))?;
+        let store = || {
+            samo_extensions::store::Store::new(
+                &shop.catalog_url(),
+                shop.public_key(),
+                &home.path().join("Caches/Store"),
+                &home.path().join("store-state.toml"),
+            )
+        };
+        let host = samo_extensions::Host::start(
+            samo_extensions::ExtRoot::at(home.path().join("Extensions")),
+            samo_extensions::HostConfig::new("0.2.0"),
+            Arc::new(|| {}),
+        );
+        let wait = |worker: &samo_extensions::worker::StoreWorker, what: &str| {
+            let deadline = Instant::now() + std::time::Duration::from_secs(10);
+            loop {
+                let v = worker.view();
+                if v.catalog.is_some() && !v.images.is_empty() && !v.refreshing {
+                    return Ok(());
+                }
+                if Instant::now() > deadline {
+                    return Err(format!("timed out waiting for {what}"));
+                }
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+        };
+
+        // A first launch, then a click: the catalog and its icon are fetched and cached.
+        let first = start_store(store(), &host, Arc::new(|| {}));
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        assert!(shop.server.hits().is_empty(), "nothing before a click");
+        first.submit(
+            samo_extensions::worker::StoreJob::Refresh { force: false },
+            samo_extensions::net::UserAction::clicked(),
+        );
+        wait(&first, "the click's fetch")?;
+        let fetched = shop.server.hits().len();
+
+        // Samo launches again (SAMO_START_PAGE=extensions): the store shows its cache, and asks nothing.
+        let again = start_store(store(), &host, Arc::new(|| {}));
+        wait(&again, "the cache")?;
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        assert_eq!(
+            shop.server.hits().len(),
+            fetched,
+            "{:?}",
+            shop.server.hits()
+        );
+        host.shutdown_all();
+        Ok(())
+    }
 
     fn view_of(root: &str) -> Arc<DiskView> {
         Arc::new(DiskView::build(Arc::new(ScanSnapshot {

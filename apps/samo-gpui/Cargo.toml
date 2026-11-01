@@ -24,3 +24,4 @@ objc2-foundation.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+samo-testkit.workspace = true

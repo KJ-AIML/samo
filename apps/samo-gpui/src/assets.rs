@@ -91,6 +91,7 @@ const ICONS: &[(&str, &str)] = &[
         r##"<path d="M8 2.25v5"/><path d="M4.6 4.4a5 5 0 1 0 6.8 0"/>"##,
     ),
     ("chevron-right", r##"<path d="M6 3.5L10.5 8 6 12.5"/>"##),
+    ("chevron-left", r##"<path d="M10 3.5L5.5 8 10 12.5"/>"##),
     ("chevron-down", r##"<path d="M4 6l4 4 4-4"/>"##),
     ("check", r##"<path d="M3 8.5l3.25 3.25L13 4.75"/>"##),
     (

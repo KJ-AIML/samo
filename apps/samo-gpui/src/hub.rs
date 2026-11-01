@@ -94,6 +94,8 @@ pub struct Hub {
     wake_ui: UnboundedSender<()>,
     /// Extensions' helpers, once started (they need this hub to wake the UI, so they come second).
     pub ext: Arc<OnceLock<samo_extensions::Host>>,
+    /// The store's worker: the catalog, its images, installs and updates. It goes online only for a click.
+    pub store: Arc<OnceLock<samo_extensions::worker::StoreWorker>>,
 }
 
 impl Hub {
@@ -125,6 +127,7 @@ impl Hub {
             )),
             wake_ui,
             ext: Arc::new(OnceLock::new()),
+            store: Arc::new(OnceLock::new()),
         }
     }
 
