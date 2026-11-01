@@ -6,8 +6,8 @@
 //! `off` and `uninstall` to undo or restore whatever the extension changes outside its own folder.
 
 use samo_ext_protocol::{
-    ButtonKind, HelperMsg, HostMsg, Lamp, NoteKind, PROTOCOL_VERSION, PopupKind, RowItem, Widget,
-    decode_host_line, encode,
+    BadgeMeter, ButtonKind, HelperMsg, HostMsg, Lamp, NoteKind, PROTOCOL_VERSION, PopupKind,
+    RowItem, Widget, decode_host_line, encode,
 };
 use samo_primitives::{Reading, UnsupportedReason};
 use std::io::{self, BufRead, Write};
@@ -117,6 +117,7 @@ fn row(lamp: Lamp, title: &str, detail: &str) -> RowItem {
     }
 }
 
+/// The badge, with a small load bar on the quick panel's line (half, to show what one looks like).
 fn badge(state: &State) -> HelperMsg {
     HelperMsg::Badge {
         count: u32::from(state.greet),
@@ -125,6 +126,10 @@ fn badge(state: &State) -> HelperMsg {
         } else {
             String::new()
         },
+        meter: Some(BadgeMeter {
+            label: "half".into(),
+            fraction: Reading::available(0.5, now_ms()),
+        }),
     }
 }
 

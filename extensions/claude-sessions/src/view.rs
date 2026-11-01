@@ -4,7 +4,7 @@
 use crate::limits::{Limits, reading};
 use crate::sessions::{Row, State};
 use crate::usage::Tokens;
-use samo_ext_protocol::{Lamp, NoteKind, RowItem, Widget};
+use samo_ext_protocol::{BadgeMeter, Lamp, NoteKind, RowItem, Widget};
 use samo_primitives::{Reading, UnsupportedReason};
 
 /// The switches the page shows, as they are now.
@@ -93,6 +93,18 @@ pub fn badge(rows: &[(Row, Option<Tokens>)]) -> (u32, String) {
         u32::try_from(waiting).unwrap_or(u32::MAX),
         parts.join(" · "),
     )
+}
+
+/// The quick panel's load bar: the 5-hour window's use, while Plan limits is on. Unknown until Claude Code
+/// reports it, and after it resets.
+pub fn badge_meter(plan_limits: bool, limits: Option<&Limits>, now_ms: i64) -> Option<BadgeMeter> {
+    plan_limits.then(|| BadgeMeter {
+        label: "5h".into(),
+        fraction: match limits {
+            Some(l) => reading(l.five_hour.as_ref(), l.observed_at_ms, now_ms),
+            None => Reading::unsupported(UnsupportedReason::NotReported),
+        },
+    })
 }
 
 fn token_note(tokens: &Reading<f64>, split: Tokens) -> String {
@@ -359,6 +371,34 @@ mod tests {
             (1, "Claude · 1 needs you · 1 working".to_string())
         );
         Ok(())
+    }
+
+    #[test]
+    fn badge_meter_follows_plan_limits() {
+        let limits = Limits {
+            five_hour: Some(Window {
+                used_percentage: 36.0,
+                resets_at: 2_000,
+            }),
+            seven_day: None,
+            observed_at_ms: 1_000_000,
+        };
+        assert_eq!(badge_meter(false, Some(&limits), 1_500_000), None);
+        let on = badge_meter(true, Some(&limits), 1_500_000);
+        assert_eq!(on.as_ref().map(|m| m.label.as_str()), Some("5h"));
+        assert_eq!(
+            on.map(|m| m.fraction),
+            Some(Reading::available(0.36, 1_000_000))
+        );
+        // Before Claude Code reports, and after the window resets: unknown, not 0.
+        assert_eq!(
+            badge_meter(true, None, 1).map(|m| m.fraction),
+            Some(Reading::unsupported(UnsupportedReason::NotReported))
+        );
+        assert_eq!(
+            badge_meter(true, Some(&limits), 2_000_001).map(|m| m.fraction),
+            Some(Reading::stopped(2_000_000))
+        );
     }
 
     #[test]

@@ -136,7 +136,7 @@ doesn't make the existing gap between ADR-001's platform layer and the Mac app a
 | Direction | Messages |
 | --- | --- |
 | Samo → helper | `hello { protocol, samo_version, data_dir, settings }`, `setting { key, value }`, `action { id }`, `visible { page: bool }`, `shutdown` |
-| Helper → Samo | `hello { protocol }`, `view { sections }`, `badge { count, summary }` (0 clears it; `summary` is the quick panel's line), `popup { key, kind: needs_you \| finished \| info, title, body }`, `log { event, detail }` (Samo appends it to `history.log`), `health { ok, message }` |
+| Helper → Samo | `hello { protocol }`, `view { sections }`, `badge { count, summary, meter? }` (0 clears it; `summary` is the quick panel's line; `meter { label, fraction }` is an optional small load bar at its end, added 2026-11-01 for Claude Sessions' 5-hour use), `popup { key, kind: needs_you \| finished \| info, title, body }`, `log { event, detail }` (Samo appends it to `history.log`), `health { ok, message }` |
 
 **[call] The helper owns its switches.** Its `view` reports each switch's state. A flip sends `setting { key, value }`,
 the helper acts, and the next `view` shows the result. The helper may refuse; for example, Plan limits stays off when

@@ -57,15 +57,15 @@ fn hello_speaks_valid_protocol_v1() -> Result<(), String> {
     ] {
         assert!(kinds.contains(&kind), "no {kind} in {kinds:?}");
     }
-    assert!(messages.contains(&HelperMsg::Badge {
-        count: 1,
-        summary: "Hello · 1 waiting".into()
-    }));
+    let badge = |want: u32, words: &str| {
+        messages.iter().any(|m| {
+            matches!(m, HelperMsg::Badge { count, summary, meter: Some(meter) }
+                if *count == want && summary == words && meter.label == "half")
+        })
+    };
+    assert!(badge(1, "Hello · 1 waiting"));
     // Turning the switch off clears the badge, and Ping pops up.
-    assert!(messages.contains(&HelperMsg::Badge {
-        count: 0,
-        summary: String::new()
-    }));
+    assert!(badge(0, ""));
     assert!(messages.iter().any(|m| matches!(
         m,
         HelperMsg::Popup {

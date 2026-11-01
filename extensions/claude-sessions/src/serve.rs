@@ -14,7 +14,9 @@ use crate::popups::{Policy, Wanted};
 use crate::sessions::{SessionFile, derive};
 use crate::transcripts::Reader;
 use crate::view::{self, Input, Switches};
-use samo_ext_protocol::{HelperMsg, HostMsg, PROTOCOL_VERSION, decode_host_line, encode};
+use samo_ext_protocol::{
+    BadgeMeter, HelperMsg, HostMsg, PROTOCOL_VERSION, decode_host_line, encode,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::{self, File, TryLockError};
@@ -99,7 +101,7 @@ struct Serve {
     policy: Policy,
     sent_view: String,
     sent_view_at: Option<Instant>,
-    sent_badge: Option<(u32, String)>,
+    sent_badge: Option<(u32, String, Option<BadgeMeter>)>,
 }
 
 impl Serve {
@@ -326,12 +328,15 @@ impl Serve {
                 out.push(HelperMsg::View { sections: view });
             }
         }
-        let badge = view::badge(&rows);
+        let (count, summary) = view::badge(&rows);
+        let meter = view::badge_meter(self.active.plan_limits, self.limits.as_ref(), now);
+        let badge = (count, summary, meter);
         if self.sent_badge.as_ref() != Some(&badge) {
             self.sent_badge = Some(badge.clone());
             out.push(HelperMsg::Badge {
                 count: badge.0,
                 summary: badge.1,
+                meter: badge.2,
             });
         }
         out

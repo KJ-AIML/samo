@@ -8,7 +8,9 @@ mod message;
 mod widget;
 
 pub use manifest::{Change, Manifest, SettingDecl, valid_id, valid_version};
-pub use message::{HelperMsg, HostMsg, PopupKind, decode_helper_line, decode_host_line, encode};
+pub use message::{
+    BadgeMeter, HelperMsg, HostMsg, PopupKind, decode_helper_line, decode_host_line, encode,
+};
 pub use widget::{ButtonKind, Lamp, NoteKind, RowItem, Widget, rows_in};
 
 /// The protocol version this crate speaks. A helper says it in `hello`; a manifest names it.

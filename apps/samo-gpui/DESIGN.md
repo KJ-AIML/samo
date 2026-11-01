@@ -147,7 +147,8 @@ Samo lives in the menu bar too (`src/menubar.rs`, via `tray-icon`'s safe `NSStat
   Clicking anywhere else closes it.
 - **Extensions** (ADR-002): while they have something waiting for you, the count follows the CPU figure,
   `23% !1`. The probe's eyes stay Samo's own state. The quick panel adds a line per extension that is on (at most
-  three) and grows to fit; a pop-up can appear under the item, without taking the keyboard.
+  three) and grows to fit; a line can end in a small LED load bar with its figure (`5h 36%`, or `5h --` when
+  unknown). A pop-up can appear under the item, without taking the keyboard.
 - **Closing the window** leaves Samo running in the menu bar; the Dock icon, Show Samo (⌘0) or Open Samo brings
   the window back. ⌘Q quits.
 

@@ -7,7 +7,8 @@ use crate::limits::{HelperLog, Line, MAX_LINE, read_line_capped};
 use crate::state::{ExtSlot, PendingPopup, Status};
 use samo_domain::extensions::{Backoff, RateGate, Restart};
 use samo_ext_protocol::{
-    HelperMsg, HostMsg, NoteKind, PROTOCOL_VERSION, Widget, decode_helper_line, encode, rows_in,
+    BadgeMeter, HelperMsg, HostMsg, NoteKind, PROTOCOL_VERSION, Widget, decode_helper_line, encode,
+    rows_in,
 };
 use std::env;
 use std::io::{BufReader, Write};
@@ -178,7 +179,7 @@ pub(crate) fn run(job: Job, rx: Receiver<Event>) {
 #[derive(Default)]
 struct Held {
     view: Option<Vec<Widget>>,
-    badge: Option<(u32, String)>,
+    badge: Option<(u32, String, Option<BadgeMeter>)>,
     health: Option<(bool, String)>,
 }
 
@@ -329,7 +330,11 @@ fn run_once(job: &Job, rx: &Receiver<Event>, log: &HelperLog, generation: u64) -
                 } else {
                     match msg {
                         HelperMsg::View { sections } => held.view = Some(sections),
-                        HelperMsg::Badge { count, summary } => held.badge = Some((count, summary)),
+                        HelperMsg::Badge {
+                            count,
+                            summary,
+                            meter,
+                        } => held.badge = Some((count, summary, meter)),
                         HelperMsg::Health { ok, message } => held.health = Some((ok, message)),
                         HelperMsg::Popup { .. }
                         | HelperMsg::Log { .. }
@@ -368,8 +373,12 @@ fn run_once(job: &Job, rx: &Receiver<Event>, log: &HelperLog, generation: u64) -
             if let Some(sections) = taken.view {
                 run.apply(HelperMsg::View { sections });
             }
-            if let Some((count, summary)) = taken.badge {
-                run.apply(HelperMsg::Badge { count, summary });
+            if let Some((count, summary, meter)) = taken.badge {
+                run.apply(HelperMsg::Badge {
+                    count,
+                    summary,
+                    meter,
+                });
             }
             if let Some((ok, message)) = taken.health {
                 run.apply(HelperMsg::Health { ok, message });
@@ -500,10 +509,15 @@ impl Run<'_> {
                 let view = Arc::new(cap_rows(sections));
                 job.inner.update(job.slot, |rt| rt.view = view);
             }
-            HelperMsg::Badge { count, summary } => {
+            HelperMsg::Badge {
+                count,
+                summary,
+                meter,
+            } => {
                 job.inner.update(job.slot, |rt| {
                     rt.badge = count;
                     rt.badge_summary = summary;
+                    rt.badge_meter = meter;
                 });
             }
             HelperMsg::Popup {

@@ -6,7 +6,7 @@
 //! full window; clicking anywhere else closes it. The status item itself comes from `tray-icon`, which wraps
 //! `NSStatusItem` safely (Samo's own code stays free of `unsafe`).
 
-use crate::art::{Mood, Who, cell, logo_mark, probe_template, scan_step};
+use crate::art::{Mood, Who, cell, led_meter, logo_mark, probe_template, scan_step};
 use crate::components::*;
 use crate::layout::Layout;
 use crate::shell::{glass_panel, readout_cell, readout_dot_h, readouts, samo_mood, samo_status};
@@ -503,7 +503,16 @@ fn ext_facts_count(ext: &samo_extensions::ExtSnapshot) -> usize {
         .min(MAX_EXT_FACTS)
 }
 
-/// A line for each extension that is on: what it says is waiting, and how many. A click opens its page.
+/// A badge meter's words: `5h 36%`, or `5h --` when unknown (never `0%`).
+pub(crate) fn meter_text(meter: &samo_ext_protocol::BadgeMeter) -> String {
+    match crate::ext_view::meter_share(&meter.fraction) {
+        Some(share) => format!("{} {:.0}%", meter.label, share * 100.0),
+        None => format!("{} --", meter.label),
+    }
+}
+
+/// A line for each extension that is on: what it says is waiting, its load bar if it sends one, and how many
+/// things wait. A click opens its page.
 fn ext_facts(frame: &Frame) -> Vec<(gpui::Stateful<gpui::Div>, Option<NavSection>)> {
     let pal = p();
     frame
@@ -530,6 +539,31 @@ fn ext_facts(frame: &Frame) -> Vec<(gpui::Stateful<gpui::Div>, Option<NavSection
                 .cursor_pointer()
                 .child(icon("plug", 14.0, pal.text_2))
                 .child(line(text, FontWeight::NORMAL, 13.0, pal.text).flex_1())
+                .children(e.badge_meter.as_ref().map(|meter| {
+                    div()
+                        .flex_shrink_0()
+                        .flex()
+                        .flex_row()
+                        .items_center()
+                        .gap(px(6.0))
+                        .child(div().w(px(56.0)).child(led_meter(
+                            crate::ext_view::meter_share(&meter.fraction),
+                            pal.accent,
+                            pal.dot,
+                            6.0,
+                        )))
+                        .child(
+                            div()
+                                .min_w(px(52.0))
+                                .flex()
+                                .justify_end()
+                                .font(mono(FontWeight::MEDIUM))
+                                .text_size(px(12.0))
+                                .text_color(pal.text)
+                                .whitespace_nowrap()
+                                .child(meter_text(meter)),
+                        )
+                }))
                 .when(e.badge > 0, |row| {
                     row.child(
                         div()
@@ -540,7 +574,7 @@ fn ext_facts(frame: &Frame) -> Vec<(gpui::Stateful<gpui::Div>, Option<NavSection
                             .child(format!("!{}", e.badge)),
                     )
                 });
-            (fact, None)
+            (fact, Some(NavSection::Extension(e.slot)))
         })
         .collect()
 }
@@ -548,6 +582,23 @@ fn ext_facts(frame: &Frame) -> Vec<(gpui::Stateful<gpui::Div>, Option<NavSection
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn meter_words_never_say_zero_for_unknown() {
+        use samo_ext_protocol::BadgeMeter;
+        use samo_primitives::{Reading, UnsupportedReason};
+        let meter = |fraction| BadgeMeter {
+            label: "5h".into(),
+            fraction,
+        };
+        assert_eq!(meter_text(&meter(Reading::available(0.36, 1))), "5h 36%");
+        assert_eq!(meter_text(&meter(Reading::available(0.0, 1))), "5h 0%");
+        assert_eq!(
+            meter_text(&meter(Reading::unsupported(UnsupportedReason::NotReported))),
+            "5h --"
+        );
+        assert_eq!(meter_text(&meter(Reading::stopped(5))), "5h --");
+    }
 
     #[test]
     fn title_appends_attention_count() {

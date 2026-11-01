@@ -1,4 +1,4 @@
-use samo_ext_protocol::{Change, PopupKind, Widget};
+use samo_ext_protocol::{BadgeMeter, Change, PopupKind, Widget};
 use std::sync::Arc;
 
 /// Which installed extension, by its place in the list; stable while Samo runs.
@@ -38,6 +38,8 @@ pub struct ExtView {
     /// How many things wait for the user, and the quick panel's line.
     pub badge: u32,
     pub badge_summary: String,
+    /// A small load bar for the quick panel's line, if the extension sends one.
+    pub badge_meter: Option<BadgeMeter>,
 }
 
 /// Every installed extension, copied out for one render.

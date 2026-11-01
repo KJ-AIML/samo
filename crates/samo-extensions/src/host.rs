@@ -5,7 +5,7 @@ use crate::state::{ExtSlot, ExtSnapshot, ExtView, PendingPopup, Status};
 use crate::supervisor::{self, Event, one_shot};
 use crate::{ExtRoot, History, Installed, Registry, find_dev_packages, install_dev};
 use samo_domain::extensions::{BackoffConfig, Source, may_run, samo_satisfies};
-use samo_ext_protocol::{HostMsg, Manifest, Widget};
+use samo_ext_protocol::{BadgeMeter, HostMsg, Manifest, Widget};
 use std::collections::VecDeque;
 use std::env;
 use std::path::{Path, PathBuf};
@@ -87,6 +87,7 @@ pub(crate) struct Runtime {
     pub view: Arc<Vec<Widget>>,
     pub badge: u32,
     pub badge_summary: String,
+    pub badge_meter: Option<BadgeMeter>,
     pub control: Option<Sender<Event>>,
     pub thread: Option<JoinHandle<()>>,
 }
@@ -214,6 +215,7 @@ impl Host {
                 view: Arc::new(Vec::new()),
                 badge: 0,
                 badge_summary: String::new(),
+                badge_meter: None,
                 control: None,
                 thread: None,
             });
@@ -335,6 +337,11 @@ impl Host {
                         0
                     },
                     badge_summary: rt.badge_summary.clone(),
+                    badge_meter: if rt.status == Status::Running {
+                        rt.badge_meter.clone()
+                    } else {
+                        None
+                    },
                 })
                 .collect(),
             problems: state.problems.clone(),

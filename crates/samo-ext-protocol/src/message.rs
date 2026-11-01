@@ -1,4 +1,5 @@
 use crate::{ProtocolError, Widget};
+use samo_primitives::Reading;
 use serde::{Deserialize, Serialize};
 
 /// Samo to a helper, one JSON object per line on the helper's stdin.
@@ -29,11 +30,13 @@ pub enum HelperMsg {
     /// The whole page; it replaces the last one.
     View { sections: Vec<Widget> },
     /// How many things wait for the user (shown beside Samo's menu bar figure); `0` clears it. `summary` is the
-    /// quick panel's line.
+    /// quick panel's line, and `meter`, if any, a small load bar at its end.
     Badge {
         count: u32,
         #[serde(default)]
         summary: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        meter: Option<BadgeMeter>,
     },
     /// A short note under the menu bar item. `key` names what it is about.
     Popup {
@@ -54,6 +57,14 @@ pub enum HelperMsg {
         #[serde(default)]
         message: String,
     },
+}
+
+/// A small load bar on an extension's quick-panel line: a short label and a share, `0..=1`. Unknown lights
+/// nothing and reads `--`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BadgeMeter {
+    pub label: String,
+    pub fraction: Reading<f64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -163,6 +174,15 @@ mod tests {
             HelperMsg::Badge {
                 count: 2,
                 summary: "Claude · 2 need you".into(),
+                meter: None,
+            },
+            HelperMsg::Badge {
+                count: 0,
+                summary: "Claude · 1 working".into(),
+                meter: Some(BadgeMeter {
+                    label: "5h".into(),
+                    fraction: Reading::available(0.36, 9),
+                }),
             },
             HelperMsg::Popup {
                 key: "s1".into(),
@@ -209,7 +229,8 @@ mod tests {
             decode_helper_line(line).ok(),
             Some(HelperMsg::Badge {
                 count: 2,
-                summary: "x".into()
+                summary: "x".into(),
+                meter: None
             })
         );
         // Optional fields may be left out.
@@ -217,7 +238,8 @@ mod tests {
             decode_helper_line(r#"{"type":"badge","count":0}"#).ok(),
             Some(HelperMsg::Badge {
                 count: 0,
-                summary: String::new()
+                summary: String::new(),
+                meter: None
             })
         );
     }
