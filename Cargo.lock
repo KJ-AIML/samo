@@ -4489,6 +4489,7 @@ dependencies = [
  "objc2-foundation",
  "samo-blueprint",
  "samo-domain",
+ "samo-ext-protocol",
  "samo-extensions",
  "samo-macos",
  "samo-primitives",
