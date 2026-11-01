@@ -18,6 +18,28 @@ fn main() -> ExitCode {
             samo_claude::statusline::run();
             ExitCode::SUCCESS
         }
+        "serve" => samo_claude::serve::run(),
+        "on" | "off" | "uninstall" => {
+            let (Some(home), Some(data)) =
+                (samo_claude::paths::home(), samo_claude::paths::data_dir())
+            else {
+                eprintln!("samo-claude: no home folder");
+                return ExitCode::FAILURE;
+            };
+            let places = samo_claude::connection::Places { home, data };
+            let done = match verb.as_str() {
+                "on" => samo_claude::connection::on(&places),
+                "off" => samo_claude::connection::off(&places),
+                _ => samo_claude::connection::uninstall(&places),
+            };
+            match done {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(e) => {
+                    eprintln!("samo-claude {verb}: {e}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
         _ => {
             eprintln!("usage: samo-claude hook|statusline|serve|on|off|uninstall");
             ExitCode::from(2)

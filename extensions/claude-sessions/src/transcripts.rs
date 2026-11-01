@@ -1,6 +1,10 @@
 //! Reading today's transcripts as they grow (ADR-002 C2): only files changed since local midnight, each from
 //! where it was last read, within a byte budget per call so it never runs hot (at most 8 MiB a second).
 //! A line without its newline yet waits for it.
+//!
+//! A long-running session's file holds days of history before today's lines (KJ's held 724 MB in 8 files
+//! touched in one morning). Lines are written in time order, so a new file is first searched for where today
+//! begins, and only that part is read.
 
 use crate::usage::{DayTally, parse_line};
 use std::collections::HashMap;
@@ -16,12 +20,80 @@ const MAX_DEPTH: usize = 4;
 struct Tracked {
     offset: u64,
     partial: Vec<u8>,
+    /// The start of today's part has been found.
+    positioned: bool,
+}
+
+/// Files smaller than this are read from the start.
+const SEARCH_ABOVE: u64 = 1024 * 1024;
+/// How much is read at each step of the search.
+const PROBE: u64 = 256 * 1024;
+
+/// The time on a transcript line, found without parsing the whole line.
+fn line_time_ms(line: &[u8]) -> Option<i64> {
+    let text = std::str::from_utf8(line).ok()?;
+    let at = text.find("\"timestamp\":\"")? + "\"timestamp\":\"".len();
+    let rest = &text[at..];
+    let end = rest.find('"')?;
+    chrono::DateTime::parse_from_rfc3339(&rest[..end])
+        .ok()
+        .map(|t| t.timestamp_millis())
+}
+
+/// The first timestamped line starting at or after `from`: its offset and time. `from` is moved past a partial
+/// line first, unless it is 0.
+fn probe(file: &mut File, from: u64, len: u64) -> Option<(u64, i64)> {
+    file.seek(SeekFrom::Start(from)).ok()?;
+    let mut buf = Vec::new();
+    file.take(PROBE.min(len - from))
+        .read_to_end(&mut buf)
+        .ok()?;
+    let mut pos = if from == 0 {
+        0
+    } else {
+        buf.iter().position(|b| *b == b'\n')? + 1
+    };
+    while pos < buf.len() {
+        let end = buf[pos..].iter().position(|b| *b == b'\n')?;
+        if let Some(ts) = line_time_ms(&buf[pos..pos + end]) {
+            return Some((from + u64::try_from(pos).ok()?, ts));
+        }
+        pos += end + 1;
+    }
+    None
+}
+
+/// Where the first line from `midnight_ms` on starts, or near before it (always the start of a line).
+fn start_of_today(path: &Path, midnight_ms: i64) -> u64 {
+    let Ok(mut file) = File::open(path) else {
+        return 0;
+    };
+    let Some(len) = file.metadata().ok().map(|m| m.len()) else {
+        return 0;
+    };
+    if len <= SEARCH_ABOVE {
+        return 0;
+    }
+    // `lo` is always a line start known to be before midnight (or 0).
+    let (mut lo, mut hi) = (0u64, len);
+    while hi - lo > PROBE {
+        let mid = lo + (hi - lo) / 2;
+        match probe(&mut file, mid, len) {
+            Some((at, ts)) if ts < midnight_ms => lo = at,
+            Some(_) => hi = mid,
+            // Nothing timestamped this far in: search the earlier half.
+            None => hi = mid,
+        }
+    }
+    lo
 }
 
 pub struct Reader {
     root: PathBuf,
     files: HashMap<PathBuf, Tracked>,
     tally: DayTally,
+    /// The last read used its whole budget: there is more to read, so the count isn't complete yet.
+    behind: bool,
 }
 
 fn modified_ms(path: &Path) -> Option<i64> {
@@ -59,7 +131,13 @@ impl Reader {
             root,
             files: HashMap::new(),
             tally: DayTally::new(midnight_ms),
+            behind: false,
         }
+    }
+
+    /// Whether today's transcripts are still being caught up with (after Samo starts, or a burst of writing).
+    pub fn behind(&self) -> bool {
+        self.behind
     }
 
     pub fn tally(&self) -> &DayTally {
@@ -117,6 +195,10 @@ impl Reader {
             let Some(tracked) = self.files.get_mut(&path) else {
                 continue;
             };
+            if !tracked.positioned {
+                tracked.positioned = true;
+                tracked.offset = start_of_today(&path, midnight);
+            }
             if len < tracked.offset {
                 // Rewritten from the start.
                 tracked.offset = 0;
@@ -149,6 +231,7 @@ impl Reader {
                 self.tally.add(&session, parse_line(&text));
             }
         }
+        self.behind = used >= budget;
         used
     }
 }
@@ -261,6 +344,58 @@ mod tests {
     }
 
     #[test]
+    fn long_history_is_skipped_to_today() -> Result<(), String> {
+        let (_dir, projects) = setup()?;
+        let file = projects.join("-Users-kj-samo/s1.jsonl");
+        let at = |ts: &str, msg: &str, input: u64| {
+            format!(
+                r#"{{"sessionId":"s1","timestamp":"{ts}","message":{{"id":"{msg}","usage":{{"input_tokens":{input},"output_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}},"content":"{}"}}}}"#,
+                "x".repeat(300)
+            ) + "\n"
+        };
+        // About 6 MB of yesterday, a line without a time, then today.
+        let mut text = String::new();
+        for i in 0..15_000 {
+            text += &at("2026-10-31T10:00:00Z", &format!("old{i}"), 1_000);
+        }
+        text += "{\"type\":\"summary\"}\n";
+        for i in 0..50 {
+            text += &at("2026-11-01T09:00:00Z", &format!("new{i}"), 2);
+        }
+        append(&file, &text)?;
+        let midnight = chrono::DateTime::parse_from_rfc3339("2026-11-01T00:00:00Z")
+            .map_or(0, |t| t.timestamp_millis());
+
+        let start = start_of_today(&file, midnight);
+        let today_starts = text
+            .find("2026-11-01")
+            .map_or(0, |i| text[..i].rfind('\n').map_or(0, |n| n + 1));
+        let today_starts = u64::try_from(today_starts).unwrap_or(0);
+        assert!(start <= today_starts, "{start} > {today_starts}");
+        assert!(
+            today_starts - start <= PROBE * 2,
+            "skipped too little: {start} of {today_starts}"
+        );
+
+        let mut reader = Reader::new(projects, midnight);
+        reader.sweep();
+        let mut read = 0;
+        loop {
+            let n = reader.read_new(u64::MAX);
+            if n == 0 {
+                break;
+            }
+            read += n;
+        }
+        assert_eq!(reader.tally().total().input, 100);
+        assert!(
+            read < u64::try_from(text.len()).unwrap_or(0) / 10,
+            "read {read} bytes"
+        );
+        Ok(())
+    }
+
+    #[test]
     fn budget_is_kept() -> Result<(), String> {
         let (_dir, projects) = setup()?;
         let file = projects.join("-Users-kj-samo/s1.jsonl");
@@ -269,6 +404,7 @@ mod tests {
         let mut reader = Reader::new(projects, 0);
         reader.sweep();
         assert_eq!(reader.read_new(1_000), 1_000);
+        assert!(reader.behind());
         let mut total = 1_000;
         loop {
             let read = reader.read_new(1_000);
@@ -279,6 +415,7 @@ mod tests {
         }
         assert_eq!(total, u64::try_from(text.len()).unwrap_or(0));
         assert_eq!(reader.tally().total().input, 100);
+        assert!(!reader.behind());
         Ok(())
     }
 
