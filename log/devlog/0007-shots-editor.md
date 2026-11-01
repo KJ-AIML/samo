@@ -1,0 +1,63 @@
+# Devlog 0007 — Shots, Phase 2: the editor
+
+- **Date:** 2026-11-02
+- **Design:** ADR-004 S3 and Phase 2. KJ's answer on 2026-11-02: every shot opens in the editor, like Shottr. Plan:
+  `docs/samo/2026-11-02-samo-shots-p2-plan.md`, approved by KJ ("approved"), one commit per task, on
+  `feat/shots-editor` from `feat/shots`.
+- **Samo:** unchanged. The editor is Shots alone; Samo stays 0.3.0.
+
+## What Shots 0.2.0 does
+- **After a capture:** two choices, *First* (Copy · Save · Both) and *Then* (Edit · Pin · Nothing). The default is
+  Both, then Edit. Copy and save still happen before any window opens (R19), and the editor opens even if the save
+  failed, so the shot is never only in a failed file.
+- **The editor:**
+  - Thirteen tools, each with a key: select V, arrow A, line L, rectangle R, ellipse O, text T, highlighter H, pen P,
+    numbered step N, blur B, pixelate X, spotlight S, crop C. A backdrop is a switch.
+  - Seven swatches and the colour panel; S, M, L widths (`[` `]`).
+  - Undo and redo of whole canvases: marks only, never pixels, capped at 500.
+  - Copy (⌘C), Save over the shot's own file (⌘S), Save As (⇧⌘S), Pin (⌘P), copy and close (⌘↩).
+  - A thumbnail at the foot drags the shot out as a file.
+  - Closing with changes not copied or saved asks: Save and close, Discard, Cancel.
+- **Rendering:** one renderer draws the canvas and every export, so what is copied is what was on screen.
+  - The shot is a layer's contents, so only the marks redraw.
+  - Blur and pixelate are made from the shot's own pixels: black-and-white stripes come out flat.
+- **The other ways in:** a pin's double-click, and Edit on each recent shot in Samo (its fourth button, the protocol's
+  most).
+- **Lifetime:**
+  - One editor per shot. It keeps its shot alive while open and hands its unsaved edits to shutdown, which saves them
+    beside the shot as `… (unsaved).png`, never over it.
+  - `data/drag/` is emptied at start and stop.
+  - When the last editor closes, the app you came from gets the keyboard back.
+
+## Rulings made during the build
+1. **Focus,** checked on this Mac before building on it.
+   - Refused: macOS 14's `NSApp.activate()`, when another app is in front.
+   - Never became key: a non-activating panel.
+   - Works: `activate(ignoringOtherApps:)`, reached through a protocol so its deprecation doesn't warn. Checked live:
+     the editor opened in front of Warp, with the keyboard.
+2. **Saved shots carry their density** (144 dpi at Retina), as macOS's own screenshots do. Without it, a shot saved at
+   1x and reopened would be halved again. Files without one (0.1.0's) are read at the screen's scale.
+3. **The highlighter is translucent, not multiplied,** so the canvas and the export are drawn the same way.
+4. **Crop:** before there is a crop, a drag inside the shot draws a new box; moving a box the size of the whole shot
+   does nothing.
+5. **Text marks:** a click while typing only ends the typing. Return or Esc ends it; ⇧↩ or ⌥↩ starts a new line.
+6. **A drag that lands somewhere counts as out:** closing afterwards doesn't ask.
+7. **The minimum width is 868 pt.** A live check showed the toolbar overlapping at 760, and a test now guards it.
+8. **Views don't clip by default since macOS 14,** so the backdrop's gradient filled the whole window until the
+   ground and marks views clipped to their bounds.
+9. **The worker has an invisible Edit menu,** so ⌘C, ⌘V, ⌘A and ⌘Z work while typing a text mark. It has no Quit.
+10. **Settings load field by field,** so one value Shots doesn't know never resets the rest.
+
+## Found along the way
+- **Phase 1:** `~` in the folder came from the account, not `$HOME`, so test runs saved into the real
+  `~/Pictures/Shots`. Fixed: `Settings.home`, `expand`, `abbreviate`.
+- **Phase 1:** the clipboard and the file each encoded the PNG; now once.
+- **Not fixed, for KJ:** Shots is signed ad hoc, so macOS knows it by its binary hash (`designated => cdhash …`). Every
+  new build, and so every store update, is a new app to Screen Recording and asks again. A stable signing identity in
+  `ext-package` (a gate file) would fix it.
+
+## Verification
+- **Tests:** 64 Swift tests. They include the editor window driven headless with real mouse and key events; it is
+  never shown on screen.
+- **Phase 1 demo:** the Rust demo still passes. Its choice step now sets `then: pin`.
+- **Store:** `ext-package` and `ext-publish --test-key` give a catalog that verifies against the 0.2.0 package.

@@ -160,9 +160,14 @@ a pull request, and KJ reviews and signs it. The design is [ADR-003](docs/decisi
 **Shots** is a screenshot extension in the store ([ADR-004](docs/decisions/ADR-004-samo-shots.md)). Press ⇧⌘2 and
 drag: the screen is frozen at the shortcut, a magnifier and the size in pixels follow the pointer, and the shot is
 copied and saved to `~/Pictures/Shots` when you let go. Space picks a window instead; ⇧⌘1 takes the whole screen.
-Pin a shot to keep it above every window. Shots asks macOS for Screen Recording as its own app, so no other extension
-gains it, and nothing it captures leaves your Mac. It opens its own windows, which the store says before you install
-it; an extension that opens windows without saying so is stopped.
+Every shot then opens in Shots' editor, already copied and saved, so closing it loses nothing. The editor has arrows,
+lines, boxes, ellipses, text, a highlighter, a pen, numbered steps, blur, pixelate, a spotlight, crop and a backdrop.
+Each tool has a key (A, L, R, O, T, H, P, N, B, X, S, C; V selects), with ⌘Z and ⇧⌘Z, ⌘C to copy, ⌘S to save over the
+shot, ⇧⌘S to save elsewhere, ⌘P to pin and ⌘↩ to copy and close; drag the thumbnail at the foot into another app.
+Closing with changes not copied or saved asks first. Pin a shot to keep it above every window, and double-click a pin to
+edit it. Shots asks macOS for Screen Recording as its own app, so no other extension gains it, and nothing it captures
+leaves your Mac. It opens its own windows, which the store says before you install it; an extension that opens windows
+without saying so is stopped.
 
 ### Developing an extension
 
