@@ -11,7 +11,7 @@ use samo_ext_protocol::{
     rows_in,
 };
 use std::env;
-use std::io::{BufReader, Write};
+use std::io::{BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
@@ -80,8 +80,11 @@ fn helper_env(data_dir: &Path, config: &HostConfig) -> Vec<(&'static str, String
     ]
 }
 
+/// What a one-shot's stderr may add to its error, at most.
+const STDERR_KEPT: u64 = 2048;
+
 /// Runs `<helper> <verb>` (`on`, `off`, `uninstall`) once, with the helper's environment, and waits for it up to
-/// `timeout`. `Err` says what went wrong in words.
+/// `timeout`. `Err` says what went wrong in words, with what the helper printed to stderr.
 pub(crate) fn one_shot(
     helper: &Path,
     verb: &str,
@@ -97,18 +100,39 @@ pub(crate) fn one_shot(
         .current_dir(data_dir)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .spawn()
         .map_err(|e| format!("couldn't run `{verb}`: {e}"))?;
+    // Read on the side, so a chatty helper can't fill the pipe and hang; keep only the start.
+    let stderr = child.stderr.take().map(|mut pipe| {
+        thread::spawn(move || {
+            let mut kept = Vec::new();
+            let _ = (&mut pipe).take(STDERR_KEPT).read_to_end(&mut kept);
+            let _ = std::io::copy(&mut pipe, &mut std::io::sink());
+            String::from_utf8_lossy(&kept).trim().to_string()
+        })
+    });
+    let said = |stderr: Option<thread::JoinHandle<String>>| {
+        let text = stderr.and_then(|t| t.join().ok()).unwrap_or_default();
+        if text.is_empty() {
+            String::new()
+        } else {
+            format!(": {text}")
+        }
+    };
     let deadline = Instant::now() + timeout;
     loop {
         match child.try_wait() {
             Ok(Some(status)) if status.success() => return Ok(()),
-            Ok(Some(status)) => return Err(format!("`{verb}` failed ({status})")),
+            Ok(Some(status)) => return Err(format!("`{verb}` failed ({status}){}", said(stderr))),
             Ok(None) if Instant::now() >= deadline => {
                 let _ = child.kill();
                 let _ = child.wait();
-                return Err(format!("`{verb}` took longer than {}s", timeout.as_secs()));
+                return Err(format!(
+                    "`{verb}` took longer than {}s{}",
+                    timeout.as_secs(),
+                    said(stderr)
+                ));
             }
             Ok(None) => thread::sleep(Duration::from_millis(20)),
             Err(e) => return Err(format!("couldn't wait for `{verb}`: {e}")),

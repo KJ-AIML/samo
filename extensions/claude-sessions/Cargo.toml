@@ -29,3 +29,5 @@ chrono.workspace = true
 [dev-dependencies]
 samo-extensions.workspace = true
 tempfile.workspace = true
+samo-testkit.workspace = true
+samo-domain.workspace = true

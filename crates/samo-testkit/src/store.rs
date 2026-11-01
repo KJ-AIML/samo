@@ -4,7 +4,7 @@
 use crate::http::TestServer;
 use ring::signature::{Ed25519KeyPair, KeyPair};
 use samo_domain::store::{Catalog, FileRef, Listing, hex, image_size, sha256_hex};
-use samo_ext_protocol::Change;
+use samo_ext_protocol::{Change, Manifest};
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -60,7 +60,8 @@ impl FakeStore {
     /// Writes `catalog.json` and its signature.
     pub fn publish(&self, catalog: &Catalog) -> Result<(), String> {
         let bytes = serde_json::to_vec_pretty(catalog).map_err(|e| e.to_string())?;
-        fs::write(self.dir.path().join("catalog.json.sig"), self.sign(&bytes)).map_err(|e| e.to_string())?;
+        fs::write(self.dir.path().join("catalog.json.sig"), self.sign(&bytes))
+            .map_err(|e| e.to_string())?;
         fs::write(self.dir.path().join("catalog.json"), bytes).map_err(|e| e.to_string())
     }
 
@@ -116,6 +117,27 @@ pub fn listing(id: &str, version: &str, package: FileRef) -> Listing {
             place: "-".into(),
             undo: "-".into(),
         }],
+    }
+}
+
+/// The listing a package's own manifest calls for, pinning `package`.
+pub fn listing_for(manifest: &Manifest, package: FileRef) -> Listing {
+    Listing {
+        id: manifest.id.clone(),
+        name: manifest.name.clone(),
+        author: "Samo".into(),
+        summary: manifest.summary.clone(),
+        description: String::new(),
+        categories: Vec::new(),
+        homepage: String::new(),
+        version: manifest.version.clone(),
+        protocol: manifest.protocol,
+        min_samo: manifest.min_samo.clone(),
+        whats_new: String::new(),
+        package,
+        icon: None,
+        screenshots: Vec::new(),
+        changes: manifest.changes.clone(),
     }
 }
 
