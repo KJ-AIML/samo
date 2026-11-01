@@ -24,6 +24,7 @@ final class CaptureController {
 
     private var overlay: OverlaySession?
     private var busy = false
+    private let watchdog = Watchdog()
     private var fromPage = false
 
     init(
@@ -63,9 +64,10 @@ final class CaptureController {
 
     private func run(_ mode: Mode) {
         let started = Date()
+        let token = waitForScreen()
         Task { @MainActor [weak self] in
             let frozen = await Screenshotter.freezeAll()
-            guard let self else { return }
+            guard let self, self.watchdog.answered(token) else { return }
             guard !frozen.isEmpty else {
                 self.end(note: "Shots couldn't capture the screen. Is Screen Recording allowed for Shots?",
                          problem: true)
@@ -99,6 +101,18 @@ final class CaptureController {
         }
     }
 
+    /// Starts waiting on macOS for the screen. If it never answers, the capture ends after `Watchdog.limit` with a
+    /// note, so Shots isn't left busy, ignoring every shortcut.
+    private func waitForScreen() -> Int {
+        let token = watchdog.begin()
+        DispatchQueue.main.asyncAfter(deadline: .now() + Watchdog.limit) { [weak self] in
+            guard let self, self.watchdog.expired(token) else { return }
+            self.end(note: "macOS didn't hand Shots the screen. Try again, or restart Shots from its page in Samo.",
+                     problem: true)
+        }
+        return token
+    }
+
     private func area(_ frozen: Frozen, _ rect: CGRect, view: OverlayView, takenAt: Date) {
         let released = Date()
         let pixels = Selection.imageRect(rect, viewHeight: view.bounds.height, scale: frozen.scale)
@@ -115,9 +129,10 @@ final class CaptureController {
     private func window(_ window: SCWindow, scale: CGFloat, takenAt: Date) {
         let clicked = Date()
         overlay?.close()
+        let token = waitForScreen()
         Task { @MainActor [weak self] in
             let image = await Screenshotter.capture(window: window, scale: scale)
-            guard let self else { return }
+            guard let self, self.watchdog.answered(token) else { return }
             guard let image else {
                 self.end(note: "Shots couldn't capture that window", problem: true)
                 return

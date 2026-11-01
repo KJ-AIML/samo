@@ -195,3 +195,26 @@ final class CaptureTests: XCTestCase {
         XCTAssertEqual(fullSize.width, 200)
     }
 }
+
+final class WatchdogTests: XCTestCase {
+    func testAnAnswerInTimeIsTaken() {
+        let dog = Watchdog()
+        let token = dog.begin()
+        XCTAssertTrue(dog.isWaiting)
+        XCTAssertTrue(dog.answered(token))
+        XCTAssertFalse(dog.expired(token), "answered, so the limit passing changes nothing")
+        XCTAssertFalse(dog.isWaiting)
+    }
+
+    func testALateAnswerIsIgnored() {
+        let dog = Watchdog()
+        let token = dog.begin()
+        XCTAssertTrue(dog.expired(token), "nothing came: give up")
+        XCTAssertFalse(dog.answered(token), "and an answer after that is ignored")
+        // The next capture waits afresh; the old limit can't end it.
+        let next = dog.begin()
+        XCTAssertFalse(dog.expired(token))
+        XCTAssertTrue(dog.isWaiting)
+        XCTAssertTrue(dog.answered(next))
+    }
+}
