@@ -63,12 +63,21 @@ public enum Spawn {
         return started == 0 ? pid : nil
     }
 
-    /// `samo-shots serve`: starts the worker and waits for it, ending as it ends.
+    /// `samo-shots serve`: starts the worker and waits for it, ending as it ends. A worker that exits with
+    /// `restartExitCode` (after Screen Recording was allowed) is started again, a few times at most.
     public static func relay(executable: String) -> Int32 {
-        guard let (pid, _) = startWorker(executable: executable) else {
-            FileHandle.standardError.write(Data("samo-shots: couldn't start the worker\n".utf8))
-            return 1
+        for _ in 0..<5 {
+            guard let (pid, _) = startWorker(executable: executable) else {
+                FileHandle.standardError.write(Data("samo-shots: couldn't start the worker\n".utf8))
+                return 1
+            }
+            let code = wait(pid)
+            if code != restartExitCode { return code }
         }
+        return 1
+    }
+
+    private static func wait(_ pid: pid_t) -> Int32 {
         var status: Int32 = 0
         while waitpid(pid, &status, 0) == -1 {
             if errno != EINTR { return 1 }
