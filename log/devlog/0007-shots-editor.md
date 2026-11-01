@@ -47,6 +47,9 @@
    ground and marks views clipped to their bounds.
 9. **The worker has an invisible Edit menu,** so ⌘C, ⌘V, ⌘A and ⌘Z work while typing a text mark. It has no Quit.
 10. **Settings load field by field,** so one value Shots doesn't know never resets the rest.
+11. **A capture macOS never answers ends after 8 s.** This was found while scripting M7. Before, the worker stayed
+    busy and ignored every shortcut until it restarted. Now a `Watchdog` gives up with a note, and ignores a late
+    answer.
 
 ## Found along the way
 - **Phase 1:** `~` in the folder came from the account, not `$HOME`, so test runs saved into the real
@@ -57,7 +60,27 @@
   `ext-package` (a gate file) would fix it.
 
 ## Verification
-- **Tests:** 64 Swift tests. They include the editor window driven headless with real mouse and key events; it is
-  never shown on screen.
-- **Phase 1 demo:** the Rust demo still passes. Its choice step now sets `then: pin`.
-- **Store:** `ext-package` and `ext-publish --test-key` give a catalog that verifies against the 0.2.0 package.
+- **Local CI:** `scripts/ci-local.sh` passes: fmt, clippy, all seven gates, 241 Rust tests and 66 Swift tests.
+  - The Swift tests drive the editor window headless, with real mouse and key events; it is never shown on screen.
+- **Phase 2 demo:** `shots_phase2_demo` installs 0.2.0 from a test-key store under a temporary home.
+  - Phase 1's settings load as Both, then Edit.
+  - The temporary home's shot shows in Recent with Copy, Reveal, Pin and Edit.
+  - Edit opens the editor, and R15 leaves it be.
+  - Off leaves nothing running and no `data/drag/`.
+  - The Phase 1 demo still passes; its choice step now sets `then: pin`.
+- **Store:** `ext-package` and `ext-publish --test-key` give a catalog that verifies against the 0.2.0 package
+  (416 KB).
+- **Live, on KJ's Mac:**
+  - The editor opened from Edit, in front, with the keyboard, and drew correctly in the dark theme.
+  - This check found the toolbar overlapping at 760 pt.
+- **M13, by script** (20 editors on 3024 × 1964 shots, opened over the protocol, each closed by ⌘W sent to Shots alone):
+  - Memory: 87 MB after the first editor, 89 MB after twenty (physical footprint 20 → 21 MB). The limit is 50 MB.
+  - Speed: each editor was on screen 112–148 ms after the request, decoding included.
+- **M7, by script: not done.**
+  - A second Shots process, beside the test Samo's, asked for the screen 50 times; ScreenCaptureKit never answered
+    the first.
+  - That led to rule 11. The test Samo's own Shots is idle at 27 MB after KJ's four shots, down from 60 MB.
+- **Left for KJ:**
+  - Capture with 0.2.0: M8, M10–M12, and the drawing feel in M9. These need Screen Recording allowed for the new
+    build.
+  - Phase 1's M3, M5 and M6.

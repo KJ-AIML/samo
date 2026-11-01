@@ -4,124 +4,17 @@
 //!
 //! Shots' settings are written first with no shortcuts, so the test never takes ⇧⌘1 or ⇧⌘2 from the Mac it runs on.
 
-use samo_ext_protocol::{Manifest, Widget};
-use samo_extensions::{ExtRoot, ExtSlot, ExtSnapshot, Host, HostConfig, Status};
+mod shots_common;
+
+use samo_extensions::{ExtRoot, Host, HostConfig, Status};
 use samo_testkit::store::{FakeStore, listing_for};
+use shots_common::{
+    Fallible, SLOT, build_shots, chosen, has_section, io, shots_processes, stage, wait,
+};
 use std::fs;
-use std::os::unix::fs::PermissionsExt;
-use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
-
-type Fallible<T> = Result<T, String>;
-
-fn io<E: std::fmt::Display>(e: E) -> String {
-    e.to_string()
-}
-
-const SLOT: ExtSlot = ExtSlot(0);
-
-fn shots_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../extensions/shots")
-}
-
-/// Builds `samo-shots` (debug) and returns where it is.
-fn build_shots() -> Fallible<PathBuf> {
-    let dir = shots_dir();
-    let ok = Command::new("swift")
-        .args(["build", "--package-path"])
-        .arg(&dir)
-        .args(["--product", "samo-shots"])
-        .status()
-        .map_err(|e| format!("Shots needs Swift ({e})"))?;
-    if !ok.success() {
-        return Err("swift build failed".into());
-    }
-    let out = Command::new("swift")
-        .args(["build", "--package-path"])
-        .arg(&dir)
-        .arg("--show-bin-path")
-        .output()
-        .map_err(io)?;
-    Ok(PathBuf::from(String::from_utf8_lossy(&out.stdout).trim()).join("samo-shots"))
-}
-
-/// `<stage>/shots/`: the manifest (changed by `edit`), the helper and the fonts, as `ext-package` lays them out.
-fn stage(stage: &Path, binary: &Path, edit: impl Fn(String) -> String) -> Fallible<Manifest> {
-    let ext = stage.join("shots");
-    let _ = fs::remove_dir_all(&ext);
-    fs::create_dir_all(ext.join("bin")).map_err(io)?;
-    fs::create_dir_all(ext.join("share/fonts")).map_err(io)?;
-    let text = edit(fs::read_to_string(shots_dir().join("extension.toml")).map_err(io)?);
-    fs::write(ext.join("extension.toml"), &text).map_err(io)?;
-    let helper = ext.join("bin/samo-shots");
-    fs::write(&helper, fs::read(binary).map_err(io)?).map_err(io)?;
-    fs::set_permissions(&helper, fs::Permissions::from_mode(0o755)).map_err(io)?;
-    for font in fs::read_dir(shots_dir().join("share/fonts")).map_err(io)? {
-        let font = font.map_err(io)?;
-        fs::write(
-            ext.join("share/fonts").join(font.file_name()),
-            fs::read(font.path()).map_err(io)?,
-        )
-        .map_err(io)?;
-    }
-    Manifest::parse(&text).map_err(io)
-}
-
-fn wait(
-    host: &Host,
-    what: &str,
-    secs: u64,
-    test: impl Fn(&ExtSnapshot) -> bool,
-) -> Fallible<Arc<ExtSnapshot>> {
-    let deadline = Instant::now() + Duration::from_secs(secs);
-    loop {
-        let snap = host.snapshot();
-        if test(&snap) {
-            return Ok(snap);
-        }
-        if Instant::now() > deadline {
-            return Err(format!(
-                "timed out waiting for {what}; {:?}",
-                snap.get(SLOT).map(|e| (&e.status, &e.note))
-            ));
-        }
-        thread::sleep(Duration::from_millis(50));
-    }
-}
-
-fn page(snap: &ExtSnapshot) -> Vec<Widget> {
-    snap.get(SLOT)
-        .map(|e| (*e.view).clone())
-        .unwrap_or_default()
-}
-
-fn has_section(snap: &ExtSnapshot, title: &str) -> bool {
-    page(snap)
-        .iter()
-        .any(|w| matches!(w, Widget::Section { title: t, .. } if t == title))
-}
-
-fn chosen(snap: &ExtSnapshot, key: &str) -> Option<String> {
-    page(snap).into_iter().find_map(|w| match w {
-        Widget::Choice {
-            key: k, selected, ..
-        } if k == key => Some(selected),
-        _ => None,
-    })
-}
-
-/// Processes running the installed helper (the first process and its worker).
-fn shots_processes(root: &ExtRoot) -> usize {
-    let path = root.ext_dir("shots").to_string_lossy().into_owned();
-    Command::new("pgrep")
-        .args(["-f", &path])
-        .output()
-        .map(|o| String::from_utf8_lossy(&o.stdout).lines().count())
-        .unwrap_or(0)
-}
 
 #[test]
 fn shots_phase1_demo() -> Fallible<()> {
