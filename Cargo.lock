@@ -4418,10 +4418,13 @@ dependencies = [
 name = "samo-domain"
 version = "0.1.1"
 dependencies = [
+ "chrono",
+ "ring",
  "samo-blueprint",
  "samo-ext-protocol",
  "samo-primitives",
  "serde",
+ "serde_json",
 ]
 
 [[package]]

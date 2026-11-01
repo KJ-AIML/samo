@@ -132,7 +132,7 @@ pub fn may_run(source: &Source, dev_dir_env: Option<&str>) -> bool {
 }
 
 /// `major.minor.patch` of a version, ignoring any `-pre` or `+build`; missing parts are 0.
-fn numeric(version: &str) -> Option<(u64, u64, u64)> {
+pub fn numeric(version: &str) -> Option<(u64, u64, u64)> {
     let core = version.split(['-', '+']).next()?;
     let mut parts = core.split('.').map(|p| p.parse::<u64>());
     let major = parts.next()?.ok()?;
