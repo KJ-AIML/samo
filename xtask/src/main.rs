@@ -4,6 +4,7 @@ mod network;
 mod purity;
 mod rls;
 mod store;
+mod swift;
 
 use std::env;
 use std::path::{Path, PathBuf};
@@ -102,28 +103,33 @@ fn publish_args(root: &Path, args: &[String]) -> Result<store::PublishArgs, Stri
 
 fn verify(root: &Path) -> Result<(), String> {
     let root = root.to_path_buf();
-    println!("==> [xtask] gate 1/6: layers");
+    println!("==> [xtask] gate 1/7: layers");
     layers::check_layers(&root)?;
     println!("    layers: ok");
 
-    println!("==> [xtask] gate 2/6: purity");
+    println!("==> [xtask] gate 2/7: purity");
     purity::check_purity(&root)?;
     println!("    purity: ok");
 
-    println!("==> [xtask] gate 3/6: rls");
+    println!("==> [xtask] gate 3/7: rls");
     rls::check_rls(&root)?;
     println!("    rls: ok");
 
-    println!("==> [xtask] gate 4/6: commands-complete");
+    println!("==> [xtask] gate 4/7: commands-complete");
     commands_complete::check_commands_complete(&root)?;
     println!("    commands-complete: ok");
 
-    println!("==> [xtask] gate 5/6: network");
+    println!("==> [xtask] gate 5/7: network");
     network::check_network(&root)?;
     println!("    network: ok");
 
+    println!("==> [xtask] gate 6/7: swift");
+    swift::check_swift(&root)?;
+    println!("    swift: ok");
+
     if env::var("XTASK_SKIP_TESTS").as_deref() != Ok("1") {
-        println!("==> [xtask] gate 6/6: tests");
+        println!("==> [xtask] gate 7/7: tests");
+        swift::run_swift_tests(&root)?;
         run_tests(&root)?;
         println!("    tests: ok");
     }

@@ -63,20 +63,33 @@ pub fn package(root: &Path, dir: &Path) -> Result<PathBuf, String> {
     let manifest_text =
         fs::read_to_string(dir.join("extension.toml")).map_err(io("extension.toml"))?;
     let manifest = Manifest::parse(&manifest_text).map_err(|e| e.to_string())?;
-    let cargo = fs::read_to_string(dir.join("Cargo.toml")).map_err(io("Cargo.toml"))?;
-    let package = field(&cargo, "name").ok_or("Cargo.toml has no package name")?;
     let bin = Path::new(&manifest.helper)
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .ok_or("the manifest's helper has no file name")?;
-    let status = Command::new("cargo")
-        .args(["build", "--release", "-p", &package, "--bin", &bin])
-        .current_dir(root)
-        .status()
-        .map_err(io("cargo build"))?;
-    if !status.success() {
-        return Err(format!("building {package} failed"));
-    }
+    let built = if dir.join("Package.swift").is_file() {
+        // A Swift extension (ADR-004).
+        let status = Command::new("swift")
+            .args(crate::swift::build_args(dir, &bin, true))
+            .status()
+            .map_err(io("swift build"))?;
+        if !status.success() {
+            return Err(format!("building {bin} failed"));
+        }
+        crate::swift::bin_path(dir, true)?.join(&bin)
+    } else {
+        let cargo = fs::read_to_string(dir.join("Cargo.toml")).map_err(io("Cargo.toml"))?;
+        let package = field(&cargo, "name").ok_or("Cargo.toml has no package name")?;
+        let status = Command::new("cargo")
+            .args(["build", "--release", "-p", &package, "--bin", &bin])
+            .current_dir(root)
+            .status()
+            .map_err(io("cargo build"))?;
+        if !status.success() {
+            return Err(format!("building {package} failed"));
+        }
+        root.join("target/release").join(&bin)
+    };
     let stage = root.join("target/ext-dist/stage");
     let _ = fs::remove_dir_all(stage.join(&manifest.id));
     let helper_dest = stage.join(&manifest.id).join(&manifest.helper);
@@ -89,11 +102,11 @@ pub fn package(root: &Path, dir: &Path) -> Result<PathBuf, String> {
     )
     .map_err(io("staging"))?;
     // A fresh copy, not cargo's hard link: Samo refuses hard links in a package (R5).
-    fs::write(
-        &helper_dest,
-        fs::read(root.join("target/release").join(&bin)).map_err(io("the helper"))?,
-    )
-    .map_err(io("staging"))?;
+    fs::write(&helper_dest, fs::read(&built).map_err(io("the helper"))?).map_err(io("staging"))?;
+    // Files the helper reads beside itself (a Swift extension's fonts), copied as plain files.
+    if dir.join("share").is_dir() {
+        copy_plain_tree(&dir.join("share"), &stage.join(&manifest.id).join("share"))?;
+    }
     let status = Command::new("chmod")
         .arg("755")
         .arg(&helper_dest)
@@ -126,6 +139,28 @@ pub fn package(root: &Path, dir: &Path) -> Result<PathBuf, String> {
         bytes.len()
     );
     Ok(out)
+}
+
+/// Copies files and folders only: a link would make the package refused (R5).
+fn copy_plain_tree(from: &Path, to: &Path) -> Result<(), String> {
+    fs::create_dir_all(to).map_err(io("staging"))?;
+    for entry in fs::read_dir(from).map_err(io("share"))? {
+        let entry = entry.map_err(io("share"))?;
+        let kind = entry.file_type().map_err(io("share"))?;
+        let target = to.join(entry.file_name());
+        if kind.is_symlink() {
+            return Err(format!(
+                "{} is a link; packages hold only files",
+                entry.path().display()
+            ));
+        } else if kind.is_dir() {
+            copy_plain_tree(&entry.path(), &target)?;
+        } else {
+            fs::write(&target, fs::read(entry.path()).map_err(io("share"))?)
+                .map_err(io("staging"))?;
+        }
+    }
+    Ok(())
 }
 
 /// `listing.toml`: only the store's own fields. A field the manifest owns must not be here with another value.

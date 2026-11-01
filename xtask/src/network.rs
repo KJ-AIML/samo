@@ -100,6 +100,60 @@ pub fn check_user_action(rel_path: &str, content: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// What a Swift extension may not use (R16): HTTP, sockets, the Network framework, or starting programs.
+const SWIFT_NETWORK: &[&str] = &[
+    "URLSession",
+    "URLRequest",
+    "NWConnection",
+    "NWListener",
+    "import Network",
+    "CFNetwork",
+    "CFStream",
+    "Socket",
+    "socket(",
+    "NSTask",
+];
+/// The one file that may spawn (Shots' worker), and the one that may build a URL from a string (a QR code's link,
+/// handed to the browser).
+const SPAWN_FILE: &str = "/Sources/SamoShots/App/Spawn.swift";
+const LINK_FILE: &str = "/Sources/SamoShots/Recognize/Links.swift";
+
+/// `word` in `text`, not as part of a longer name (`Process`, but not `ProcessInfo`).
+fn has_word(text: &str, word: &str) -> bool {
+    let ident = |c: char| c.is_alphanumeric() || c == '_';
+    text.match_indices(word).any(|(i, _)| {
+        let before = text.get(..i).and_then(|t| t.chars().next_back());
+        let after = text.get(i + word.len()..).and_then(|t| t.chars().next());
+        !before.is_some_and(ident) && !after.is_some_and(ident)
+    })
+}
+
+/// R16: a Swift extension's screenshots, or anything else, never leave the Mac.
+pub fn check_swift_source(rel_path: &str, content: &str) -> Result<(), String> {
+    if crate::swift::is_test(rel_path) {
+        return Ok(());
+    }
+    let code = crate::swift::code(content);
+    let fail = |what: &str| {
+        Err(format!(
+            "R16 network violation in `{rel_path}`: a Swift extension must not use `{what}`"
+        ))
+    };
+    if let Some(found) = SWIFT_NETWORK.iter().find(|n| code.contains(*n)) {
+        return fail(found);
+    }
+    if has_word(&code, "Process") {
+        return fail("Process");
+    }
+    if code.contains("posix_spawn") && !rel_path.ends_with(SPAWN_FILE) {
+        return fail("posix_spawn (only App/Spawn.swift starts the worker)");
+    }
+    if code.contains("URL(string:") && !rel_path.ends_with(LINK_FILE) {
+        return fail("URL(string:) (only Recognize/Links.swift opens a link, in the browser)");
+    }
+    Ok(())
+}
+
 /// Claude Sessions never goes online.
 pub fn check_claude_source(rel_path: &str, content: &str) -> Result<(), String> {
     for needle in ["std::net", "TcpStream", "UdpSocket"] {
@@ -133,6 +187,7 @@ pub fn check_network(root: &Path) -> Result<(), String> {
         &root.join("extensions/claude-sessions"),
         &mut check_claude_source,
     )?;
+    crate::swift::visit_swift_files(root, &root.join("extensions"), &mut check_swift_source)?;
     Ok(())
 }
 
@@ -210,6 +265,59 @@ ureq = { version = "3", default-features = false }
         let cfg_test_fn = format!("#[cfg(test)]\nfn helper() {{}}\nfn sneak() {{ {call} }}\n");
         assert!(check_user_action(path, &cfg_test_fn).is_err());
         assert!(check_user_action("crates/samo-extensions/tests/store.rs", call).is_ok());
+    }
+
+    #[test]
+    fn rejects_network_in_shots() {
+        let path = "extensions/shots/Sources/SamoShots/Capture/Upload.swift";
+        for line in [
+            "let task = URLSession.shared.dataTask(with: url)",
+            "var request = URLRequest(url: url)",
+            "import Network",
+            "let c = NWConnection(host: h, port: p, using: .tcp)",
+            "let fd = socket(AF_INET, SOCK_STREAM, 0)",
+            "let p = Process()",
+            "try Process.run(curl, arguments: [])",
+        ] {
+            assert!(check_swift_source(path, line).is_err(), "{line}");
+        }
+        for line in [
+            "let pid = ProcessInfo.processInfo.processIdentifier",
+            "let image = NSImage(contentsOf: URL(fileURLWithPath: path))",
+            "// URLSession would be wrong here",
+        ] {
+            assert!(check_swift_source(path, line).is_ok(), "{line}");
+        }
+        // Tests may start the helper.
+        assert!(
+            check_swift_source(
+                "extensions/shots/Tests/SamoShotsTests/P.swift",
+                "let p = Process()"
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn posix_spawn_and_url_string_only_in_their_files() {
+        let spawn = "posix_spawn(&pid, path, nil, &attrs, argv, envp)";
+        let link = "if let url = URL(string: text) { NSWorkspace.shared.open(url) }";
+        assert!(
+            check_swift_source("extensions/shots/Sources/SamoShots/App/Spawn.swift", spawn).is_ok()
+        );
+        assert!(
+            check_swift_source("extensions/shots/Sources/SamoShots/App/Main.swift", spawn).is_err()
+        );
+        assert!(
+            check_swift_source(
+                "extensions/shots/Sources/SamoShots/Recognize/Links.swift",
+                link
+            )
+            .is_ok()
+        );
+        assert!(
+            check_swift_source("extensions/shots/Sources/SamoShots/Pin/Pin.swift", link).is_err()
+        );
     }
 
     #[test]
