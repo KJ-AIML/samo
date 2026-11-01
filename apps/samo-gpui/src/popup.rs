@@ -128,6 +128,12 @@ pub fn show(popup: Popup, cx: &mut App) {
     .detach();
 }
 
+/// Whether to show an extension's pop-up, given which page the main window shows and whether it is the window
+/// you're using: not when you're already looking at that extension's page.
+pub fn should_show(slot: samo_extensions::ExtSlot, looking: Option<(NavSection, bool)>) -> bool {
+    !matches!(looking, Some((NavSection::Extension(on_screen), true)) if on_screen == slot)
+}
+
 /// Hides the pop-up showing, if any.
 pub fn hide(cx: &mut App) {
     if let Some(handle) = cx.global_mut::<AppState>().popup.take() {
@@ -255,6 +261,27 @@ mod tests {
         };
         let (x, _) = origin(Some(left), 2.0, 1512.0);
         assert!((x - MARGIN).abs() < 0.01);
+    }
+
+    #[test]
+    fn popup_skipped_when_page_visible() {
+        use samo_extensions::ExtSlot;
+        let mine = ExtSlot(1);
+        assert!(!should_show(
+            mine,
+            Some((NavSection::Extension(mine), true))
+        ));
+        // Another page, another extension's page, a window in the background, or no window: show it.
+        assert!(should_show(mine, Some((NavSection::Overview, true))));
+        assert!(should_show(
+            mine,
+            Some((NavSection::Extension(ExtSlot(2)), true))
+        ));
+        assert!(should_show(
+            mine,
+            Some((NavSection::Extension(mine), false))
+        ));
+        assert!(should_show(mine, None));
     }
 
     #[test]

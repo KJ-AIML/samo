@@ -17,10 +17,10 @@ bin=$(basename "$helper")
 cargo build --release -p "$package" --bin "$bin"
 
 out="target/ext-dev/$id"
-rm -rf "$out"
 mkdir -p "$out/$(dirname "$helper")"
 cp "$manifest" "$out/extension.toml"
-# A copy, not cargo's hard link: Samo refuses hard links in a package (ADR-002 R5).
+# A fresh copy, not cargo's hard link: Samo refuses hard links in a package (ADR-002 R5).
+rm -f "$out/$helper"
 cp "target/release/$bin" "$out/$helper"
 echo "Laid out $id in $out"
 echo "Run: SAMO_EXT_DEV_DIR=\"$PWD/target/ext-dev\" cargo run --release -p samo-gpui"

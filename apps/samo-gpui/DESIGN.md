@@ -80,6 +80,8 @@ Samo uses them when installed and falls back to the system face otherwise.
 | Face switch | `components.rs` `face_switch` | Every on/off: its thumb sleeps when off and wakes when on |
 | Empty / loading / error line | `components.rs` | Mascot asleep / Samo scanning / mascot blocked + words that say how to recover |
 | Truncating line | `art.rs` `clip_text` (`components::line`, `mono_line`) | Any single line that may not fit. Give it `.flex_1()` in a row or `.w_full()` in a column. |
+| Pop-up | `popup.rs` | A short note under the menu bar item (an extension's "needs you"). A non-activating panel: it never takes the keyboard. One at a time, gone after 6 s; a click opens the page it is about |
+| Extension page | `ext_view.rs`, `extensions_page.rs` | What an extension's helper sends, drawn with the components above: a section rule per section, figures and meters side by side in cells, rows with a lamp (`!` for "needs you"), switches, Default or Link buttons, notes |
 
 ## 6. Folders, the map, and colour
 
@@ -143,6 +145,9 @@ Samo lives in the menu bar too (`src/menubar.rs`, via `tray-icon`'s safe `NSStat
 - **A click** opens the quick panel under the item: the same readout as the app (a click on a figure opens that
   page), the busiest process across all processes, memory, the network, the folder, and Open Samo / Rescan / Quit.
   Clicking anywhere else closes it.
+- **Extensions** (ADR-002): while they have something waiting for you, the count follows the CPU figure,
+  `23% !1`. The probe's eyes stay Samo's own state. The quick panel adds a line per extension that is on (at most
+  three) and grows to fit; a pop-up can appear under the item, without taking the keyboard.
 - **Closing the window** leaves Samo running in the menu bar; the Dock icon, Show Samo (⌘0) or Open Samo brings
   the window back. ⌘Q quits.
 
@@ -168,6 +173,8 @@ Samo lives in the menu bar too (`src/menubar.rs`, via `tray-icon`'s safe `NSStat
 6. A single line that might not fit uses `clip_text`, not gpui's `truncate()` (it can paint a stale measurement in flex rows).
 7. Nothing slow on the UI thread: sensors, scans and their derived data live on their own threads.
 8. Nothing inside a card grows to fill it (no `flex_1`/`flex_grow` spacers): split it into a top and a bottom.
+9. An extension draws only with Samo's widgets: no dither (that is Samo's suggestion), never the Primary action,
+   Signal only for its errors. Waiting for you is Ink with `!`, not Signal: it isn't wrong.
 
 ## Decisions
 

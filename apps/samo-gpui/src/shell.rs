@@ -180,8 +180,19 @@ impl SamoWorkspaceApp {
                             }
                             _ => None,
                         };
-                        self.nav_link(section, badge, cx)
-                    })),
+                        self.nav_link(section, section.title().to_string(), badge, cx)
+                    }))
+                    .child(rail_label("Extensions", false))
+                    .children(frame.ext.extensions.iter().filter(|e| e.on).map(|e| {
+                        let badge = (e.badge > 0).then(|| format!("!{}", e.badge));
+                        self.nav_link(NavSection::Extension(e.slot), e.name.clone(), badge, cx)
+                    }))
+                    .child(self.nav_link(
+                        NavSection::Extensions,
+                        "All extensions".to_string(),
+                        None,
+                        cx,
+                    )),
             )
             .child(self.side_foot(frame))
             .into_any_element()
@@ -190,13 +201,14 @@ impl SamoWorkspaceApp {
     fn nav_link(
         &self,
         section: NavSection,
+        label: String,
         badge: Option<String>,
         cx: &mut Context<Self>,
     ) -> Stateful<Div> {
         let pal = p();
         let current = self.nav == section;
         div()
-            .id(SharedString::from(format!("nav-{}", section.title())))
+            .id(SharedString::from(format!("nav-{}", section.key())))
             .h(px(34.0))
             .px(px(10.0))
             .flex()
@@ -224,7 +236,7 @@ impl SamoWorkspaceApp {
                     .font(body(FontWeight::MEDIUM))
                     .text_size(px(T_BODY))
                     .text_color(pal.text)
-                    .child(section.title()),
+                    .child(label),
             )
             .children(badge.map(|b| {
                 div()
@@ -285,15 +297,31 @@ impl SamoWorkspaceApp {
                     .flex_col()
                     .items_center()
                     .gap(px(S1))
-                    .children(NavSection::ALL.into_iter().map(|section| {
-                        rail_button(
-                            SharedString::from(format!("rail-{}", section.title())),
-                            section.icon(),
-                            section.title().to_string(),
-                            self.nav == section,
-                        )
-                        .on_click(cx.listener(move |this, _, _, cx| this.set_nav(section, cx)))
-                    })),
+                    .children(
+                        NavSection::ALL
+                            .into_iter()
+                            .map(|section| (section, section.title().to_string()))
+                            .chain(
+                                frame
+                                    .ext
+                                    .extensions
+                                    .iter()
+                                    .filter(|e| e.on)
+                                    .map(|e| (NavSection::Extension(e.slot), e.name.clone())),
+                            )
+                            .chain([(NavSection::Extensions, "All extensions".to_string())])
+                            .map(|(section, name)| {
+                                rail_button(
+                                    SharedString::from(format!("rail-{}", section.key())),
+                                    section.icon(),
+                                    name,
+                                    self.nav == section,
+                                )
+                                .on_click(
+                                    cx.listener(move |this, _, _, cx| this.set_nav(section, cx)),
+                                )
+                            }),
+                    ),
             )
             .child(
                 div()
@@ -434,7 +462,7 @@ impl SamoWorkspaceApp {
             })
             // A page arrives: a short fade, once, when it opens.
             .with_animation(
-                ElementId::Name(format!("arrive-{}", self.nav.title()).into()),
+                ElementId::Name(format!("arrive-{}", self.nav.key()).into()),
                 Animation::new(Duration::from_millis(180)).with_easing(ease_out_quint()),
                 |el, t| el.opacity(t),
             );
@@ -474,7 +502,7 @@ impl SamoWorkspaceApp {
                             .into_any_element()
                     } else {
                         div()
-                            .id(SharedString::from(format!("page-{}", self.nav.title())))
+                            .id(SharedString::from(format!("page-{}", self.nav.key())))
                             .flex_1()
                             .min_h(px(0.0))
                             .overflow_y_scroll()
