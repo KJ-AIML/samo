@@ -72,8 +72,35 @@ fn snapshot(hub: &Hub, layout: Layout) -> Option<Frame> {
         telemetry_view: g.telemetry_view,
         busiest: g.busiest.clone(),
         thermal: g.thermal,
+        ext: hub
+            .ext
+            .get()
+            .map(samo_extensions::Host::snapshot)
+            .unwrap_or_default(),
         layout,
     })
+}
+
+/// Starts installed extensions' helpers (ADR-002). Without a home folder there is nowhere to keep them.
+fn start_extensions(hub: &Hub) {
+    let Some(root) = samo_extensions::ExtRoot::resolve() else {
+        return;
+    };
+    let waker = hub.clone();
+    let host = samo_extensions::Host::start(
+        root,
+        samo_extensions::HostConfig::new(env!("CARGO_PKG_VERSION")),
+        Arc::new(move || waker.wake_ui()),
+    );
+    let _ = hub.ext.set(host);
+}
+
+/// Quits Samo, stopping extensions' helpers first (each gets 2 s to finish).
+fn quit(cx: &mut App) {
+    if let Some(host) = cx.global::<AppState>().hub.ext.get() {
+        host.shutdown_all();
+    }
+    cx.quit();
 }
 
 /// Brings the main window forward (opening it again if it was closed), optionally on a page.
@@ -234,6 +261,8 @@ struct Frame {
     /// The process using the most CPU right now, across all processes.
     busiest: Option<(String, f32)>,
     thermal: Option<hub::Thermal>,
+    /// Installed extensions and what their helpers last said.
+    ext: Arc<samo_extensions::ExtSnapshot>,
     layout: Layout,
 }
 
@@ -751,7 +780,7 @@ fn main() {
     app.on_reopen(|cx| open_main(cx, None));
     app.run(|cx: &mut App| {
         theme::init_fonts(cx);
-        cx.on_action(|_: &Quit, cx| cx.quit());
+        cx.on_action(|_: &Quit, cx| quit(cx));
         cx.on_action(|_: &ShowWindow, cx| open_main(cx, None));
         cx.bind_keys([
             KeyBinding::new("cmd-q", Quit, None),
@@ -776,6 +805,7 @@ fn main() {
             .map(|g| g.scan_root.clone())
             .unwrap_or_else(|_| resolve_default_root());
         SamoWorkspaceApp::spawn_scan(&hub, root, true);
+        start_extensions(&hub);
         cx.set_global(AppState {
             hub,
             main: None,

@@ -101,6 +101,10 @@ const ICONS: &[(&str, &str)] = &[
         "shield",
         r##"<path d="M8 1.75l5 1.9v4.1c0 3.1-2.1 5.4-5 6.5-2.9-1.1-5-3.4-5-6.5v-4.1z"/><path d="M5.75 8l1.6 1.6 2.9-3.1"/>"##,
     ),
+    (
+        "plug",
+        r##"<path d="M6 1.75v3M10 1.75v3"/><path d="M3.75 4.75h8.5v2.5a4.25 4.25 0 0 1-8.5 0z"/><path d="M8 11.5v2.75"/>"##,
+    ),
 ];
 
 impl AssetSource for Assets {

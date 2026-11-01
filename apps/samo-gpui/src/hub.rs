@@ -13,7 +13,7 @@ use samo_macos::{SystemCollector, TrashOutcome};
 use samo_primitives::{
     Reading, SystemSummary, TelemetryPoint, TelemetrySnapshot, UnsupportedReason,
 };
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 /// How often sensors are read.
@@ -92,6 +92,8 @@ pub struct Hub {
     pub shared: Arc<Mutex<SharedState>>,
     control: Arc<(Mutex<Control>, Condvar)>,
     wake_ui: UnboundedSender<()>,
+    /// Extensions' helpers, once started (they need this hub to wake the UI, so they come second).
+    pub ext: Arc<OnceLock<samo_extensions::Host>>,
 }
 
 impl Hub {
@@ -122,6 +124,7 @@ impl Hub {
                 Condvar::new(),
             )),
             wake_ui,
+            ext: Arc::new(OnceLock::new()),
         }
     }
 
