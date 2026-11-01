@@ -51,10 +51,38 @@ pub enum Widget {
         #[serde(default)]
         kind: NoteKind,
     },
+    /// One of a few options (drawn as segments). Picking one sends `choice` with its `id`; the helper says which is
+    /// selected in its next view.
+    Choice {
+        key: String,
+        label: String,
+        options: Vec<ChoiceOption>,
+        selected: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChoiceOption {
+    pub id: String,
+    pub label: String,
+}
+
+/// A button at a row's end. Pressing it sends `action` with its `id` and the row's `id`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RowAction {
+    pub id: String,
+    pub label: String,
+}
+
+/// At most this many buttons on a row, and options in a choice; Samo drops the rest (R8).
+pub const MAX_ROW_ACTIONS: usize = 4;
+pub const MAX_CHOICE_OPTIONS: usize = 8;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RowItem {
+    /// Names the row for its buttons' `action`s.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
     pub lamp: Lamp,
     pub title: String,
     #[serde(default)]
@@ -64,6 +92,8 @@ pub struct RowItem {
     pub trailing: String,
     #[serde(default)]
     pub tag: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub actions: Vec<RowAction>,
 }
 
 /// A row's lamp. Only `Error` is drawn in Signal: waiting for you isn't wrong.

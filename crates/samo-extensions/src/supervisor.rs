@@ -147,7 +147,10 @@ pub(crate) fn run(job: Job, rx: Receiver<Event>) {
     let mut generation = 0u64;
     loop {
         generation += 1;
-        match run_once(&job, &rx, &log, generation) {
+        let outcome = run_once(&job, &rx, &log, generation);
+        // A helper that has gone isn't capturing: Samo shows its windows again.
+        job.inner.update(job.slot, |rt| rt.capturing = false);
+        match outcome {
             Outcome::Stopped => return,
             Outcome::Halt(reason) => {
                 log.note(&format!("stopped: {reason}"));
@@ -205,11 +208,16 @@ struct Held {
     view: Option<Vec<Widget>>,
     badge: Option<(u32, String, Option<BadgeMeter>)>,
     health: Option<(bool, String)>,
+    /// The latest of `capturing` and `captured`: held like a view, never dropped, or Samo could stay hidden.
+    capturing: Option<bool>,
 }
 
 impl Held {
     fn is_empty(&self) -> bool {
-        self.view.is_none() && self.badge.is_none() && self.health.is_none()
+        self.view.is_none()
+            && self.badge.is_none()
+            && self.health.is_none()
+            && self.capturing.is_none()
     }
 }
 
@@ -360,6 +368,8 @@ fn run_once(job: &Job, rx: &Receiver<Event>, log: &HelperLog, generation: u64) -
                             meter,
                         } => held.badge = Some((count, summary, meter)),
                         HelperMsg::Health { ok, message } => held.health = Some((ok, message)),
+                        HelperMsg::Capturing => held.capturing = Some(true),
+                        HelperMsg::Captured => held.capturing = Some(false),
                         HelperMsg::Popup { .. }
                         | HelperMsg::Log { .. }
                         | HelperMsg::Hello { .. } => {
@@ -406,6 +416,11 @@ fn run_once(job: &Job, rx: &Receiver<Event>, log: &HelperLog, generation: u64) -
             }
             if let Some((ok, message)) = taken.health {
                 run.apply(HelperMsg::Health { ok, message });
+            }
+            match taken.capturing {
+                Some(true) => run.apply(HelperMsg::Capturing),
+                Some(false) => run.apply(HelperMsg::Captured),
+                None => {}
             }
         }
         if let Ok(Some(_)) = child.try_wait() {
@@ -567,6 +582,20 @@ impl Run<'_> {
                 let event: String = event.chars().take(40).collect();
                 let detail: String = detail.chars().take(1_000).collect();
                 History::append(&job.inner.root, &event, &job.id, &detail);
+            }
+            HelperMsg::Capturing | HelperMsg::Captured => {
+                let capturing = matches!(msg, HelperMsg::Capturing);
+                let mut declared = true;
+                job.inner.update(job.slot, |rt| {
+                    declared = rt.manifest.windows.is_some();
+                    if declared {
+                        rt.capturing = capturing;
+                    }
+                });
+                if !declared {
+                    self.log
+                        .note("ignored `capturing`: only an extension that declares windows may hide Samo");
+                }
             }
             HelperMsg::Health { ok, message } => {
                 self.unhealthy = (!ok).then(|| message.clone());

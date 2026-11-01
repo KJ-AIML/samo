@@ -272,6 +272,7 @@ impl Host {
                 badge_meter: None,
                 control: None,
                 thread: None,
+                capturing: false,
             });
         }
         self.inner.waker.poke();

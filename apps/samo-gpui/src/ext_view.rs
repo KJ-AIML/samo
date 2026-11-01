@@ -14,7 +14,10 @@ use gpui::{
     AnyElement, Context, Div, FontWeight, Hsla, IntoElement, ParentElement, SharedString, Styled,
     div, prelude::*, px,
 };
-use samo_ext_protocol::{ButtonKind, Lamp, NoteKind, RowItem, Widget};
+use samo_ext_protocol::{
+    ButtonKind, ChoiceOption, Lamp, MAX_CHOICE_OPTIONS, MAX_ROW_ACTIONS, NoteKind, RowAction,
+    RowItem, Widget,
+};
 use samo_extensions::ExtSlot;
 use samo_primitives::Reading;
 
@@ -153,6 +156,26 @@ fn row_line(item: &RowItem) -> Div {
                     .child(item.trailing.clone()),
             )
         })
+}
+
+/// A row's buttons as Samo draws them: none without a row id to send back, and at most four.
+pub fn row_buttons(item: &RowItem) -> Vec<(&str, &RowAction)> {
+    match &item.id {
+        Some(row) => item
+            .actions
+            .iter()
+            .take(MAX_ROW_ACTIONS)
+            .map(|a| (row.as_str(), a))
+            .collect(),
+        None => Vec::new(),
+    }
+}
+
+/// A choice's options as Samo draws them: at most eight.
+pub fn choice_options(options: &[ChoiceOption]) -> &[ChoiceOption] {
+    options
+        .get(..options.len().min(MAX_CHOICE_OPTIONS))
+        .unwrap_or_default()
 }
 
 /// A figure or meter cell, side by side with its neighbours.
@@ -314,7 +337,63 @@ impl SamoWorkspaceApp {
             Widget::Rows { items } => div()
                 .flex()
                 .flex_col()
-                .children(items.iter().map(row_line))
+                .children(items.iter().enumerate().map(|(r, item)| {
+                    row_line(item).children(row_buttons(item).into_iter().enumerate().map(
+                        |(b, (row, action))| {
+                            let (row, act) = (row.to_string(), action.id.clone());
+                            button(
+                                id(&format!("row-{r}-{b}")),
+                                action.label.clone(),
+                                None,
+                                Variant::Link,
+                                true,
+                            )
+                            .on_click(cx.listener(
+                                move |this, _, _, cx| {
+                                    if let Some(host) = this.hub.ext.get() {
+                                        host.row_action(slot, &row, &act);
+                                    }
+                                    cx.notify();
+                                },
+                            ))
+                        },
+                    ))
+                }))
+                .into_any_element(),
+            Widget::Choice {
+                key,
+                label,
+                options,
+                selected,
+            } => div()
+                .min_h(px(44.0))
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap(px(S3))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w(px(0.0))
+                        .font(body(FontWeight::MEDIUM))
+                        .text_size(px(T_BODY))
+                        .text_color(pal.text)
+                        .child(label.clone()),
+                )
+                .child(segments(choice_options(options).iter().enumerate().map(
+                    |(o, option)| {
+                        let (key, value) = (key.clone(), option.id.clone());
+                        let on = option.id == *selected;
+                        segment(id(&format!("choice-{o}")), &option.label, on).when(!on, |el| {
+                            el.on_click(cx.listener(move |this, _, _, cx| {
+                                if let Some(host) = this.hub.ext.get() {
+                                    host.choice(slot, &key, &value);
+                                }
+                                cx.notify();
+                            }))
+                        })
+                    },
+                )))
                 .into_any_element(),
             Widget::Switch {
                 key,
@@ -428,6 +507,41 @@ mod tests {
             ("12.3".into(), "k".into())
         );
         assert_eq!(meter_share(&Reading::available(1.7, 1)), Some(1.0));
+    }
+
+    #[test]
+    fn row_actions_and_choice_map_to_messages() {
+        let action = |id: &str| RowAction {
+            id: id.into(),
+            label: id.to_uppercase(),
+        };
+        let mut row = RowItem {
+            id: Some("shot-1".into()),
+            lamp: Lamp::Done,
+            title: "Shot".into(),
+            detail: String::new(),
+            trailing: String::new(),
+            tag: None,
+            actions: ["copy", "reveal", "pin", "edit", "extra"]
+                .map(action)
+                .to_vec(),
+        };
+        let buttons = row_buttons(&row);
+        assert_eq!(buttons.len(), MAX_ROW_ACTIONS, "at most four");
+        assert!(buttons.iter().all(|(r, _)| *r == "shot-1"));
+        assert_eq!(buttons[0].1.id, "copy");
+        // Without an id there is nothing to send back, so no buttons.
+        row.id = None;
+        assert!(row_buttons(&row).is_empty());
+
+        let options: Vec<ChoiceOption> = (0..10)
+            .map(|i| ChoiceOption {
+                id: format!("o{i}"),
+                label: format!("O{i}"),
+            })
+            .collect();
+        assert_eq!(choice_options(&options).len(), MAX_CHOICE_OPTIONS);
+        assert_eq!(choice_options(&options[..2]).len(), 2);
     }
 
     #[test]

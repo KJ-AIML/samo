@@ -13,8 +13,14 @@ pub enum HostMsg {
     },
     /// The user flipped a switch. The helper acts, then reports the result in its next `view`; it may refuse.
     Setting { key: String, value: bool },
-    /// The user pressed a button.
-    Action { id: String },
+    /// The user pressed a button; `row` names the row, for a row's buttons.
+    Action {
+        id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        row: Option<String>,
+    },
+    /// The user picked an option of a `choice`.
+    Choice { key: String, value: String },
     /// Whether the extension's page is on screen, so the helper can skip pop-ups the user would see anyway.
     Visible { page: bool },
     /// Samo is stopping the helper; it should exit within 2 s.
@@ -26,9 +32,13 @@ pub enum HostMsg {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum HelperMsg {
     /// The first thing a helper says, within 5 s.
-    Hello { protocol: u32 },
+    Hello {
+        protocol: u32,
+    },
     /// The whole page; it replaces the last one.
-    View { sections: Vec<Widget> },
+    View {
+        sections: Vec<Widget>,
+    },
     /// How many things wait for the user (shown beside Samo's menu bar figure); `0` clears it. `summary` is the
     /// quick panel's line, and `meter`, if any, a small load bar at its end.
     Badge {
@@ -57,6 +67,9 @@ pub enum HelperMsg {
         #[serde(default)]
         message: String,
     },
+    /// A capture is starting: Samo hides its own windows until `captured`, so they aren't in the shot.
+    Capturing,
+    Captured,
 }
 
 /// A small load bar on an extension's quick-panel line: a short label and a share, `0..=1`. Unknown lights
@@ -91,7 +104,7 @@ pub fn encode<T: Serialize>(msg: &T) -> Result<String, ProtocolError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ButtonKind, Lamp, NoteKind, RowItem, rows_in};
+    use crate::{ButtonKind, ChoiceOption, Lamp, NoteKind, RowAction, RowItem, rows_in};
     use samo_primitives::{Reading, UnsupportedReason};
 
     fn every_widget() -> Vec<Widget> {
@@ -118,13 +131,35 @@ mod tests {
                 note: Some("reset at 18:40".into()),
             },
             Widget::Rows {
-                items: vec![RowItem {
-                    lamp: Lamp::NeedsYou,
-                    title: "samo".into(),
-                    detail: "permission: Bash".into(),
-                    trailing: "12.3k".into(),
-                    tag: Some("dev".into()),
-                }],
+                items: vec![
+                    RowItem {
+                        id: None,
+                        lamp: Lamp::NeedsYou,
+                        title: "samo".into(),
+                        detail: "permission: Bash".into(),
+                        trailing: "12.3k".into(),
+                        tag: Some("dev".into()),
+                        actions: Vec::new(),
+                    },
+                    RowItem {
+                        id: Some("shot-1".into()),
+                        lamp: Lamp::Done,
+                        title: "Shot 2026-11-01 at 21.35.12.png".into(),
+                        detail: "2.1 MB · 21:35".into(),
+                        trailing: String::new(),
+                        tag: None,
+                        actions: vec![
+                            RowAction {
+                                id: "copy".into(),
+                                label: "Copy".into(),
+                            },
+                            RowAction {
+                                id: "pin".into(),
+                                label: "Pin".into(),
+                            },
+                        ],
+                    },
+                ],
             },
             Widget::Switch {
                 key: "connect".into(),
@@ -141,6 +176,21 @@ mod tests {
                 text: "Something went wrong".into(),
                 kind: NoteKind::Error,
             },
+            Widget::Choice {
+                key: "after".into(),
+                label: "After a capture".into(),
+                options: vec![
+                    ChoiceOption {
+                        id: "copy".into(),
+                        label: "Copy".into(),
+                    },
+                    ChoiceOption {
+                        id: "both".into(),
+                        label: "Copy and save".into(),
+                    },
+                ],
+                selected: "both".into(),
+            },
         ]
     }
 
@@ -156,7 +206,18 @@ mod tests {
                 key: "connect".into(),
                 value: true,
             },
-            HostMsg::Action { id: "ping".into() },
+            HostMsg::Action {
+                id: "ping".into(),
+                row: None,
+            },
+            HostMsg::Action {
+                id: "copy".into(),
+                row: Some("shot-1".into()),
+            },
+            HostMsg::Choice {
+                key: "after".into(),
+                value: "copy".into(),
+            },
             HostMsg::Visible { page: false },
             HostMsg::Shutdown,
         ];
@@ -198,12 +259,43 @@ mod tests {
                 ok: false,
                 message: "running in another copy of Samo".into(),
             },
+            HelperMsg::Capturing,
+            HelperMsg::Captured,
         ];
         for msg in helper {
             let line = encode(&msg).map_err(|e| e.to_string())?;
             assert!(!line.contains('\n'), "{line}");
             assert_eq!(decode_helper_line(&line).map_err(|e| e.to_string())?, msg);
         }
+        Ok(())
+    }
+
+    #[test]
+    fn old_messages_still_parse() -> Result<(), String> {
+        // What 0.2.0's helpers and hosts send, without any of protocol 1's later fields.
+        assert_eq!(
+            decode_host_line(r#"{"type":"action","id":"ping"}"#).map_err(|e| e.to_string())?,
+            HostMsg::Action {
+                id: "ping".into(),
+                row: None
+            }
+        );
+        let view = r#"{"type":"view","sections":[{"widget":"rows","items":[{"lamp":"done","title":"t"}]}]}"#;
+        let HelperMsg::View { sections } = decode_helper_line(view).map_err(|e| e.to_string())?
+        else {
+            return Err("not a view".into());
+        };
+        let Some(Widget::Rows { items }) = sections.first() else {
+            return Err("not rows".into());
+        };
+        assert_eq!((items[0].id.clone(), items[0].actions.len()), (None, 0));
+        // And what they don't use is left out when encoding, so an old reader sees what it always saw.
+        let row = encode(&HostMsg::Action {
+            id: "ping".into(),
+            row: None,
+        })
+        .map_err(|e| e.to_string())?;
+        assert_eq!(row, r#"{"type":"action","id":"ping"}"#);
         Ok(())
     }
 
@@ -258,7 +350,7 @@ mod tests {
 
     #[test]
     fn rows_are_counted() {
-        assert_eq!(rows_in(&every_widget()), 8);
+        assert_eq!(rows_in(&every_widget()), 10);
         assert_eq!(rows_in(&[Widget::Rows { items: vec![] }]), 1);
     }
 }

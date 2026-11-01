@@ -284,6 +284,7 @@ mod tests {
             badge: 0,
             badge_summary: String::new(),
             badge_meter: None,
+            capturing: false,
         }
     }
 

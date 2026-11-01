@@ -92,6 +92,8 @@ pub(crate) struct Runtime {
     pub badge_meter: Option<BadgeMeter>,
     pub control: Option<Sender<Event>>,
     pub thread: Option<JoinHandle<()>>,
+    /// Between its `capturing` and `captured`: Samo hides its own windows.
+    pub capturing: bool,
 }
 
 impl Inner {
@@ -239,6 +241,7 @@ impl Host {
                 badge_meter: None,
                 control: None,
                 thread: None,
+                capturing: false,
             });
         }
 
@@ -364,6 +367,7 @@ impl Host {
                     } else {
                         None
                     },
+                    capturing: rt.capturing,
                 })
                 .collect(),
             problems: state.problems.clone(),
@@ -403,7 +407,35 @@ impl Host {
 
     /// The user pressed one of the extension's buttons.
     pub fn action(&self, slot: ExtSlot, id: &str) {
-        self.send(slot, HostMsg::Action { id: id.to_string() });
+        self.send(
+            slot,
+            HostMsg::Action {
+                id: id.to_string(),
+                row: None,
+            },
+        );
+    }
+
+    /// The user pressed one of a row's buttons.
+    pub fn row_action(&self, slot: ExtSlot, row: &str, id: &str) {
+        self.send(
+            slot,
+            HostMsg::Action {
+                id: id.to_string(),
+                row: Some(row.to_string()),
+            },
+        );
+    }
+
+    /// The user picked an option of one of the extension's choices.
+    pub fn choice(&self, slot: ExtSlot, key: &str, value: &str) {
+        self.send(
+            slot,
+            HostMsg::Choice {
+                key: key.to_string(),
+                value: value.to_string(),
+            },
+        );
     }
 
     /// Whether the extension's page is on screen.

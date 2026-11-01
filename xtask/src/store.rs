@@ -547,6 +547,10 @@ mod tests {
                 undo: "nothing".into(),
             }],
             settings: Vec::new(),
+            windows: None,
+            permissions: Vec::new(),
+            min_macos: None,
+            limits: None,
         }
     }
 

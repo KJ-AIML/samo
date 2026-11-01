@@ -40,6 +40,8 @@ pub struct ExtView {
     pub badge_summary: String,
     /// A small load bar for the quick panel's line, if the extension sends one.
     pub badge_meter: Option<BadgeMeter>,
+    /// It is capturing the screen: Samo hides its own windows until it says `captured`.
+    pub capturing: bool,
 }
 
 /// Every installed extension, copied out for one render.

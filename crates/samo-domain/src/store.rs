@@ -661,6 +661,10 @@ mod tests {
             summary: "Every widget".into(),
             changes: vec![change()],
             settings: Vec::new(),
+            windows: None,
+            permissions: Vec::new(),
+            min_macos: None,
+            limits: None,
         };
         let l = listing();
         manifest_matches(&manifest, &l).map_err(|e| e.to_string())?;

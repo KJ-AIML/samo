@@ -7,11 +7,17 @@ mod manifest;
 mod message;
 mod widget;
 
-pub use manifest::{Change, Manifest, SettingDecl, valid_id, valid_version};
+pub use manifest::{
+    Change, KNOWN_PERMISSIONS, Limits, MAX_CPU_PCT, MAX_MEMORY_MB, Manifest, SettingDecl, valid_id,
+    valid_macos, valid_version,
+};
 pub use message::{
     BadgeMeter, HelperMsg, HostMsg, PopupKind, decode_helper_line, decode_host_line, encode,
 };
-pub use widget::{ButtonKind, Lamp, NoteKind, RowItem, Widget, rows_in};
+pub use widget::{
+    ButtonKind, ChoiceOption, Lamp, MAX_CHOICE_OPTIONS, MAX_ROW_ACTIONS, NoteKind, RowAction,
+    RowItem, Widget, rows_in,
+};
 
 /// The protocol version this crate speaks. A helper says it in `hello`; a manifest names it.
 pub const PROTOCOL_VERSION: u32 = 1;
