@@ -20,10 +20,10 @@ use gpui::{
 };
 use std::time::Duration;
 
-/// The card's size; the window is larger by `SHADOW_PAD` on each side so its shadow isn't cut off.
+/// The card's size, which is also the window's: macOS draws the shadow, following the card's rounded shape. (A
+/// shadow drawn by Samo inside a larger transparent window was cut off at the window's edge and showed as a box.)
 pub const POPUP_W: f32 = 340.0;
 pub const POPUP_H: f32 = 84.0;
-const SHADOW_PAD: f32 = 16.0;
 /// How long a pop-up stays before it fades, unless the pointer is on it.
 const SHOWN_FOR: Duration = Duration::from_secs(6);
 /// While the pointer is on it, it is looked at again this often…
@@ -140,11 +140,8 @@ pub fn show(popup: Popup, cx: &mut App) {
         let opened = cx.open_window(
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(Bounds {
-                    origin: point(px(x - SHADOW_PAD), px(y - SHADOW_PAD)),
-                    size: size(
-                        px(POPUP_W + 2.0 * SHADOW_PAD),
-                        px(POPUP_H + 2.0 * SHADOW_PAD),
-                    ),
+                    origin: point(px(x), px(y)),
+                    size: size(px(POPUP_W), px(POPUP_H)),
                 })),
                 titlebar: None,
                 // Never take the keyboard: the panel doesn't activate Samo and isn't made key.
@@ -222,10 +219,21 @@ pub fn should_show(slot: samo_extensions::ExtSlot, looking: Option<(NavSection, 
 }
 
 /// Hides the pop-up showing, if any.
+/// Hides the pop-up showing, if any. Not from the pop-up's own event handlers: gpui can't reach a window while it
+/// is handling one of its events, so those use `close_from_inside`.
 pub fn hide(cx: &mut App) {
     if let Some(handle) = cx.global_mut::<AppState>().popup.take() {
         let _ = handle.update(cx, |_, window, _| window.remove_window());
     }
+}
+
+/// Closes the pop-up from one of its own event handlers (the close button, a click on the card).
+fn close_from_inside(window: &mut Window, cx: &mut App) {
+    let state = cx.global_mut::<AppState>();
+    state.popup = None;
+    // Any hide timer still running belongs to a pop-up that is gone.
+    state.popup_gen = state.popup_gen.wrapping_add(1);
+    window.remove_window();
 }
 
 pub struct PopupView {
@@ -317,9 +325,9 @@ impl Render for PopupView {
                         .hover(|s| s.bg(pal.hover))
                         .cursor_pointer()
                         .child(icon("close", 11.0, pal.text_2))
-                        .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                        .on_mouse_down(MouseButton::Left, |_, window, cx| {
                             cx.stop_propagation();
-                            hide(cx);
+                            close_from_inside(window, cx);
                         }),
                 )
             });
@@ -338,7 +346,6 @@ impl Render for PopupView {
             .bg(pal.frame)
             .border_1()
             .border_color(pal.hairline_strong)
-            .shadow(shadow_pop())
             .overflow_hidden()
             .text_color(pal.text)
             .cursor_pointer()
@@ -348,9 +355,9 @@ impl Render for PopupView {
             }))
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(|this, _, _, cx| {
+                cx.listener(|this, _, window, cx| {
                     let target = this.popup.target;
-                    hide(cx);
+                    close_from_inside(window, cx);
                     open_main(cx, target);
                 }),
             )
@@ -408,7 +415,7 @@ impl Render for PopupView {
         .size_full();
 
         let leaving = self.leaving;
-        div().size_full().p(px(SHADOW_PAD)).child(watch_exit).child(
+        div().size_full().child(watch_exit).child(
             div()
                 .size_full()
                 .relative()
