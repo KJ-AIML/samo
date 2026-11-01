@@ -85,7 +85,12 @@ fn publish_args(root: &Path, args: &[String]) -> Result<store::PublishArgs, Stri
     }
     let store =
         store.ok_or("usage: cargo run -p xtask -- ext-publish --store <samo-extensions folder>")?;
+    let trusted = match &test_key {
+        Some(_) => None,
+        None => Some(store::trusted_key(root)?),
+    };
     Ok(store::PublishArgs {
+        trusted,
         out: out.unwrap_or_else(|| store.join("dist")),
         store,
         packages,

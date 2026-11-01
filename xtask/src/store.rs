@@ -18,6 +18,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 pub const KEYCHAIN_SERVICE: &str = "dev.talvyn.samo.store";
+/// Where Samo's trusted store key is compiled in.
+pub const TRUSTED_KEY_FILE: &str = "crates/samo-extensions/src/store/mod.rs";
 pub const KEYCHAIN_ACCOUNT: &str = "catalog-signing";
 
 fn io<E: std::fmt::Display>(what: &str) -> impl Fn(E) -> String + '_ {
@@ -44,7 +46,7 @@ pub fn keygen() -> Result<(), String> {
     )
     .map_err(io("couldn't store the key in your Keychain"))?;
     println!("The store's signing key is in your Keychain ({KEYCHAIN_SERVICE}).");
-    println!("Its public key, for STORE_PUBLIC_KEY in crates/samo-extensions/src/store.rs:");
+    println!("Its public key, for STORE_PUBLIC_KEY in {TRUSTED_KEY_FILE}:");
     println!("{}", hex(pair.public_key().as_ref()));
     Ok(())
 }
@@ -283,6 +285,8 @@ fn samo_version(zip: &Path, scratch: &Path) -> Result<String, String> {
 }
 
 pub struct PublishArgs {
+    /// The key Samo trusts (`STORE_PUBLIC_KEY`); signing with another is refused. `None` with a test key.
+    pub trusted: Option<[u8; 32]>,
     pub store: PathBuf,
     pub packages: PathBuf,
     pub samo: Option<PathBuf>,
@@ -449,6 +453,16 @@ pub fn publish(args: &PublishArgs) -> Result<(), String> {
     let pair = Ed25519KeyPair::from_pkcs8(&pkcs8)
         .or_else(|_| Ed25519KeyPair::from_pkcs8_maybe_unchecked(&pkcs8))
         .map_err(|_| "the signing key can't be read")?;
+    if let Some(trusted) = args.trusted
+        && trusted != pair.public_key().as_ref()
+    {
+        return Err(format!(
+            "the signing key ({}) isn't the one Samo trusts ({}, STORE_PUBLIC_KEY in {TRUSTED_KEY_FILE}); \
+             Samo would refuse this catalog",
+            hex(pair.public_key().as_ref()),
+            hex(&trusted)
+        ));
+    }
     let sig = hex(pair.sign(&bytes).as_ref());
     copy("catalog.json", &bytes)?;
     copy("catalog.json.sig", sig.as_bytes())?;
@@ -464,6 +478,28 @@ pub fn publish(args: &PublishArgs) -> Result<(), String> {
         out.display()
     );
     Ok(())
+}
+
+/// `STORE_PUBLIC_KEY` from Samo's source: the first 64 hex characters in quotes after its name.
+pub fn key_in_source(text: &str) -> Option<[u8; 32]> {
+    let after = text.split_once("pub const STORE_PUBLIC_KEY")?.1;
+    let quoted = after.split('"').nth(1)?;
+    let bytes = samo_domain::store::unhex(quoted.trim())?;
+    let mut key = [0u8; 32];
+    (bytes.len() == 32).then(|| key.copy_from_slice(&bytes))?;
+    Some(key)
+}
+
+/// The key the Samo in `root` trusts.
+pub fn trusted_key(root: &Path) -> Result<[u8; 32], String> {
+    let text = fs::read_to_string(root.join(TRUSTED_KEY_FILE)).map_err(io(TRUSTED_KEY_FILE))?;
+    match key_in_source(&text) {
+        Some(key) if key != [0u8; 32] => Ok(key),
+        Some(_) => Err(format!(
+            "STORE_PUBLIC_KEY in {TRUSTED_KEY_FILE} is still all zeros; run ext-keygen and paste its public key"
+        )),
+        None => Err(format!("no STORE_PUBLIC_KEY in {TRUSTED_KEY_FILE}")),
+    }
 }
 
 /// Reads `dist/` back and checks it all, exactly as Samo would.
@@ -607,6 +643,7 @@ mod tests {
         fs::write(dir.join("test-key.pk8"), key.as_ref()).map_err(|e| e.to_string())?;
         let out = dir.join("dist");
         publish(&PublishArgs {
+            trusted: None,
             store: dir.join("store"),
             packages,
             samo: None,
@@ -629,6 +666,48 @@ mod tests {
         }
         fs::write(&p, bytes).map_err(|e| e.to_string())?;
         assert!(verify_written(&out, &public).is_err());
+        let _ = fs::remove_dir_all(&dir);
+        Ok(())
+    }
+
+    #[test]
+    fn publish_refuses_a_key_samo_doesnt_trust() -> Result<(), String> {
+        let src = "/// doc\npub const STORE_PUBLIC_KEY: &str =\n    \"54fdd32a521a6b5c0d68e14becad464ee9b64bf82e06d5b2c8e6ba2d6beb4b27\";\n";
+        let key = key_in_source(src).ok_or("no key")?;
+        assert_eq!(
+            hex(&key),
+            "54fdd32a521a6b5c0d68e14becad464ee9b64bf82e06d5b2c8e6ba2d6beb4b27"
+        );
+        assert_eq!(
+            key_in_source("pub const STORE_PUBLIC_KEY: &str = \"abc\";"),
+            None
+        );
+        // This repository's Samo trusts a real key.
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .ok_or("no root")?;
+        assert!(trusted_key(root).is_ok());
+
+        let dir = std::env::temp_dir().join(format!("samo-publish-trust-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("store/extensions")).map_err(|e| e.to_string())?;
+        fs::create_dir_all(dir.join("packages")).map_err(|e| e.to_string())?;
+        let pk8 = Ed25519KeyPair::generate_pkcs8(&SystemRandom::new()).map_err(|_| "key")?;
+        fs::write(dir.join("k.pk8"), pk8.as_ref()).map_err(|e| e.to_string())?;
+        let result = publish(&PublishArgs {
+            trusted: Some(key),
+            store: dir.join("store"),
+            packages: dir.join("packages"),
+            samo: None,
+            out: dir.join("dist"),
+            test_key: Some(dir.join("k.pk8")),
+            published_at: "2026-11-02T10:00:00Z".into(),
+        });
+        assert!(result.is_err_and(|e| e.contains("isn't the one Samo trusts")));
+        assert!(
+            !dir.join("dist/catalog.json.sig").exists(),
+            "nothing is signed"
+        );
         let _ = fs::remove_dir_all(&dir);
         Ok(())
     }

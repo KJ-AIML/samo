@@ -22,10 +22,11 @@ use std::sync::{Arc, Mutex};
 pub const STORE_URL: &str =
     "https://github.com/KJ-AIML/samo-extensions/releases/download/store/catalog.json";
 
-/// The public half of KJ's store key (`cargo run -p xtask -- ext-keygen`). All zeros until KJ makes the key: a
-/// Samo built with it trusts no catalog at all.
+/// The public half of KJ's store key, made by `cargo run -p xtask -- ext-keygen` on 2026-11-01; the private half
+/// never leaves KJ's login Keychain. Changing it means releasing a new Samo, and `ext-publish` refuses to sign with
+/// any other key.
 pub const STORE_PUBLIC_KEY: &str =
-    "0000000000000000000000000000000000000000000000000000000000000000";
+    "54fdd32a521a6b5c0d68e14becad464ee9b64bf82e06d5b2c8e6ba2d6beb4b27";
 
 /// The longest a catalog's signature file may be: 128 hex characters and a newline or two.
 const SIG_CAP: u64 = 256;
@@ -291,6 +292,13 @@ mod tests {
             l.icon = Some(icon);
             self.shop.publish(&catalog(at, vec![l]))
         }
+    }
+
+    #[test]
+    fn store_public_key_is_a_real_key() {
+        let key = unhex(STORE_PUBLIC_KEY).unwrap_or_default();
+        assert_eq!(key.len(), 32);
+        assert!(key.iter().any(|&b| b != 0), "STORE_PUBLIC_KEY is unset");
     }
 
     #[test]
