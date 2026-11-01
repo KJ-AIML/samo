@@ -17,6 +17,10 @@ toml.workspace = true
 sysinfo.workspace = true
 chrono.workspace = true
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+objc2.workspace = true
+objc2-foundation = { workspace = true, features = ["NSArray", "NSDictionary", "NSString", "NSValue", "NSObject", "NSEnumerator"] }
+objc2-core-foundation = { version = "0.3.2", default-features = false, features = ["std", "objc2", "CFArray"] }
+objc2-core-graphics = { version = "0.3.2", default-features = false, features = ["std", "CGWindow"] }
 ureq = { version = "3", default-features = false, features = ["rustls"] }
 
 [dev-dependencies]

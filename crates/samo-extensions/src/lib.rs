@@ -16,7 +16,9 @@ mod registry;
 mod state;
 pub mod store;
 mod supervisor;
+mod tree;
 pub mod update;
+pub mod windows;
 pub mod worker;
 
 pub use error::InstallError;

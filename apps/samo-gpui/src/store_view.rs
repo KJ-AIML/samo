@@ -293,6 +293,9 @@ mod tests {
             badge_summary: String::new(),
             badge_meter: None,
             capturing: false,
+            windows: None,
+            permissions: Vec::new(),
+            limits: None,
         }
     }
 
