@@ -1,5 +1,6 @@
 mod commands_complete;
 mod layers;
+mod network;
 mod purity;
 mod rls;
 
@@ -49,24 +50,28 @@ fn run() -> Result<(), String> {
     }
 
     let root = workspace_root()?;
-    println!("==> [xtask] gate 1/5: layers");
+    println!("==> [xtask] gate 1/6: layers");
     layers::check_layers(&root)?;
     println!("    layers: ok");
 
-    println!("==> [xtask] gate 2/5: purity");
+    println!("==> [xtask] gate 2/6: purity");
     purity::check_purity(&root)?;
     println!("    purity: ok");
 
-    println!("==> [xtask] gate 3/5: rls");
+    println!("==> [xtask] gate 3/6: rls");
     rls::check_rls(&root)?;
     println!("    rls: ok");
 
-    println!("==> [xtask] gate 4/5: commands-complete");
+    println!("==> [xtask] gate 4/6: commands-complete");
     commands_complete::check_commands_complete(&root)?;
     println!("    commands-complete: ok");
 
+    println!("==> [xtask] gate 5/6: network");
+    network::check_network(&root)?;
+    println!("    network: ok");
+
     if env::var("XTASK_SKIP_TESTS").as_deref() != Ok("1") {
-        println!("==> [xtask] gate 5/5: tests");
+        println!("==> [xtask] gate 6/6: tests");
         run_tests(&root)?;
         println!("    tests: ok");
     }
