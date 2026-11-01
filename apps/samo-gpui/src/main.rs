@@ -143,7 +143,21 @@ fn quit(cx: &mut App) {
 }
 
 /// Brings the main window forward (opening it again if it was closed), optionally on a page.
+///
+/// Samo is made the active app first, and the window is opened on the next turn of the run loop, after the
+/// click that asked for it (in the quick panel or a pop-up) has finished. Creating a window while Samo isn't
+/// active makes Cocoa send the previous key window a spurious "became key" message. gpui 0.2.2 answers it by
+/// resigning that window while holding its lock, the resign calls back into the same handler, and Samo hung (10 to
+/// 50 seconds measured: the spinning cursor) until macOS gave up.
 fn open_main(cx: &mut App, nav: Option<NavSection>) {
+    cx.activate(true);
+    cx.spawn(async move |cx| {
+        let _ = cx.update(|cx| open_main_now(cx, nav));
+    })
+    .detach();
+}
+
+fn open_main_now(cx: &mut App, nav: Option<NavSection>) {
     if let Some(handle) = cx.global::<AppState>().main {
         let reused = handle
             .update(cx, |view, window, cx| {
