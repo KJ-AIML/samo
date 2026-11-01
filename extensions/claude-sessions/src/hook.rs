@@ -16,8 +16,10 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 /// The most hook input read.
 pub const MAX_INPUT: u64 = 1024 * 1024;
-/// How long to wait for Claude Code's input.
-const READ_WAIT: Duration = Duration::from_millis(300);
+/// How long to wait for Claude Code's input. Claude Code writes it as it starts the hook, so this only matters
+/// when something holds stdin open; it leaves room under the 500 ms promise for starting the process on a busy
+/// machine.
+const READ_WAIT: Duration = Duration::from_millis(200);
 /// Everything is done by then, or given up.
 const DEADLINE: Duration = Duration::from_millis(450);
 
@@ -81,7 +83,7 @@ pub fn record(dir: &Path, event: &HookEvent, at_ms: i64, started: Instant) {
             let _ = fs::remove_file(dir.join(format!("{}.lock", event.session_id)));
         }
         Apply::Write(mut next) => {
-            if next.claude.is_none() && started.elapsed() < Duration::from_millis(300) {
+            if next.claude.is_none() && started.elapsed() < Duration::from_millis(250) {
                 next.claude = ancestry::claude_identity(&ancestry::ancestors(6));
             }
             let Ok(text) = serde_json::to_vec(&next) else {

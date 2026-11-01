@@ -13,6 +13,9 @@
   - **Wording:** Claude Code sends `PermissionRequest` for its own `AskUserQuestion` and `ExitPlanMode` tools.
     These now read as a question and a plan to review.
   - **The spinning cursor** didn't happen again after the close fix: hovering and clicking stayed responsive.
+  - **The hook's 500 ms promise (R9):** on GitHub's busy runner the hook took 535 ms when stdin was held open,
+    because 300 ms of waiting for input plus starting the process ran over. It now waits 200 ms; Claude Code
+    writes the input as it starts the hook, so that is still generous.
 - **Verification:** `scripts/ci-local.sh` (168 tests). Live check: a pop-up from a real hook, held under the
   pointer, then closed with one click on ×; no box; Samo responsive throughout.
 - **Versions:** Samo 0.1.1, Claude Sessions 0.1.1.
