@@ -10,4 +10,5 @@ workspace = true
 [dependencies]
 samo-primitives.workspace = true
 samo-blueprint.workspace = true
+samo-ext-protocol.workspace = true
 serde.workspace = true

@@ -4419,6 +4419,7 @@ name = "samo-domain"
 version = "0.1.0"
 dependencies = [
  "samo-blueprint",
+ "samo-ext-protocol",
  "samo-primitives",
  "serde",
 ]

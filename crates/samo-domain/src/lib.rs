@@ -1,5 +1,6 @@
 pub mod cleanup;
 pub mod disk;
+pub mod extensions;
 pub mod packing;
 pub mod process;
 pub mod telemetry;
