@@ -150,6 +150,11 @@ impl StoreWorker {
         });
     }
 
+    /// Samo's prepared update couldn't be handed over; Settings says why and offers it again.
+    pub fn samo_failed(&self, why: String) {
+        self.shared.change(|v| v.samo = SamoUpdate::Failed(why));
+    }
+
     /// The user dismissed a failed job's message.
     pub fn dismiss(&self, id: &str) {
         self.shared.change(|v| {

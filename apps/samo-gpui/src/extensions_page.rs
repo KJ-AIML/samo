@@ -1107,7 +1107,8 @@ fn paragraph(text: &str) -> Div {
         .child(text.to_string())
 }
 
-fn block(b: Block) -> AnyElement {
+/// A description block: a paragraph, or bullets.
+pub(crate) fn block(b: Block) -> AnyElement {
     let pal = p();
     match b {
         Block::Para(text) => paragraph(&text).into_any_element(),

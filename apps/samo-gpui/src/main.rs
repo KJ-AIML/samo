@@ -16,6 +16,7 @@ mod performance;
 mod popup;
 mod processes;
 mod projects;
+mod settings_page;
 mod shell;
 mod storage;
 mod store_view;
@@ -58,6 +59,8 @@ struct AppState {
     /// pop-up replaced it.
     popup: Option<WindowHandle<popup::PopupView>>,
     popup_gen: u64,
+    /// A new Samo has been started to finish an update; this one is quitting.
+    updating: bool,
 }
 
 impl Global for AppState {}
@@ -158,6 +161,34 @@ fn show_extension_popups(cx: &mut App) {
 }
 
 /// Quits Samo, stopping extensions' helpers first (each gets 2 s to finish).
+/// Once the worker has a new Samo downloaded and checked, starts its `--finish-update` and quits (R14).
+fn finish_samo_update(cx: &mut App) {
+    let state = cx.global::<AppState>();
+    if state.updating {
+        return;
+    }
+    let Some(store) = state.hub.store.get().cloned() else {
+        return;
+    };
+    let samo_extensions::worker::SamoUpdate::Ready(prepared) = store.view().samo else {
+        return;
+    };
+    let bundle = env::current_exe()
+        .map_err(|e| e.to_string())
+        .and_then(|exe| samo_extensions::update::can_update(&exe).map_err(|e| e.to_string()));
+    let started = bundle.and_then(|b| finish_update::launch(&prepared, &b.path));
+    match started {
+        Ok(()) => {
+            cx.global_mut::<AppState>().updating = true;
+            quit(cx);
+        }
+        Err(why) => store.samo_failed(format!(
+            "Couldn't restart into Samo {}: {why}",
+            prepared.version
+        )),
+    }
+}
+
 fn quit(cx: &mut App) {
     if let Some(host) = cx.global::<AppState>().hub.ext.get() {
         host.shutdown_all();
@@ -235,6 +266,8 @@ enum NavSection {
     Extensions,
     /// One extension's own page.
     Extension(samo_extensions::ExtSlot),
+    /// Samo's settings: Updates.
+    Settings,
 }
 
 impl NavSection {
@@ -255,6 +288,7 @@ impl NavSection {
             Self::Performance => "Performance",
             Self::Extensions => "Extensions",
             Self::Extension(_) => "Extension",
+            Self::Settings => "Settings",
         }
     }
 
@@ -274,6 +308,7 @@ impl NavSection {
             Self::Processes => "pulse",
             Self::Performance => "chip",
             Self::Extensions | Self::Extension(_) => "plug",
+            Self::Settings => "gear",
         }
     }
 
@@ -282,7 +317,7 @@ impl NavSection {
         let wanted = name.trim().to_ascii_lowercase();
         NavSection::ALL
             .into_iter()
-            .chain([NavSection::Extensions])
+            .chain([NavSection::Extensions, NavSection::Settings])
             .find(|s| s.title().to_ascii_lowercase() == wanted)
     }
 }
@@ -655,6 +690,7 @@ impl SamoWorkspaceApp {
     fn nav_clicked(&mut self, section: NavSection, cx: &mut Context<Self>) {
         match section {
             NavSection::Extensions => self.store_opened_by_click(cx),
+            NavSection::Settings => self.settings_opened_by_click(cx),
             other => self.set_nav(other, cx),
         }
     }
@@ -884,6 +920,7 @@ impl Render for SamoWorkspaceApp {
             NavSection::Performance => self.render_performance(&frame),
             NavSection::Extensions => self.render_extensions(&frame, cx),
             NavSection::Extension(slot) => self.render_extension(slot, &frame, cx),
+            NavSection::Settings => self.render_settings(&frame, cx),
         };
 
         div()
@@ -952,6 +989,7 @@ fn main() {
             menubar: None,
             popup: None,
             popup_gen: 0,
+            updating: false,
         });
         let menubar = menubar::MenuBar::install(cx);
         cx.global_mut::<AppState>().menubar = menubar;
@@ -964,6 +1002,7 @@ fn main() {
                     cx.refresh_windows();
                     menubar::refresh(cx);
                     show_extension_popups(cx);
+                    finish_samo_update(cx);
                 });
                 if drawn.is_err() {
                     break;

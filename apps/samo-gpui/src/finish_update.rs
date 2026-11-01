@@ -25,7 +25,6 @@ const WAIT_FOR_QUIT: Duration = Duration::from_secs(30);
 
 /// Starts the new app's binary in update mode, in its own process group so it outlives this Samo. The caller
 /// quits right after.
-#[allow(dead_code)] // Settings → Updates calls it (the next task).
 pub fn launch(prepared: &PreparedUpdate, old_app: &Path) -> Result<(), String> {
     let me =
         inspect_process_identity(std::process::id()).ok_or("Samo couldn't read its own process")?;

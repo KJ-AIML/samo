@@ -192,7 +192,9 @@ impl SamoWorkspaceApp {
                         "All extensions".to_string(),
                         updates_badge(frame),
                         cx,
-                    )),
+                    ))
+                    .child(rail_label("Samo", false))
+                    .child(self.nav_link(NavSection::Settings, "Settings".to_string(), None, cx)),
             )
             .child(self.side_foot(frame))
             .into_any_element()
@@ -309,7 +311,10 @@ impl SamoWorkspaceApp {
                                     .filter(|e| e.on)
                                     .map(|e| (NavSection::Extension(e.slot), e.name.clone())),
                             )
-                            .chain([(NavSection::Extensions, "All extensions".to_string())])
+                            .chain([
+                                (NavSection::Extensions, "All extensions".to_string()),
+                                (NavSection::Settings, "Settings".to_string()),
+                            ])
                             .map(|(section, name)| {
                                 rail_button(
                                     SharedString::from(format!("rail-{}", section.key())),
