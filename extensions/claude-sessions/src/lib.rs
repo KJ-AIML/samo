@@ -12,3 +12,5 @@ pub mod paths;
 pub mod sessions;
 pub mod settings;
 pub mod settings_io;
+pub mod transcripts;
+pub mod usage;
