@@ -1,3 +1,5 @@
+pub mod http;
+
 use samo_primitives::{ErrorCode, SamoError, SamoResult};
 use samo_store::StorePool;
 use std::fs;
