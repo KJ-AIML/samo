@@ -445,7 +445,10 @@ pub fn publish(args: &PublishArgs) -> Result<(), String> {
                 .to_string()
         })?,
     };
-    let pair = Ed25519KeyPair::from_pkcs8(&pkcs8).map_err(|_| "the signing key can't be read")?;
+    // `ext-keygen` stores PKCS#8 v2; a test key from `openssl genpkey -algorithm ed25519` is v1.
+    let pair = Ed25519KeyPair::from_pkcs8(&pkcs8)
+        .or_else(|_| Ed25519KeyPair::from_pkcs8_maybe_unchecked(&pkcs8))
+        .map_err(|_| "the signing key can't be read")?;
     let sig = hex(pair.sign(&bytes).as_ref());
     copy("catalog.json", &bytes)?;
     copy("catalog.json.sig", sig.as_bytes())?;
