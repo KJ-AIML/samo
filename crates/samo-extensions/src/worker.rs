@@ -5,8 +5,10 @@
 use crate::Host;
 use crate::net::UserAction;
 use crate::store::{ImageKind, Store};
-use samo_domain::store::{Catalog, FileRef, PACKAGE_CAP};
+use crate::update::{PreparedUpdate, can_update, prepare_update, staging_root};
+use samo_domain::store::{Catalog, FileRef, PACKAGE_CAP, newer};
 use std::collections::{BTreeMap, HashMap};
+use std::path::PathBuf;
 use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
@@ -24,6 +26,21 @@ pub enum StoreJob {
         id: String,
         anyway: bool,
     },
+    /// Downloads and checks the catalog's Samo, to replace the one running from `current_exe`.
+    UpdateSamo {
+        current_exe: PathBuf,
+    },
+}
+
+/// Samo's own update, as Settings shows it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum SamoUpdate {
+    #[default]
+    Idle,
+    Preparing,
+    /// Checked and ready: Samo starts the new app's `--finish-update` and quits.
+    Ready(PreparedUpdate),
+    Failed(String),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -59,6 +76,7 @@ pub struct StoreView {
     pub images: Arc<HashMap<String, ImageResult>>,
     /// By extension id.
     pub jobs: BTreeMap<String, JobView>,
+    pub samo: SamoUpdate,
 }
 
 struct Shared {
@@ -192,6 +210,16 @@ fn run(store: &Store, host: &Host, s: &Shared, job: StoreJob, action: &UserActio
             }
         }
         StoreJob::Install(id) => install(store, host, s, &id, action),
+        StoreJob::UpdateSamo { current_exe } => {
+            s.change(|v| v.samo = SamoUpdate::Preparing);
+            let result = update_samo(store, s, &current_exe, action);
+            s.change(|v| {
+                v.samo = match result {
+                    Ok(ready) => SamoUpdate::Ready(ready),
+                    Err(why) => SamoUpdate::Failed(why),
+                }
+            });
+        }
         StoreJob::Uninstall { id, anyway } => {
             s.change(|v| {
                 v.jobs.insert(
@@ -292,4 +320,25 @@ fn install(store: &Store, host: &Host, s: &Shared, id: &str, action: &UserAction
         }),
         Err(e) => fail(format!("Couldn't install {}: {e}.", listing.name)),
     }
+}
+
+fn update_samo(
+    store: &Store,
+    s: &Shared,
+    current_exe: &std::path::Path,
+    action: &UserAction,
+) -> Result<PreparedUpdate, String> {
+    can_update(current_exe).map_err(|e| e.to_string())?;
+    let release = s
+        .view()
+        .catalog
+        .as_ref()
+        .and_then(|c| c.samo.clone())
+        .ok_or("The store doesn't offer a Samo download right now. Check again later")?;
+    if !newer(&release.version, env!("CARGO_PKG_VERSION")) {
+        return Err("You have the latest Samo".into());
+    }
+    let root = staging_root().ok_or("Samo can't find your home folder")?;
+    prepare_update(store, &release, action, &root)
+        .map_err(|e| format!("Couldn't get Samo {}: {e}", release.version))
 }

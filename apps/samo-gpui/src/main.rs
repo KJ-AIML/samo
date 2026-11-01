@@ -5,6 +5,7 @@ mod components;
 mod disk_view;
 mod ext_view;
 mod extensions_page;
+mod finish_update;
 mod hub;
 mod layout;
 mod live;
@@ -871,6 +872,10 @@ impl Render for SamoWorkspaceApp {
 }
 
 fn main() {
+    // The new Samo, finishing an update the old one prepared: no window, just the swap.
+    if let Some(code) = finish_update::from_args(&env::args().collect::<Vec<_>>()) {
+        std::process::exit(code);
+    }
     let app = Application::new().with_assets(assets::Assets);
     // Closing the window leaves Samo in the menu bar; the Dock icon brings the window back.
     app.on_reopen(|cx| open_main(cx, None));
