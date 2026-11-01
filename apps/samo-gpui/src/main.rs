@@ -18,6 +18,7 @@ mod processes;
 mod projects;
 mod shell;
 mod storage;
+mod text_input;
 mod theme;
 
 use disk_view::DiskView;
@@ -881,6 +882,7 @@ fn main() {
     app.on_reopen(|cx| open_main(cx, None));
     app.run(|cx: &mut App| {
         theme::init_fonts(cx);
+        text_input::bind_keys(cx);
         cx.on_action(|_: &Quit, cx| quit(cx));
         cx.on_action(|_: &ShowWindow, cx| open_main(cx, None));
         cx.bind_keys([
