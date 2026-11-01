@@ -4382,7 +4382,7 @@ dependencies = [
 
 [[package]]
 name = "samo-blueprint"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "samo-primitives",
  "serde",
@@ -4390,7 +4390,7 @@ dependencies = [
 
 [[package]]
 name = "samo-claude"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "chrono",
  "samo-ext-protocol",
@@ -4404,7 +4404,7 @@ dependencies = [
 
 [[package]]
 name = "samo-cli"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "samo-blueprint",
  "samo-domain",
@@ -4416,7 +4416,7 @@ dependencies = [
 
 [[package]]
 name = "samo-domain"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "samo-blueprint",
  "samo-ext-protocol",
@@ -4426,7 +4426,7 @@ dependencies = [
 
 [[package]]
 name = "samo-engine"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "chrono",
  "futures",
@@ -4452,7 +4452,7 @@ dependencies = [
 
 [[package]]
 name = "samo-ext-protocol"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "samo-primitives",
  "serde",
@@ -4463,7 +4463,7 @@ dependencies = [
 
 [[package]]
 name = "samo-extensions"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "chrono",
  "samo-domain",
@@ -4479,7 +4479,7 @@ dependencies = [
 
 [[package]]
 name = "samo-gpui"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "chrono",
  "futures",
@@ -4498,7 +4498,7 @@ dependencies = [
 
 [[package]]
 name = "samo-macos"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "chrono",
  "samo-blueprint",
@@ -4511,7 +4511,7 @@ dependencies = [
 
 [[package]]
 name = "samo-primitives"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "chrono",
  "serde",
@@ -4522,7 +4522,7 @@ dependencies = [
 
 [[package]]
 name = "samo-server"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "axum",
  "chrono",
@@ -4544,7 +4544,7 @@ dependencies = [
 
 [[package]]
 name = "samo-store"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "chrono",
  "samo-blueprint",
@@ -4560,7 +4560,7 @@ dependencies = [
 
 [[package]]
 name = "samo-testkit"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "samo-blueprint",
  "samo-domain",
@@ -6814,7 +6814,7 @@ checksum = "ec7a2a501ed189703dba8b08142f057e887dfc4b2cc4db2d343ac6376ba3e0b9"
 
 [[package]]
 name = "xtask"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "serde",
  "serde_json",
