@@ -7,6 +7,7 @@ private final class MemoryDisk: Disk {
     func makeFolder(_ url: URL) throws {}
     func exists(_ url: URL) -> Bool { files[url] != nil }
     func write(_ data: Data, to url: URL) throws { files[url] = data }
+    func replace(_ data: Data, at url: URL) throws { files[url] = data }
 }
 
 private func image() throws -> CGImage {

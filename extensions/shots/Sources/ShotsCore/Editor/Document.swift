@@ -32,6 +32,8 @@ public final class Document {
     private var undoStack: [Canvas] = []
     private var redoStack: [Canvas] = []
     private var exported = Canvas()
+    /// What the shot's own file holds: as captured, until Save writes the marks into it.
+    private var saved = Canvas()
     /// The canvas before a drag began.
     private var pending: Canvas?
     private var lastId = 0
@@ -46,10 +48,22 @@ public final class Document {
     /// Changed since it was last copied or saved. Undoing back to that point is clean again.
     public var dirty: Bool { canvas != exported }
 
-    /// It was just copied or saved, as it is now.
+    /// It was just copied, or saved elsewhere, as it is now.
     public func markExported() {
         exported = canvas
     }
+
+    /// It was just saved into the shot's own file, as it is now.
+    public func markSaved() {
+        exported = canvas
+        saved = canvas
+    }
+
+    /// The shot's own file shows exactly this.
+    public var matchesSaved: Bool { canvas == saved }
+
+    /// Nothing has been drawn, cropped or added: the shot as captured.
+    public var untouched: Bool { canvas == Canvas() }
 
     // MARK: Changes and history
 

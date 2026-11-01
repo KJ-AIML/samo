@@ -13,7 +13,10 @@ public protocol Clipboard {
 public protocol Disk {
     func makeFolder(_ url: URL) throws
     func exists(_ url: URL) -> Bool
+    /// Writes a new file; never over one.
     func write(_ data: Data, to url: URL) throws
+    /// Writes over `url`, all at once (Save in the editor, over the shot's own file).
+    func replace(_ data: Data, at url: URL) throws
 }
 
 public struct CaptureOutcome: Equatable {
@@ -64,10 +67,11 @@ public enum AfterCapture {
     ) -> CaptureOutcome {
         var outcome = CaptureOutcome(savedTo: nil, bytes: 0, copied: false, pinned: false, problems: [])
         let image = settings.retina ? shot.image : (Encoding.scaled(shot.image, by: 1 / max(shot.scale, 1)) ?? shot.image)
+        let density = settings.retina ? shot.scale : 1
         // Encoded once when the clipboard and the file both want PNG (30–70 ms a whole screen).
         var png: Data?
         if settings.after == .copy || settings.after == .both {
-            png = Encoding.data(image, format: .png)
+            png = Encoding.data(image, format: .png, scale: density)
             if let png, clipboard.put(png: png) {
                 outcome.copied = true
             } else {
@@ -77,7 +81,7 @@ public enum AfterCapture {
         if settings.after == .save || settings.after == .both {
             do {
                 let encoded = settings.format == .png ? png : nil
-                guard let data = encoded ?? Encoding.data(image, format: settings.format) else {
+                guard let data = encoded ?? Encoding.data(image, format: settings.format, scale: density) else {
                     throw CocoaError(.fileWriteUnknown)
                 }
                 try disk.makeFolder(settings.folderURL)
@@ -110,5 +114,8 @@ public struct FileDisk: Disk {
     }
     public func write(_ data: Data, to url: URL) throws {
         try data.write(to: url, options: .withoutOverwriting)
+    }
+    public func replace(_ data: Data, at url: URL) throws {
+        try data.write(to: url, options: .atomic)
     }
 }

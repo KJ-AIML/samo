@@ -1,12 +1,16 @@
 // Shots kept in memory only while a window shows them (R17), and none lost when Shots stops (R19): whatever is
-// still open and was never saved is saved as `… (unsaved).png`.
+// still open and was never saved is saved as `… (unsaved).png`, and so are edits not yet copied or saved, beside
+// the shot and never over it.
 
+import CoreGraphics
 import Foundation
 
 public final class ShotStore {
     private struct Entry {
         let shot: Shot
         var holders: Int
+        /// The editor's export while it has changes not yet copied or saved; `nil` when it has none.
+        var edits: (() -> CGImage?)?
     }
 
     private var entries: [ObjectIdentifier: Entry] = [:]
@@ -16,7 +20,12 @@ public final class ShotStore {
     /// A window now shows `shot`.
     public func retain(_ shot: Shot) {
         let key = ObjectIdentifier(shot)
-        entries[key, default: Entry(shot: shot, holders: 0)].holders += 1
+        entries[key, default: Entry(shot: shot, holders: 0, edits: nil)].holders += 1
+    }
+
+    /// An editor showing `shot` hands over how to get its unsaved edits, or `nil` when it closes.
+    public func setEdits(for shot: Shot, _ edits: (() -> CGImage?)?) {
+        entries[ObjectIdentifier(shot)]?.edits = edits
     }
 
     /// A window showing `shot` closed; the last one lets it go.
@@ -29,18 +38,30 @@ public final class ShotStore {
 
     public var live: Int { entries.count }
 
-    /// Saves every shown shot that was never saved, into the folder, as `<name> (unsaved).png`. Returns where.
+    /// Saves, as `<name> (unsaved).png`, every shown shot that was never saved (into the folder) and every
+    /// editor's unsaved edits (beside the shot's file, never over it). Returns where.
     @discardableResult
     public func saveUnsaved(settings: Settings, disk: Disk) -> [URL] {
         var saved: [URL] = []
-        for entry in entries.values where entry.shot.savedTo == nil {
-            guard let data = Encoding.data(entry.shot.image, format: .png) else { continue }
-            let stem = (FileNaming.name(at: entry.shot.takenAt, format: .png) as NSString).deletingPathExtension
+        for entry in entries.values {
+            let shot = entry.shot
+            let image: CGImage
+            if let edited = entry.edits?() {
+                image = edited
+            } else if shot.savedTo == nil {
+                image = shot.image
+            } else {
+                continue
+            }
+            guard let data = Encoding.data(image, format: .png, scale: shot.scale) else { continue }
+            let folder = shot.savedTo?.deletingLastPathComponent() ?? settings.folderURL
+            let stem = shot.savedTo.map { $0.deletingPathExtension().lastPathComponent }
+                ?? (FileNaming.name(at: shot.takenAt, format: .png) as NSString).deletingPathExtension
             do {
-                try disk.makeFolder(settings.folderURL)
-                let url = FileNaming.unique("\(stem) (unsaved).png", in: settings.folderURL, exists: disk.exists)
+                try disk.makeFolder(folder)
+                let url = FileNaming.unique("\(stem) (unsaved).png", in: folder, exists: disk.exists)
                 try disk.write(data, to: url)
-                entry.shot.savedTo = url
+                if shot.savedTo == nil { shot.savedTo = url }
                 saved.append(url)
             } catch {
                 continue

@@ -41,6 +41,11 @@ private final class FakeDisk: Disk {
         if fails { throw CocoaError(.fileWriteNoPermission) }
         files[url] = data
     }
+    func replace(_ data: Data, at url: URL) throws {
+        log.events.append("replace")
+        if fails { throw CocoaError(.fileWriteNoPermission) }
+        files[url] = data
+    }
 }
 
 final class CaptureTests: XCTestCase {

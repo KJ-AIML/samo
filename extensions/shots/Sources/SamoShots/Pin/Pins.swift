@@ -114,7 +114,7 @@ final class PinView: NSView {
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         if event.modifierFlags.contains(.command), event.charactersIgnoringModifiers == "c" {
-            if let png = Encoding.data(shot.image, format: .png), SystemClipboard().put(png: png) {
+            if let png = Encoding.data(shot.image, format: .png, scale: shot.scale), SystemClipboard().put(png: png) {
                 Note.show("Copied", problem: false)
             } else {
                 Note.show("Couldn't copy the shot", problem: true)
