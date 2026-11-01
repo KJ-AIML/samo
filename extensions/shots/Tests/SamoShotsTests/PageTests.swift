@@ -42,7 +42,8 @@ final class PageTests: XCTestCase {
         }.first)
         XCTAssertEqual(row.id, "/Users/kj/Pictures/Shots/Shot a.png")
         XCTAssertEqual(row.title, "Shot a.png")
-        XCTAssertEqual(row.actions.map(\.id), ["copy", "reveal", "pin"])
+        // Edit is the fourth, the most a row may carry.
+        XCTAssertEqual(row.actions.map(\.id), ["copy", "reveal", "pin", "edit"])
         XCTAssertTrue(row.detail.contains("MB"), row.detail)
         XCTAssertTrue(page.contains(.section(title: "RECENT", about: "1 today")))
         XCTAssertEqual(Page.badge(recent, now: now), .badge(count: 0, summary: "Shots · 1 today"))
@@ -51,18 +52,19 @@ final class PageTests: XCTestCase {
 
     func testChoiceUpdatesSettings() {
         var s = Settings()
-        XCTAssertTrue(s.apply(choice: "after", "pin"))
-        XCTAssertEqual(s.after, .pin)
+        XCTAssertTrue(s.apply(choice: "after", "save"))
+        XCTAssertEqual(s.after, .save)
         XCTAssertTrue(s.apply(choice: "format", "jpeg"))
         XCTAssertEqual(s.format, .jpeg)
         XCTAssertFalse(s.apply(choice: "after", "explode"))
         XCTAssertFalse(s.apply(choice: "colour", "red"))
-        XCTAssertEqual(s.after, .pin, "a bad value changes nothing")
+        XCTAssertFalse(s.apply(choice: "after", "pin"), "pin is a Then now")
+        XCTAssertEqual(s.after, .save, "a bad value changes nothing")
         XCTAssertTrue(s.apply(setting: "sound", true))
         XCTAssertFalse(s.apply(setting: "other", true))
         let page = Page.build(PageState(access: .allowed, shared: false, settings: s, recent: Recent()))
         XCTAssertTrue(page.contains { widget in
-            if case let .choice(key, _, _, selected) = widget { return key == "after" && selected == "pin" }
+            if case let .choice(key, _, _, selected) = widget { return key == "after" && selected == "save" }
             return false
         })
         // A folder in iCloud Drive is called out.
@@ -70,6 +72,26 @@ final class PageTests: XCTestCase {
         XCTAssertTrue(Page.inICloud(home.appendingPathComponent("Library/Mobile Documents/x"), home: home, desktopSynced: false))
         XCTAssertTrue(Page.inICloud(home.appendingPathComponent("Desktop/Shots"), home: home, desktopSynced: true))
         XCTAssertFalse(Page.inICloud(home.appendingPathComponent("Pictures/Shots"), home: home, desktopSynced: true))
+    }
+
+    func testThenChoiceUpdatesSettings() {
+        var s = Settings()
+        let choices = Page.build(PageState(access: .allowed, shared: false, settings: s, recent: Recent()))
+            .compactMap { widget -> (String, String, [String])? in
+                if case let .choice(key, label, options, _) = widget { return (key, label, options.map(\.id)) }
+                return nil
+            }
+        XCTAssertTrue(choices.contains { $0.0 == "after" && $0.1 == "First" && $0.2 == ["copy", "save", "both"] })
+        XCTAssertTrue(choices.contains { $0.0 == "then" && $0.1 == "Then" && $0.2 == ["edit", "pin", "nothing"] })
+        XCTAssertTrue(s.apply(choice: "then", "pin"))
+        XCTAssertEqual(s.then, .pin)
+        XCTAssertFalse(s.apply(choice: "then", "both"))
+        XCTAssertEqual(s.then, .pin)
+        let page = Page.build(PageState(access: .allowed, shared: false, settings: s, recent: Recent()))
+        XCTAssertTrue(page.contains { widget in
+            if case let .choice(key, _, _, selected) = widget { return key == "then" && selected == "pin" }
+            return false
+        })
     }
 
     func testRecorderRefusesTypingKeys() {

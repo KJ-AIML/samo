@@ -43,8 +43,14 @@ public struct Shortcut: Codable, Equatable, Hashable {
 }
 
 public struct Settings: Codable, Equatable {
+    /// First, the shot is copied, saved, or both (R19: before any window opens).
     public enum After: String, Codable, CaseIterable {
-        case copy, save, both, pin
+        case copy, save, both
+    }
+
+    /// Then it opens in the editor, is pinned, or nothing more.
+    public enum Then: String, Codable, CaseIterable {
+        case edit, pin, nothing
     }
 
     public enum Format: String, Codable, CaseIterable {
@@ -52,6 +58,7 @@ public struct Settings: Codable, Equatable {
     }
 
     public var after: After = .both
+    public var then: Then = .edit
     /// Where shots are saved; `~` is the home folder.
     public var folder: String = "~/Pictures/Shots"
     public var format: Format = .png
@@ -62,6 +69,25 @@ public struct Settings: Codable, Equatable {
     public var shortcuts: [String: Shortcut] = ["screen": .wholeScreen, "area": .area]
 
     public init() {}
+
+    /// Field by field, so one value Shots doesn't know never resets the rest. Shots 0.1.0's `"after": "pin"`
+    /// (pin, without copying or saving) becomes both, then pin.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let after = (try? c.decodeIfPresent(String.self, forKey: .after)) ?? nil
+        if after == "pin" {
+            self.after = .both
+            then = .pin
+        } else {
+            self.after = after.flatMap(After.init(rawValue:)) ?? .both
+            then = ((try? c.decodeIfPresent(Then.self, forKey: .then)) ?? nil) ?? .edit
+        }
+        folder = ((try? c.decodeIfPresent(String.self, forKey: .folder)) ?? nil) ?? folder
+        format = ((try? c.decodeIfPresent(Format.self, forKey: .format)) ?? nil) ?? format
+        retina = ((try? c.decodeIfPresent(Bool.self, forKey: .retina)) ?? nil) ?? retina
+        sound = ((try? c.decodeIfPresent(Bool.self, forKey: .sound)) ?? nil) ?? sound
+        shortcuts = ((try? c.decodeIfPresent([String: Shortcut].self, forKey: .shortcuts)) ?? nil) ?? shortcuts
+    }
 
     public var folderURL: URL {
         URL(fileURLWithPath: Settings.expand(folder), isDirectory: true)

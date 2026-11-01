@@ -1,5 +1,5 @@
 // What happens to a shot once taken (R19): copy and save first, before any window opens, and say so if either
-// fails. A pin opens only after that.
+// fails. Only then does it open in the editor, or as a pin.
 
 import CoreGraphics
 import Foundation
@@ -23,18 +23,18 @@ public struct CaptureOutcome: Equatable {
     public var savedTo: URL?
     public var bytes: Int
     public var copied: Bool
-    public var pinned: Bool
+    /// What opened after: the editor, a pin, or nothing.
+    public var then: Settings.Then
     public var problems: [String]
 
     /// The note shown near the pointer.
     public var note: String {
         if let problem = problems.first { return problem }
-        switch (copied, savedTo != nil, pinned) {
-        case (true, true, _): return "Copied and saved"
-        case (true, false, _): return "Copied"
-        case (false, true, _): return "Saved to \(savedTo?.deletingLastPathComponent().lastPathComponent ?? "Shots")"
-        case (false, false, true): return "Pinned"
-        case (false, false, false): return "Captured"
+        switch (copied, savedTo != nil) {
+        case (true, true): return "Copied and saved"
+        case (true, false): return "Copied"
+        case (false, true): return "Saved to \(savedTo?.deletingLastPathComponent().lastPathComponent ?? "Shots")"
+        case (false, false): return "Captured"
         }
     }
 }
@@ -63,9 +63,9 @@ public enum AfterCapture {
         settings: Settings,
         clipboard: Clipboard,
         disk: Disk,
-        openPin: (Shot) -> Void
+        open: (Shot, Settings.Then) -> Void
     ) -> CaptureOutcome {
-        var outcome = CaptureOutcome(savedTo: nil, bytes: 0, copied: false, pinned: false, problems: [])
+        var outcome = CaptureOutcome(savedTo: nil, bytes: 0, copied: false, then: settings.then, problems: [])
         let image = settings.retina ? shot.image : (Encoding.scaled(shot.image, by: 1 / max(shot.scale, 1)) ?? shot.image)
         let density = settings.retina ? shot.scale : 1
         // Encoded once when the clipboard and the file both want PNG (30–70 ms a whole screen).
@@ -95,9 +95,8 @@ public enum AfterCapture {
                 outcome.problems.append("Couldn't save the shot to \(settings.folder): \(error.localizedDescription)")
             }
         }
-        if settings.after == .pin {
-            openPin(shot)
-            outcome.pinned = true
+        if settings.then != .nothing {
+            open(shot, settings.then)
         }
         return outcome
     }

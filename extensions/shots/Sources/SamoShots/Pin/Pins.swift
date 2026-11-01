@@ -1,5 +1,6 @@
 // Pinned shots (ADR-004 S2): a shot floating above every window and Space, where it was taken. Drag to move, pinch
-// to resize, scroll for opacity, ⌘C to copy, Esc or × to close. Its image is freed when it closes (R17).
+// to resize, scroll for opacity, double-click to edit, ⌘C to copy, Esc or × to close. Its image is freed when it
+// closes (R17).
 
 import AppKit
 import ShotsCore
@@ -14,14 +15,16 @@ final class PinView: NSView {
     let shot: Shot
     private let palette: Palette
     private let onClose: () -> Void
+    private let onEdit: (Shot) -> Void
     private var dragFrom: CGPoint?
     private var hovering = false {
         didSet { needsDisplay = true }
     }
 
-    init(shot: Shot, palette: Palette, onClose: @escaping () -> Void) {
+    init(shot: Shot, palette: Palette, onEdit: @escaping (Shot) -> Void, onClose: @escaping () -> Void) {
         self.shot = shot
         self.palette = palette
+        self.onEdit = onEdit
         self.onClose = onClose
         super.init(frame: .zero)
         wantsLayer = true
@@ -73,7 +76,7 @@ final class PinView: NSView {
             return
         }
         if event.clickCount == 2 {
-            Note.show("Editing comes in a later version of Shots", problem: false)
+            onEdit(shot)
             return
         }
         dragFrom = NSEvent.mouseLocation
@@ -128,10 +131,12 @@ final class PinView: NSView {
 
 final class Pins {
     private let store: ShotStore
+    private let edit: (Shot) -> Void
     private var panels: [PinPanel] = []
 
-    init(store: ShotStore) {
+    init(store: ShotStore, edit: @escaping (Shot) -> Void) {
         self.store = store
+        self.edit = edit
     }
 
     func open(_ shot: Shot) {
@@ -151,7 +156,8 @@ final class Pins {
         panel.backgroundColor = .clear
         panel.isReleasedWhenClosed = false
         panel.contentAspectRatio = size
-        let view = PinView(shot: shot, palette: Palette.current(NSApp.effectiveAppearance)) { [weak self, weak panel] in
+        let view = PinView(shot: shot, palette: Palette.current(NSApp.effectiveAppearance), onEdit: edit) {
+            [weak self, weak panel] in
             if let panel { self?.close(panel) }
         }
         panel.contentView = view

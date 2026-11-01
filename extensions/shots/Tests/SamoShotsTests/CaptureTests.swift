@@ -93,19 +93,52 @@ final class CaptureTests: XCTestCase {
         settings.after = .both
         let disk = FakeDisk(log: log)
         let outcome = AfterCapture.run(shot, settings: settings, clipboard: FakeClipboard(log: log), disk: disk,
-                                       openPin: { _ in log.events.append("pin") })
-        XCTAssertEqual(log.events, ["copy", "save"])
+                                       open: { _, then in log.events.append(then.rawValue) })
+        // Copied and saved first; only then does the editor open (the default).
+        XCTAssertEqual(log.events, ["copy", "save", "edit"])
         XCTAssertEqual(outcome.note, "Copied and saved")
         XCTAssertEqual(shot.savedTo, outcome.savedTo)
         XCTAssertGreaterThan(outcome.bytes, 0)
 
-        // Pin only: nothing copied or saved, and the pin opens last.
+        // Pin: the pin opens last.
         log.events.removeAll()
-        settings.after = .pin
+        settings.after = .copy
+        settings.then = .pin
         let pinned = AfterCapture.run(shot, settings: settings, clipboard: FakeClipboard(log: log), disk: disk,
-                                      openPin: { _ in log.events.append("pin") })
-        XCTAssertEqual(log.events, ["pin"])
-        XCTAssertEqual(pinned.note, "Pinned")
+                                      open: { _, then in log.events.append(then.rawValue) })
+        XCTAssertEqual(log.events, ["copy", "pin"])
+        XCTAssertEqual(pinned.note, "Copied")
+        // Nothing: nothing opens.
+        log.events.removeAll()
+        settings.then = .nothing
+        _ = AfterCapture.run(shot, settings: settings, clipboard: FakeClipboard(log: log), disk: disk,
+                             open: { _, then in log.events.append(then.rawValue) })
+        XCTAssertEqual(log.events, ["copy"])
+    }
+
+    func testEditorOpensAfterCopyAndSave() throws {
+        let log = Log()
+        let shot = Shot(image: try image(40, 20), scale: 2, takenAt: Date())
+        let disk = FakeDisk(log: log)
+        var opened: Shot?
+        let outcome = AfterCapture.run(shot, settings: Settings(), clipboard: FakeClipboard(log: log), disk: disk,
+                                       open: { shot, then in
+                                           // By the time the editor opens, the shot is on the clipboard and on disk.
+                                           XCTAssertEqual(log.events, ["copy", "save"])
+                                           XCTAssertNotNil(shot.savedTo)
+                                           XCTAssertEqual(then, .edit)
+                                           opened = shot
+                                       })
+        XCTAssertTrue(opened === shot)
+        XCTAssertEqual(outcome.then, .edit)
+        // Even when the save fails, the editor opens with the shot, so it isn't lost.
+        disk.fails = true
+        opened = nil
+        log.events.removeAll()
+        let failed = AfterCapture.run(shot, settings: Settings(), clipboard: FakeClipboard(log: log), disk: disk,
+                                      open: { shot, _ in opened = shot })
+        XCTAssertTrue(opened === shot)
+        XCTAssertFalse(failed.problems.isEmpty)
     }
 
     func testCopyAndSaveShareOneEncode() throws {
@@ -113,7 +146,7 @@ final class CaptureTests: XCTestCase {
         let shot = Shot(image: try image(64, 48), scale: 2, takenAt: Date())
         let disk = FakeDisk(log: log)
         let outcome = AfterCapture.run(shot, settings: Settings(), clipboard: FakeClipboard(log: log), disk: disk,
-                                       openPin: { _ in })
+                                       open: { _, _ in })
         // Both PNG: the clipboard and the file get the very same bytes.
         let saved = try XCTUnwrap(outcome.savedTo.flatMap { disk.files[$0] })
         XCTAssertEqual(log.copied, saved)
@@ -121,7 +154,7 @@ final class CaptureTests: XCTestCase {
         var settings = Settings()
         settings.format = .jpeg
         let jpeg = AfterCapture.run(shot, settings: settings, clipboard: FakeClipboard(log: log), disk: disk,
-                                    openPin: { _ in })
+                                    open: { _, _ in })
         let file = try XCTUnwrap(jpeg.savedTo.flatMap { disk.files[$0] })
         XCTAssertNotEqual(log.copied, file)
         XCTAssertEqual(jpeg.savedTo?.pathExtension, "jpg")
@@ -133,7 +166,7 @@ final class CaptureTests: XCTestCase {
         let disk = FakeDisk(log: log)
         disk.fails = true
         let outcome = AfterCapture.run(shot, settings: Settings(), clipboard: FakeClipboard(log: log, works: false),
-                                       disk: disk, openPin: { _ in })
+                                       disk: disk, open: { _, _ in })
         XCTAssertFalse(outcome.copied)
         XCTAssertNil(outcome.savedTo)
         XCTAssertEqual(outcome.problems.count, 2)
@@ -149,7 +182,7 @@ final class CaptureTests: XCTestCase {
         settings.retina = false
         let disk = FakeDisk(log: log)
         let outcome = AfterCapture.run(shot, settings: settings, clipboard: FakeClipboard(log: log), disk: disk,
-                                       openPin: { _ in })
+                                       open: { _, _ in })
         let saved = try XCTUnwrap(outcome.savedTo.flatMap { disk.files[$0] })
         let size = try XCTUnwrap(Encoding.size(of: saved))
         XCTAssertEqual(size.width, 100)
@@ -157,7 +190,7 @@ final class CaptureTests: XCTestCase {
         // At Retina, as captured.
         settings.retina = true
         let full = AfterCapture.run(shot, settings: settings, clipboard: FakeClipboard(log: log), disk: disk,
-                                    openPin: { _ in })
+                                    open: { _, _ in })
         let fullSize = try XCTUnwrap(full.savedTo.flatMap { disk.files[$0] }.flatMap(Encoding.size(of:)))
         XCTAssertEqual(fullSize.width, 200)
     }

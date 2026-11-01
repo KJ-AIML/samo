@@ -100,7 +100,8 @@ public final class EditorWindow: NSObject, NSWindowDelegate {
         window.isReleasedWhenClosed = false
         window.delegate = self
         window.title = EditorWindow.title(for: shot)
-        window.minSize = CGSize(width: 760, height: 420)
+        // Wide enough for the whole toolbar.
+        window.minSize = CGSize(width: ToolbarView.minimumWidth, height: 420)
         window.collectionBehavior = [.fullScreenPrimary]
         window.tabbingMode = .disallowed
         build()

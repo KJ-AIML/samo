@@ -329,6 +329,21 @@ final class EditorWindowTests: XCTestCase {
         editor.close()
     }
 
+    func testToolbarFitsAtTheSmallestWindow() throws {
+        let editor = try makeEditor()
+        editor.window.setContentSize(editor.window.minSize)
+        editor.window.contentView?.layoutSubtreeIfNeeded()
+        let buttons = editor.toolbar.subviews.compactMap { $0 as? NSButton }.map(\.frame)
+        XCTAssertGreaterThan(buttons.count, 20)
+        for (i, a) in buttons.enumerated() {
+            XCTAssertTrue(editor.toolbar.bounds.contains(a), "\(a) is cut off")
+            for b in buttons[(i + 1)...] {
+                XCTAssertFalse(a.intersects(b), "\(a) overlaps \(b)")
+            }
+        }
+        editor.close()
+    }
+
     func testEditorReleasesItsShot() throws {
         weak var gone: Shot?
         weak var goneEditor: EditorWindow?

@@ -94,10 +94,14 @@ public enum Page {
         page.append(.button(action: "change-shortcuts", label: "Change shortcuts…", kind: .link))
 
         page.append(.section(title: "AFTER A CAPTURE", about: nil))
-        page.append(.choice(key: "after", label: "Then", options: [
+        page.append(.choice(key: "after", label: "First", options: [
             ChoiceOption(id: "copy", label: "Copy"), ChoiceOption(id: "save", label: "Save"),
-            ChoiceOption(id: "both", label: "Both"), ChoiceOption(id: "pin", label: "Pin"),
+            ChoiceOption(id: "both", label: "Both"),
         ], selected: s.settings.after.rawValue))
+        page.append(.choice(key: "then", label: "Then", options: [
+            ChoiceOption(id: "edit", label: "Edit"), ChoiceOption(id: "pin", label: "Pin"),
+            ChoiceOption(id: "nothing", label: "Nothing"),
+        ], selected: s.settings.then.rawValue))
         page.append(.choice(key: "format", label: "Saved as", options: [
             ChoiceOption(id: "png", label: "PNG"), ChoiceOption(id: "jpeg", label: "JPEG"),
         ], selected: s.settings.format.rawValue))
@@ -122,7 +126,7 @@ public enum Page {
             id: shot.path, lamp: .done, title: (shot.path as NSString).lastPathComponent,
             detail: size + time.string(from: shot.at),
             actions: [RowAction(id: "copy", label: "Copy"), RowAction(id: "reveal", label: "Reveal"),
-                      RowAction(id: "pin", label: "Pin")]
+                      RowAction(id: "pin", label: "Pin"), RowAction(id: "edit", label: "Edit")]
         )
     }
 
@@ -160,6 +164,9 @@ extension Settings {
         case "after":
             guard let after = After(rawValue: value) else { return false }
             self.after = after
+        case "then":
+            guard let then = Then(rawValue: value) else { return false }
+            self.then = then
         case "format":
             guard let format = Format(rawValue: value) else { return false }
             self.format = format

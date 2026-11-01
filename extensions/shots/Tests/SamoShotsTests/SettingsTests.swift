@@ -20,7 +20,8 @@ final class SettingsTests: XCTestCase {
         XCTAssertTrue(fresh.folderURL.path.hasSuffix("/Pictures/Shots"))
 
         var changed = fresh
-        changed.after = .pin
+        changed.after = .save
+        changed.then = .pin
         changed.format = .jpeg
         changed.sound = true
         changed.shortcuts["area"] = Shortcut(keyCode: 0x13, modifiers: Shortcut.control | Shortcut.command | Shortcut.shift)
@@ -34,6 +35,43 @@ final class SettingsTests: XCTestCase {
         // A shortcut without ⌘, ⌃ or ⌥ would take a key you type.
         XCTAssertFalse(Shortcut(keyCode: 0x13, modifiers: Shortcut.shift).canBeGlobal)
         XCTAssertTrue(Shortcut.area.canBeGlobal)
+    }
+
+    func testPhaseOneSettingsStillLoad() throws {
+        let dir = try temporaryDirectory()
+        // Shots 0.1.0's settings, with its "pin": pin without copying or saving.
+        try Data(#"{"after":"pin","folder":"~/Desktop","format":"jpeg","retina":false,"sound":true,"shortcuts":{}}"#.utf8)
+            .write(to: dir.appendingPathComponent("settings.json"))
+        let loaded = Settings.load(dataDir: dir)
+        XCTAssertEqual(loaded.after, .both)
+        XCTAssertEqual(loaded.then, .pin)
+        XCTAssertEqual(loaded.folder, "~/Desktop")
+        XCTAssertEqual(loaded.format, .jpeg)
+        XCTAssertFalse(loaded.retina)
+        XCTAssertTrue(loaded.sound)
+        XCTAssertTrue(loaded.shortcuts.isEmpty)
+        // And the others keep their meaning, opening the editor after, as every shot now does.
+        try Data(#"{"after":"copy"}"#.utf8).write(to: dir.appendingPathComponent("settings.json"))
+        XCTAssertEqual(Settings.load(dataDir: dir).after, .copy)
+        XCTAssertEqual(Settings.load(dataDir: dir).then, .edit)
+    }
+
+    func testOneBadValueKeepsTheRest() throws {
+        let dir = try temporaryDirectory()
+        try Data(#"{"after":"teleport","then":"dance","format":"webp","folder":"/Volumes/Shots","sound":true}"#.utf8)
+            .write(to: dir.appendingPathComponent("settings.json"))
+        let loaded = Settings.load(dataDir: dir)
+        XCTAssertEqual(loaded.after, .both)
+        XCTAssertEqual(loaded.then, .edit)
+        XCTAssertEqual(loaded.format, .png)
+        XCTAssertEqual(loaded.folder, "/Volumes/Shots", "what it knows is kept")
+        XCTAssertTrue(loaded.sound)
+        XCTAssertEqual(loaded.shortcuts["area"], .area)
+        // What it saves, it loads.
+        var changed = loaded
+        changed.then = .nothing
+        try changed.save(dataDir: dir)
+        XCTAssertEqual(Settings.load(dataDir: dir), changed)
     }
 
     func testTildeIsHomeFromTheEnvironment() throws {

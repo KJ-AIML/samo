@@ -1,5 +1,5 @@
 // One capture, start to finish (ADR-004 S1, R19): check Screen Recording, freeze every display, let the person
-// choose, then copy and save before any window opens, and say what happened.
+// choose, then copy and save before any window opens, open the editor or a pin, and say what happened.
 
 import AppKit
 import ScreenCaptureKit
@@ -16,7 +16,7 @@ final class CaptureController {
     private let permission: Permission
     private let settings: () -> Settings
     private let out: Output
-    private let openPin: (Shot) -> Void
+    private let open: (Shot, Settings.Then) -> Void
     private let onPermission: () -> Void
     private let onShot: (Shot, CaptureOutcome) -> Void
     private let clipboard = SystemClipboard()
@@ -30,14 +30,14 @@ final class CaptureController {
         permission: Permission,
         settings: @escaping () -> Settings,
         out: Output,
-        openPin: @escaping (Shot) -> Void,
+        open: @escaping (Shot, Settings.Then) -> Void,
         onPermission: @escaping () -> Void,
         onShot: @escaping (Shot, CaptureOutcome) -> Void
     ) {
         self.permission = permission
         self.settings = settings
         self.out = out
-        self.openPin = openPin
+        self.open = open
         self.onPermission = onPermission
         self.onShot = onShot
     }
@@ -63,8 +63,9 @@ final class CaptureController {
 
     private func run(_ mode: Mode) {
         let started = Date()
-        Task { @MainActor in
+        Task { @MainActor [weak self] in
             let frozen = await Screenshotter.freezeAll()
+            guard let self else { return }
             guard !frozen.isEmpty else {
                 self.end(note: "Shots couldn't capture the screen. Is Screen Recording allowed for Shots?",
                          problem: true)
@@ -77,7 +78,8 @@ final class CaptureController {
                     self.end(note: nil, problem: false)
                     return
                 }
-                self.done(Shot(image: f.image, scale: f.scale, takenAt: started, origin: f.screen.frame.origin))
+                self.done(Shot(image: f.image, scale: f.scale, takenAt: started, origin: f.screen.frame.origin),
+                          since: Date())
             case .area, .window:
                 let session = OverlaySession(
                     startIn: mode == .window ? .window : .area,
@@ -98,6 +100,7 @@ final class CaptureController {
     }
 
     private func area(_ frozen: Frozen, _ rect: CGRect, view: OverlayView, takenAt: Date) {
+        let released = Date()
         let pixels = Selection.imageRect(rect, viewHeight: view.bounds.height, scale: frozen.scale)
             .intersection(CGRect(x: 0, y: 0, width: frozen.image.width, height: frozen.image.height))
         overlay?.close()
@@ -106,27 +109,35 @@ final class CaptureController {
             return
         }
         let origin = CGPoint(x: frozen.screen.frame.minX + rect.minX, y: frozen.screen.frame.minY + rect.minY)
-        done(Shot(image: crop, scale: frozen.scale, takenAt: takenAt, origin: origin))
+        done(Shot(image: crop, scale: frozen.scale, takenAt: takenAt, origin: origin), since: released)
     }
 
     private func window(_ window: SCWindow, scale: CGFloat, takenAt: Date) {
+        let clicked = Date()
         overlay?.close()
-        Task { @MainActor in
-            guard let image = await Screenshotter.capture(window: window, scale: scale) else {
+        Task { @MainActor [weak self] in
+            let image = await Screenshotter.capture(window: window, scale: scale)
+            guard let self else { return }
+            guard let image else {
                 self.end(note: "Shots couldn't capture that window", problem: true)
                 return
             }
             let primaryHeight = NSScreen.screens.first?.frame.height ?? 0
             let origin = CGPoint(x: window.frame.minX, y: primaryHeight - window.frame.maxY)
-            self.done(Shot(image: image, scale: scale, takenAt: takenAt, origin: origin))
+            self.done(Shot(image: image, scale: scale, takenAt: takenAt, origin: origin), since: clicked)
         }
     }
 
-    private func done(_ shot: Shot) {
+    /// Copy and save, then open the editor or a pin (R19). `since` is when the person let go, for the timing log.
+    private func done(_ shot: Shot, since: Date) {
         let settings = settings()
-        let outcome = AfterCapture.run(shot, settings: settings, clipboard: clipboard, disk: disk, openPin: openPin)
+        let outcome = AfterCapture.run(shot, settings: settings, clipboard: clipboard, disk: disk, open: open)
         if settings.sound {
             NSSound(named: "Grab")?.play()
+        }
+        if outcome.then == .edit {
+            let ms = Int(Date().timeIntervalSince(since) * 1000)
+            FileHandle.standardError.write(Data("shots: editor up in \(ms) ms\n".utf8))
         }
         onShot(shot, outcome)
         end(note: outcome.note, problem: !outcome.problems.isEmpty)

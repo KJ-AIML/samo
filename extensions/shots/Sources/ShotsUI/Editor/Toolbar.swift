@@ -7,6 +7,8 @@ import ShotsCore
 
 final class ToolbarView: NSView {
     static let height: CGFloat = 46
+    /// Every tool, colour, width, the backdrop, undo and redo, without overlapping.
+    static let minimumWidth: CGFloat = 868
 
     weak var editor: EditorWindow?
     private var tools: [Tool: ToolButton] = [:]

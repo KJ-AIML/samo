@@ -1,8 +1,7 @@
-// Shots, put together: its settings and recent list, Screen Recording, its shortcuts, capture, and its page in
-// Samo. Everything here runs on the main thread.
+// Shots, put together: its settings and recent list, Screen Recording, its shortcuts, capture, pins, the editor,
+// and its page in Samo. Everything here runs on the main thread.
 
 import AppKit
-import ImageIO
 import ShotsCore
 import ShotsUI
 
@@ -15,7 +14,13 @@ final class ShotsApp {
     private(set) var session: Session?
     private var capture: CaptureController?
     private let store = ShotStore()
-    private lazy var pins = Pins(store: store)
+    private lazy var pins: Pins = Pins(store: store) { [unowned self] shot in self.editors.edit(shot) }
+    private lazy var editors: Editors = Editors(
+        store: store, settings: { [unowned self] in self.settings },
+        dragFolder: dataDir.appendingPathComponent("drag", isDirectory: true),
+        saved: { [unowned self] shot, result in self.saved(shot, result) },
+        pin: { [unowned self] shot in self.pins.open(shot) }
+    )
     private var stopped = false
     /// Shortcuts macOS refused, by capture mode.
     private(set) var refused: Set<String> = []
@@ -29,6 +34,8 @@ final class ShotsApp {
     }
 
     func start(out: Output) {
+        // Files a drag needed last time are never left behind.
+        Export.clearDrags(editors.dragFolder)
         let session = Session(out: out, shared: shared, handlers: Session.Handlers(
             page: { [unowned self] in self.page() },
             setting: { [unowned self] key, value in self.setting(key, value) },
@@ -41,7 +48,13 @@ final class ShotsApp {
             permission: permission,
             settings: { [unowned self] in self.settings },
             out: out,
-            openPin: { [unowned self] shot in self.pins.open(shot) },
+            open: { [unowned self] shot, then in
+                switch then {
+                case .edit: self.editors.edit(shot)
+                case .pin: self.pins.open(shot)
+                case .nothing: break
+                }
+            },
             onPermission: { [unowned self] in self.session?.refresh() },
             onShot: { [unowned self] shot, outcome in self.captured(shot, outcome) }
         )
@@ -70,6 +83,14 @@ final class ShotsApp {
             recent.add(RecentShot(path: url.path, bytes: outcome.bytes, at: shot.takenAt))
             try? recent.save(dataDir: dataDir)
         }
+        refresh()
+    }
+
+    /// The editor saved a shot: over its file, or as a new one.
+    private func saved(_ shot: Shot, _ result: ExportResult) {
+        guard let url = result.url else { return }
+        recent.add(RecentShot(path: url.path, bytes: result.bytes, at: shot.takenAt))
+        try? recent.save(dataDir: dataDir)
         refresh()
     }
 
@@ -106,7 +127,7 @@ final class ShotsApp {
         }
     }
 
-    /// Copy, Reveal or Pin on a recent shot, by its path.
+    /// Copy, Reveal, Pin or Edit on a recent shot, by its path.
     private func recentAction(_ id: String, path: String) {
         let url = URL(fileURLWithPath: path)
         guard FileManager.default.fileExists(atPath: path) else {
@@ -119,29 +140,33 @@ final class ShotsApp {
         case "reveal":
             NSWorkspace.shared.activateFileViewerSelecting([url])
         case "copy":
-            if let data = try? Data(contentsOf: url), let image = NSImage(data: data),
-               let tiff = image.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff),
-               let png = rep.representation(using: .png, properties: [:]), SystemClipboard().put(png: png) {
+            // A PNG goes as it is; a JPEG as PNG, at its density.
+            let fallback = NSScreen.main?.backingScaleFactor ?? 2
+            let png = Export.format(of: url) == .png
+                ? try? Data(contentsOf: url)
+                : Encoding.load(url, fallbackScale: fallback).flatMap { Encoding.data($0.image, format: .png, scale: $0.scale) }
+            if let png, SystemClipboard().put(png: png) {
                 Note.show("Copied", problem: false)
             } else {
                 Note.show("Couldn't copy that shot", problem: true)
             }
         case "pin":
-            guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
-                  let image = CGImageSourceCreateImageAtIndex(source, 0, nil)
-            else {
+            guard let loaded = Encoding.load(url, fallbackScale: NSScreen.main?.backingScaleFactor ?? 2) else {
                 Note.show("Couldn't open that shot", problem: true)
                 return
             }
-            let shot = Shot(image: image, scale: NSScreen.main?.backingScaleFactor ?? 2, takenAt: Date())
+            let shot = Shot(image: loaded.image, scale: loaded.scale, takenAt: Date())
             shot.savedTo = url
             pins.open(shot)
+        case "edit":
+            editors.edit(file: url)
         default:
             break
         }
     }
 
-    /// Off, update, uninstall, or Samo quitting: nothing unsaved is lost, then shortcuts and windows go.
+    /// Off, update, uninstall, or Samo quitting: nothing unsaved is lost (shots never saved, and edits not yet
+    /// copied or saved, beside their shots), then shortcuts and windows go, and the drag folder.
     func shutdown() {
         guard !stopped else { return }
         stopped = true
@@ -154,7 +179,9 @@ final class ShotsApp {
             session?.out.send(.log(event: "saved-unsaved", detail: saved.map(\.path).joined(separator: "\n")))
         }
         pins.closeAll()
+        editors.closeAll()
         HotKeys.shared.unregisterAll()
+        Export.clearDrags(editors.dragFolder)
     }
 
     // MARK: The page

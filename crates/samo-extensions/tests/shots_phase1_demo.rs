@@ -184,12 +184,12 @@ fn shots_phase1_demo() -> Fallible<()> {
     );
 
     // 4. A choice from Samo changes its settings and its page.
-    host.choice(SLOT, "after", "pin");
+    host.choice(SLOT, "then", "pin");
     wait(&host, "the choice", 10, |s| {
-        chosen(s, "after").as_deref() == Some("pin")
+        chosen(s, "then").as_deref() == Some("pin")
     })?;
     let saved = fs::read_to_string(root.data_dir("shots").join("settings.json")).map_err(io)?;
-    assert!(saved.contains(r#""after":"pin""#), "{saved}");
+    assert!(saved.contains(r#""then":"pin""#), "{saved}");
 
     // 5. Off: the helper and its worker are gone.
     host.set_on(SLOT, false);
