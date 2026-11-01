@@ -155,6 +155,15 @@ changed, then deletes it (Claude Sessions keeps its one-time backup, `~/.claude/
 store's listings live in [`samo-extensions`](https://github.com/KJ-AIML/samo-extensions): a teammate adds one with
 a pull request, and KJ reviews and signs it. The design is [ADR-003](docs/decisions/ADR-003-samo-extension-store.md).
 
+### Shots
+
+**Shots** is a screenshot extension in the store ([ADR-004](docs/decisions/ADR-004-samo-shots.md)). Press ⇧⌘2 and
+drag: the screen is frozen at the shortcut, a magnifier and the size in pixels follow the pointer, and the shot is
+copied and saved to `~/Pictures/Shots` when you let go. Space picks a window instead; ⇧⌘1 takes the whole screen.
+Pin a shot to keep it above every window. Shots asks macOS for Screen Recording as its own app, so no other extension
+gains it, and nothing it captures leaves your Mac. It opens its own windows, which the store says before you install
+it; an extension that opens windows without saying so is stopped.
+
 ### Developing an extension
 
 Build it into a folder and point Samo at it; it shows as *dev*, and never replaces a store install:

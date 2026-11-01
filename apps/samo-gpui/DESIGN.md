@@ -184,6 +184,9 @@ Samo lives in the menu bar too (`src/menubar.rs`, via `tray-icon`'s safe `NSStat
 8. Nothing inside a card grows to fill it (no `flex_1`/`flex_grow` spacers): split it into a top and a bottom.
 9. An extension draws only with Samo's widgets: no dither (that is Samo's suggestion), never the Primary action,
    Signal only for its errors. Waiting for you is Ink with `!`, not Signal: it isn't wrong.
+10. An extension that declares windows (ADR-004) draws them with Samo's tokens, ported (Shots' `Theme.swift`): the
+    readout's glass for anything over the screen, the mono face for figures, Cobalt for what is chosen. Its windows
+    never take a click they weren't asked for, and a note near the pointer fades by itself.
 
 ## Decisions
 
