@@ -76,9 +76,22 @@ pub fn check_gpui_source(rel_path: &str, content: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// The part of a file that ships: integration tests, and a `#[cfg(test)] mod tests` block, don't.
+fn shipped<'a>(rel_path: &str, content: &'a str) -> &'a str {
+    if rel_path.contains("/tests/") {
+        return "";
+    }
+    content
+        .find("#[cfg(test)]\nmod tests")
+        .and_then(|i| content.get(..i))
+        .unwrap_or(content)
+}
+
 /// A `UserAction` (what every download needs) may only be made where the user clicks.
 pub fn check_user_action(rel_path: &str, content: &str) -> Result<(), String> {
-    if !CLICK_SITES.contains(&rel_path) && content.contains("UserAction::clicked(") {
+    if !CLICK_SITES.contains(&rel_path)
+        && shipped(rel_path, content).contains("UserAction::clicked(")
+    {
         return Err(format!(
             "R6 network violation in `{rel_path}`: `UserAction::clicked()` may only appear in {}",
             CLICK_SITES.join(" or ")
@@ -183,6 +196,20 @@ ureq = { version = "3", default-features = false }
         assert!(check_user_action("apps/samo-gpui/src/settings_page.rs", call).is_ok());
         assert!(check_user_action("apps/samo-gpui/src/popup.rs", call).is_err());
         assert!(check_user_action("apps/samo-gpui/src/settings_page.rs.bak", call).is_err());
+    }
+
+    #[test]
+    fn user_action_allowed_in_test_code_only() {
+        let call = "let a = UserAction::clicked();";
+        let path = "crates/samo-extensions/src/net.rs";
+        let in_tests =
+            format!("pub fn fetch() {{}}\n\n#[cfg(test)]\nmod tests {{\n    {call}\n}}\n");
+        assert!(check_user_action(path, &in_tests).is_ok());
+        let before_tests = format!("fn sneak() {{ {call} }}\n#[cfg(test)]\nmod tests {{}}\n");
+        assert!(check_user_action(path, &before_tests).is_err());
+        let cfg_test_fn = format!("#[cfg(test)]\nfn helper() {{}}\nfn sneak() {{ {call} }}\n");
+        assert!(check_user_action(path, &cfg_test_fn).is_err());
+        assert!(check_user_action("crates/samo-extensions/tests/store.rs", call).is_ok());
     }
 
     #[test]

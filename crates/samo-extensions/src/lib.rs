@@ -9,6 +9,7 @@ mod history;
 mod host;
 mod install;
 mod limits;
+pub mod net;
 mod paths;
 mod registry;
 mod state;
