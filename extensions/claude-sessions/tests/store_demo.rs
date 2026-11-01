@@ -208,7 +208,7 @@ fn store_phase2_demo() -> Fallible<()> {
     let d = Demo::new()?;
     let stage = d.dir.path().join("stage");
 
-    // The store: Claude Sessions and Hello 0.2.0 with icons, and Samo 0.3.0.
+    // The store: Claude Sessions and Hello 0.2.0 with icons, and Samo 99.0.0.
     let (_, cs_manifest) = claude_sessions(&stage)?;
     let cs_pkg = d.package(&stage, &cs_manifest)?;
     let hello_v1 = hello(&stage, "0.2.0")?;
@@ -217,8 +217,8 @@ fn store_phase2_demo() -> Fallible<()> {
     cs_listing.icon = Some(d.shop.put("claude-sessions-icon.png", &png(256, 256))?);
     let mut hello_listing = listing_for(&hello_v1, hello_pkg);
     hello_listing.icon = Some(d.shop.put("hello-icon.png", &png(128, 128))?);
-    let new_samo = samo_app(&d.dir.path().join("build"), "0.3.0")?;
-    let zip = d.dir.path().join("Samo-0.3.0-macos-arm64.zip");
+    let new_samo = samo_app(&d.dir.path().join("build"), "99.0.0")?;
+    let zip = d.dir.path().join("Samo-99.0.0-macos-arm64.zip");
     let zipped = Command::new("ditto")
         .args(["-c", "-k", "--keepParent"])
         .arg(&new_samo)
@@ -227,12 +227,12 @@ fn store_phase2_demo() -> Fallible<()> {
         .map_err(io)?;
     assert!(zipped.success());
     let samo = SamoRelease {
-        version: "0.3.0".into(),
+        version: "99.0.0".into(),
         whats_new: "Faster".into(),
         min_macos: "11.0".into(),
         package: d
             .shop
-            .put("Samo-0.3.0-macos-arm64.zip", &fs::read(&zip).map_err(io)?)?,
+            .put("Samo-99.0.0-macos-arm64.zip", &fs::read(&zip).map_err(io)?)?,
     };
     d.shop.publish(&catalog(
         "2026-11-02T10:00:00Z",
@@ -356,7 +356,7 @@ fn store_phase2_demo() -> Fallible<()> {
         },
         UserAction::clicked(),
     );
-    wait("Samo 0.3.0 to be ready", 20, || {
+    wait("Samo 99.0.0 to be ready", 20, || {
         matches!(
             worker.view().samo,
             SamoUpdate::Ready(_) | SamoUpdate::Failed(_)
@@ -365,11 +365,11 @@ fn store_phase2_demo() -> Fallible<()> {
     let SamoUpdate::Ready(prepared) = worker.view().samo else {
         return Err(format!("not ready: {:?}", worker.view().samo));
     };
-    assert_eq!(prepared.version, "0.3.0");
+    assert_eq!(prepared.version, "99.0.0");
     assert!(
         prepared
             .app_path
-            .starts_with(d.home.join("Library/Caches/Samo/Update/0.3.0"))
+            .starts_with(d.home.join("Library/Caches/Samo/Update/99.0.0"))
     );
     let version = Command::new("plutil")
         .args(["-extract", "CFBundleShortVersionString", "raw"])
