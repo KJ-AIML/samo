@@ -113,8 +113,14 @@ fn show_extension_popups(cx: &mut App) {
     if !popup::should_show(latest.slot, looking) {
         return;
     }
+    let source = host
+        .snapshot()
+        .get(latest.slot)
+        .map(|e| e.name.clone())
+        .unwrap_or_default();
     popup::show(
         popup::Popup {
+            source,
             kind: match latest.kind {
                 samo_extensions::PopupKind::NeedsYou => popup::PopupKind::NeedsYou,
                 samo_extensions::PopupKind::Finished => popup::PopupKind::Finished,

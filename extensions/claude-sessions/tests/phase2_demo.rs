@@ -355,7 +355,8 @@ fn phase2_end_to_end_demo() -> Fallible<()> {
     }
     assert_eq!(popups.len(), 1, "{popups:?}");
     assert_eq!(popups[0].kind, PopupKind::NeedsYou);
-    assert_eq!(popups[0].title, "talvyn-mesh needs you");
+    assert_eq!(popups[0].title, "talvyn-mesh");
+    assert_eq!(popups[0].body, "Wants permission to use Bash");
 
     // Approving it shows as the next tool event.
     b.event(
@@ -394,9 +395,11 @@ fn phase2_end_to_end_demo() -> Fallible<()> {
         Some(PopupKind::Finished),
         "{finished:?}"
     );
-    assert_eq!(
-        finished.first().map(|p| p.title.as_str()),
-        Some("samo finished")
+    assert_eq!(finished.first().map(|p| p.title.as_str()), Some("samo"));
+    assert!(
+        finished
+            .first()
+            .is_some_and(|p| p.body.starts_with("Finished after"))
     );
 
     // 3. B's terminal closes without SessionEnd: its row goes within 10 s.

@@ -29,6 +29,26 @@ pub struct Policy {
     last: HashMap<(String, u8), i64>,
 }
 
+/// Why a session waits, as a sentence: `permission: Bash` reads "Wants permission to use Bash".
+pub fn waiting_sentence(reason: &str) -> String {
+    match reason {
+        "a question" => "Has a question for you".into(),
+        "a plan to review" => "Has a plan for you to review".into(),
+        "input needed" => "Needs your input".into(),
+        "permission" => "Wants your permission".into(),
+        other => match other.strip_prefix("permission: ") {
+            Some(tool) => format!("Wants permission to use {tool}"),
+            None => {
+                let mut chars = other.chars();
+                chars
+                    .next()
+                    .map(|c| c.to_uppercase().collect::<String>() + chars.as_str())
+                    .unwrap_or_else(|| "Is waiting for you".into())
+            }
+        },
+    }
+}
+
 fn project(file: &SessionFile) -> String {
     file.cwd
         .trim_end_matches('/')
@@ -59,8 +79,8 @@ impl Policy {
             (
                 0u8,
                 PopupKind::NeedsYou,
-                format!("{name} needs you"),
-                next.reason.clone(),
+                name,
+                waiting_sentence(&next.reason),
             )
         } else if next.state == State::Done && prev.state != State::Done && next.error {
             if !wanted.needs_you {
@@ -69,8 +89,8 @@ impl Policy {
             (
                 0u8,
                 PopupKind::NeedsYou,
-                format!("{name} stopped"),
-                next.reason.clone(),
+                name,
+                "Stopped on an API error".to_string(),
             )
         } else if next.state == State::Done && prev.state != State::Done && next.reason == "done" {
             let started = prev.turn_started_ms?;
@@ -81,8 +101,8 @@ impl Policy {
             (
                 1u8,
                 PopupKind::Finished,
-                format!("{name} finished"),
-                format!("after {}", crate::sessions::duration(took)),
+                name,
+                format!("Finished after {}", crate::sessions::duration(took)),
             )
         } else {
             return None;
@@ -136,11 +156,11 @@ mod tests {
         let working = file(State::Working, "", 0, Some(0));
         let waiting = file(State::NeedsYou, "permission: Bash", 1_000, Some(0));
         let first = policy.decide(Some(&working), &waiting, 1_000, ALL);
+        assert_eq!(first.as_ref().map(|p| p.title.as_str()), Some("samo"));
         assert_eq!(
-            first.as_ref().map(|p| p.title.as_str()),
-            Some("samo needs you")
+            first.map(|p| p.body),
+            Some("Wants permission to use Bash".to_string())
         );
-        assert_eq!(first.map(|p| p.body), Some("permission: Bash".to_string()));
         // Answered, then waiting again within 30 s: no second pop-up.
         assert_eq!(policy.decide(Some(&working), &waiting, 20_000, ALL), None);
         assert!(
@@ -163,7 +183,7 @@ mod tests {
         let slow = file(State::Done, "done", 20_000, None);
         let p = policy.decide(Some(&working), &slow, 20_000, ALL);
         assert_eq!(p.as_ref().map(|p| p.kind), Some(PopupKind::Finished));
-        assert_eq!(p.map(|p| p.body), Some("after 20 s".to_string()));
+        assert_eq!(p.map(|p| p.body), Some("Finished after 20 s".to_string()));
         // Interrupting it yourself isn't news.
         let interrupted = file(State::Done, "interrupted", 60_000, None);
         assert_eq!(
@@ -193,6 +213,26 @@ mod tests {
         failed.error = true;
         failed.reason = "stopped: API error".into();
         let p = Policy::default().decide(Some(&working), &failed, 20_000, ALL);
-        assert_eq!(p.map(|p| p.title), Some("samo stopped".to_string()));
+        assert_eq!(
+            p.map(|p| p.body),
+            Some("Stopped on an API error".to_string())
+        );
+    }
+
+    #[test]
+    fn waiting_reads_as_a_sentence() {
+        assert_eq!(
+            waiting_sentence("permission: Bash"),
+            "Wants permission to use Bash"
+        );
+        assert_eq!(waiting_sentence("permission"), "Wants your permission");
+        assert_eq!(waiting_sentence("a question"), "Has a question for you");
+        assert_eq!(
+            waiting_sentence("a plan to review"),
+            "Has a plan for you to review"
+        );
+        assert_eq!(waiting_sentence("input needed"), "Needs your input");
+        assert_eq!(waiting_sentence("something new"), "Something new");
+        assert_eq!(waiting_sentence(""), "Is waiting for you");
     }
 }

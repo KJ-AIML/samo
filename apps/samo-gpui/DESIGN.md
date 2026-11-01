@@ -80,7 +80,7 @@ Samo uses them when installed and falls back to the system face otherwise.
 | Face switch | `components.rs` `face_switch` | Every on/off: its thumb sleeps when off and wakes when on |
 | Empty / loading / error line | `components.rs` | Mascot asleep / Samo scanning / mascot blocked + words that say how to recover |
 | Truncating line | `art.rs` `clip_text` (`components::line`, `mono_line`) | Any single line that may not fit. Give it `.flex_1()` in a row or `.w_full()` in a column. |
-| Pop-up | `popup.rs` | A short note under the menu bar item (an extension's "needs you"). A non-activating panel: it never takes the keyboard. One at a time, gone after 6 s; a click opens the page it is about |
+| Pop-up | `popup.rs` | A short note under the menu bar item. A non-activating panel: it never takes the keyboard. The kind in Samo's ring (an Ink `!` when something waits for you, a Cobalt dial with a check when something finished) and a short bar of the same colour inside the left edge; a mono line with where it's from and when (`CLAUDE SESSIONS · FINISHED  08:44`); the title (the project) and one sentence. One at a time; 6 s, held while the pointer is on it (which shows a close button); a click opens the page it is about |
 | Extension page | `ext_view.rs`, `extensions_page.rs` | What an extension's helper sends, drawn with the components above: a section rule per section, figures and meters side by side in cells, rows with a lamp (`!` for "needs you"), switches, Default or Link buttons, notes |
 
 ## 6. Folders, the map, and colour
@@ -154,7 +154,8 @@ Samo lives in the menu bar too (`src/menubar.rs`, via `tray-icon`'s safe `NSStat
 
 ## 10. Motion and performance
 
-- A page arrives with a 180 ms fade, once. Nothing else animates by itself.
+- A page arrives with a 180 ms fade, once. A pop-up arrives with a 220 ms drop and fade and leaves with a 160 ms
+  fade. Nothing else animates by itself.
 - Samo's probe steps every 150 ms **only while a scan runs**; an idle Samo draws nothing new.
 - Sensors are read on their own thread (`src/hub.rs`) and the UI is woken by a channel only when there is news —
   never on the UI thread (a sensor read takes ~10 ms, which used to drop a frame every 1.2 s).
