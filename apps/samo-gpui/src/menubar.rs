@@ -172,6 +172,16 @@ pub(crate) fn main_screen_scale() -> f64 {
         .unwrap_or(2.0)
 }
 
+/// Closes the quick panel, if it is open.
+pub(crate) fn close_panel(cx: &mut App) {
+    let state = cx.global::<AppState>();
+    if let Some(handle) = state.panel {
+        state.hub.want_busiest(false);
+        cx.global_mut::<AppState>().panel = None;
+        let _ = handle.update(cx, |_, window, _| window.remove_window());
+    }
+}
+
 fn toggle_panel(rect: tray_icon::Rect, cx: &mut App) {
     let state = cx.global::<AppState>();
     if let Some(handle) = state.panel {

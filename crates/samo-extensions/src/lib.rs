@@ -23,7 +23,7 @@ pub mod worker;
 
 pub use error::InstallError;
 pub use history::History;
-pub use host::{Host, HostConfig, MAX_EXTENSIONS};
+pub use host::{Host, HostConfig, MAX_EXTENSIONS, this_macos};
 pub use install::{DevInstall, find_dev_packages, install_dev};
 pub use manage::{StoreInstall, UninstallFailed};
 pub use paths::ExtRoot;

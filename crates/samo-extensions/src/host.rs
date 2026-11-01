@@ -68,7 +68,7 @@ impl HostConfig {
             home: None,
             windows: WindowCheck::default(),
             window_every: Duration::from_secs(2),
-            macos: sysinfo::System::os_version(),
+            macos: this_macos(),
         }
     }
 }
@@ -138,6 +138,11 @@ impl Inner {
     fn helper(&self, manifest: &Manifest) -> PathBuf {
         self.root.helper(&manifest.id, &manifest.helper)
     }
+}
+
+/// This Mac's macOS version (`"15.1"`), or `None` if it can't be told.
+pub fn this_macos() -> Option<String> {
+    sysinfo::System::os_version()
 }
 
 /// The memory (bytes) and CPU (% of a core) a helper may use: its manifest's `[limits]`, else R8's.

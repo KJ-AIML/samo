@@ -1277,7 +1277,7 @@ fn updates_badge(frame: &Frame) -> Option<String> {
     let n = crate::store_view::update_count(
         frame.store.catalog.as_deref(),
         &frame.ext,
-        crate::store_view::SAMO_VERSION,
+        crate::store_view::Here::now(),
     );
     match n {
         0 => None,

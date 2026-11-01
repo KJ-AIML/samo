@@ -6,7 +6,7 @@
 
 use crate::components::*;
 use crate::shell::{Head, Page};
-use crate::store_view::{SAMO_VERSION, Segment, update_count};
+use crate::store_view::{Here, SAMO_VERSION, Segment, update_count};
 use crate::theme::*;
 use crate::{Frame, NavSection, SamoWorkspaceApp};
 use gpui::{Context, Div, FontWeight, IntoElement, ParentElement, Styled, div, prelude::*, px};
@@ -139,7 +139,7 @@ impl SamoWorkspaceApp {
             .filter(|l| newer(&l.version, SAMO_VERSION))
             .map(|l| l.whats_new)
             .filter(|w| !w.trim().is_empty());
-        let updates = update_count(view.catalog.as_deref(), &frame.ext, SAMO_VERSION);
+        let updates = update_count(view.catalog.as_deref(), &frame.ext, Here::now());
 
         let body = div()
             .flex()

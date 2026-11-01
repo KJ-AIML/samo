@@ -3,12 +3,37 @@
 
 use crate::components::TagKind;
 use samo_domain::extensions::samo_satisfies;
-use samo_domain::store::{Catalog, FileRef, Listing, newer, rank};
-use samo_ext_protocol::{Change, PROTOCOL_VERSION};
+use samo_domain::store::{Catalog, FileRef, Listing, macos_satisfies, newer, rank};
+use samo_ext_protocol::{
+    Change, KNOWN_PERMISSIONS, Limits, MAX_CPU_PCT, MAX_MEMORY_MB, PROTOCOL_VERSION,
+};
 use samo_extensions::{ExtSlot, ExtSnapshot};
+use std::sync::OnceLock;
 
 /// This Samo's version.
 pub const SAMO_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// This Mac's macOS version, read once (`""` if it can't be told, which meets no `min_macos`).
+pub fn this_macos() -> &'static str {
+    static MACOS: OnceLock<String> = OnceLock::new();
+    MACOS.get_or_init(|| samo_extensions::this_macos().unwrap_or_default())
+}
+
+/// Where a listing is judged: this Samo and this Mac.
+#[derive(Debug, Clone, Copy)]
+pub struct Here<'a> {
+    pub samo: &'a str,
+    pub macos: &'a str,
+}
+
+impl Here<'static> {
+    pub fn now() -> Self {
+        Here {
+            samo: SAMO_VERSION,
+            macos: this_macos(),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Segment {
@@ -23,6 +48,8 @@ pub enum RowState {
     /// In the store, not installed.
     Available,
     NeedsNewerSamo,
+    /// Its `min_macos` is newer than this Mac's.
+    NeedsNewerMac,
     Installed,
     Off,
     /// The store has a newer version.
@@ -36,6 +63,7 @@ impl RowState {
         match self {
             RowState::Available => None,
             RowState::NeedsNewerSamo => Some(("needs a newer Samo", TagKind::Neutral)),
+            RowState::NeedsNewerMac => Some(("needs a newer macOS", TagKind::Neutral)),
             RowState::Installed => Some(("installed", TagKind::Neutral)),
             RowState::Off => Some(("off", TagKind::Neutral)),
             RowState::Update => Some(("update", TagKind::Accent)),
@@ -63,21 +91,35 @@ pub struct Row {
     pub state: RowState,
 }
 
-/// Whether this Samo can run `listing`'s version.
-pub fn can_run(listing: &Listing, samo: &str) -> bool {
-    listing.protocol == PROTOCOL_VERSION && samo_satisfies(&listing.min_samo, samo)
+/// Whether this Samo understands everything `listing` declares: its protocol, its permissions and its limits.
+fn samo_can_run(listing: &Listing, samo: &str) -> bool {
+    let limits = listing.limits.unwrap_or_default();
+    listing.protocol == PROTOCOL_VERSION
+        && samo_satisfies(&listing.min_samo, samo)
+        && listing
+            .permissions
+            .iter()
+            .all(|p| KNOWN_PERMISSIONS.contains(&p.as_str()))
+        && limits.memory_mb.is_none_or(|m| m <= MAX_MEMORY_MB)
+        && limits.cpu_pct.is_none_or(|c| c <= MAX_CPU_PCT)
+}
+
+/// Whether this Samo, on this Mac, can run `listing`'s version.
+pub fn can_run(listing: &Listing, here: Here) -> bool {
+    samo_can_run(listing, here.samo) && macos_satisfies(listing.min_macos.as_deref(), here.macos)
 }
 
 pub fn row_state(
     listing: Option<&Listing>,
     installed: Option<&InstalledAs>,
-    samo: &str,
+    here: Here,
 ) -> RowState {
     match (installed, listing) {
-        (None, Some(l)) if !can_run(l, samo) => RowState::NeedsNewerSamo,
+        (None, Some(l)) if !samo_can_run(l, here.samo) => RowState::NeedsNewerSamo,
+        (None, Some(l)) if !can_run(l, here) => RowState::NeedsNewerMac,
         (None, _) => RowState::Available,
         (Some(i), _) if i.dev => RowState::Dev,
-        (Some(i), Some(l)) if newer(&l.version, &i.version) && can_run(l, samo) => RowState::Update,
+        (Some(i), Some(l)) if newer(&l.version, &i.version) && can_run(l, here) => RowState::Update,
         (Some(i), _) if !i.on => RowState::Off,
         (Some(_), _) => RowState::Installed,
     }
@@ -85,7 +127,7 @@ pub fn row_state(
 
 /// Every extension in the store and every installed one: installed first, in the order they were installed, then
 /// the rest by name.
-pub fn rows(catalog: Option<&Catalog>, ext: &ExtSnapshot, samo: &str) -> Vec<Row> {
+pub fn rows(catalog: Option<&Catalog>, ext: &ExtSnapshot, here: Here) -> Vec<Row> {
     let listed = |id: &str| catalog.and_then(|c| c.extensions.iter().find(|l| l.id == id));
     let mut out: Vec<Row> = ext
         .extensions
@@ -99,7 +141,7 @@ pub fn rows(catalog: Option<&Catalog>, ext: &ExtSnapshot, samo: &str) -> Vec<Row
                 changes: e.changes.clone(),
             };
             let store = listed(&e.id);
-            let state = row_state(store, Some(&installed), samo);
+            let state = row_state(store, Some(&installed), here);
             let listing = store.cloned().unwrap_or_else(|| Listing {
                 id: e.id.clone(),
                 name: e.name.clone(),
@@ -122,10 +164,10 @@ pub fn rows(catalog: Option<&Catalog>, ext: &ExtSnapshot, samo: &str) -> Vec<Row
                 icon: None,
                 screenshots: Vec::new(),
                 changes: e.changes.clone(),
-                windows: None,
-                permissions: Vec::new(),
+                windows: e.windows.clone(),
+                permissions: e.permissions.clone(),
                 min_macos: None,
-                limits: None,
+                limits: e.limits,
             });
             Row {
                 listing,
@@ -144,7 +186,7 @@ pub fn rows(catalog: Option<&Catalog>, ext: &ExtSnapshot, samo: &str) -> Vec<Row
             listing: l.clone(),
             in_store: true,
             installed: None,
-            state: row_state(Some(l), None, samo),
+            state: row_state(Some(l), None, here),
         })
         .collect();
     rest.sort_by(|a, b| a.listing.name.cmp(&b.listing.name));
@@ -172,11 +214,42 @@ pub fn visible(rows: &[Row], segment: Segment, query: &str) -> Vec<usize> {
 }
 
 /// How many installed extensions the store has a newer version of (the sidebar's count, from the cache).
-pub fn update_count(catalog: Option<&Catalog>, ext: &ExtSnapshot, samo: &str) -> usize {
-    rows(catalog, ext, samo)
+pub fn update_count(catalog: Option<&Catalog>, ext: &ExtSnapshot, here: Here) -> usize {
+    rows(catalog, ext, here)
         .iter()
         .filter(|r| r.state == RowState::Update)
         .count()
+}
+
+/// What an extension may do beyond its page, in words, shown before install (ADR-004): its windows, its
+/// permissions and its limits.
+pub fn capability_words(
+    windows: Option<&str>,
+    permissions: &[String],
+    limits: Option<Limits>,
+) -> Vec<String> {
+    let mut words = Vec::new();
+    if let Some(w) = windows {
+        words.push(w.to_string());
+    }
+    for p in permissions {
+        words.push(match p.as_str() {
+            "screen-recording" => {
+                "Asks for Screen Recording, to capture what's on screen".to_string()
+            }
+            other => format!("Asks for {other}"),
+        });
+    }
+    let limits = limits.unwrap_or_default();
+    if let Some(mb) = limits.memory_mb {
+        words.push(format!("Uses up to {mb} MB of memory"));
+    }
+    if let Some(pct) = limits.cpu_pct {
+        words.push(format!(
+            "Uses up to {pct}% of a CPU core, averaged over a minute"
+        ));
+    }
+    words
 }
 
 /// A description's blocks: plain paragraphs, and runs of `- ` lines drawn as bullets. No markdown engine.
@@ -323,7 +396,11 @@ mod tests {
             ],
             problems: Vec::new(),
         };
-        let rows = rows(Some(&catalog), &ext, "0.2.0");
+        let here = Here {
+            samo: "0.2.0",
+            macos: "15.0",
+        };
+        let rows = rows(Some(&catalog), &ext, here);
         let got: Vec<(&str, Option<&str>)> = rows
             .iter()
             .map(|r| (r.listing.id.as_str(), r.state.tag().map(|t| t.0)))
@@ -346,8 +423,8 @@ mod tests {
                 .find(|r| r.listing.id == "mine")
                 .is_some_and(|r| !r.in_store)
         );
-        assert_eq!(update_count(Some(&catalog), &ext, "0.2.0"), 1);
-        assert_eq!(update_count(None, &ext, "0.2.0"), 0);
+        assert_eq!(update_count(Some(&catalog), &ext, here), 1);
+        assert_eq!(update_count(None, &ext, here), 0);
 
         assert_eq!(visible(&rows, Segment::Updates, ""), vec![1]);
         assert_eq!(visible(&rows, Segment::Installed, "").len(), 4);
@@ -364,14 +441,56 @@ mod tests {
             changes: Vec::new(),
         };
         assert_eq!(
-            row_state(Some(&listing("hello", "0.3.0", "0.1.0")), Some(&i), "0.2.0"),
+            row_state(Some(&listing("hello", "0.3.0", "0.1.0")), Some(&i), here),
             RowState::Installed
         );
         // A newer version this Samo can't run isn't offered as an update.
         assert_eq!(
-            row_state(Some(&listing("hello", "0.4.0", "9.0.0")), Some(&i), "0.2.0"),
+            row_state(Some(&listing("hello", "0.4.0", "9.0.0")), Some(&i), here),
             RowState::Installed
         );
+    }
+
+    #[test]
+    fn capability_words() {
+        let words = super::capability_words(
+            Some("Opens its own windows: the capture overlay"),
+            &["screen-recording".to_string()],
+            Some(Limits {
+                memory_mb: Some(800),
+                cpu_pct: Some(60),
+            }),
+        );
+        assert_eq!(
+            words,
+            [
+                "Opens its own windows: the capture overlay",
+                "Asks for Screen Recording, to capture what's on screen",
+                "Uses up to 800 MB of memory",
+                "Uses up to 60% of a CPU core, averaged over a minute",
+            ]
+        );
+        assert!(super::capability_words(None, &[], None).is_empty());
+    }
+
+    #[test]
+    fn needs_newer_macos_disables_install() {
+        let mut l = listing("shots", "0.1.0", "0.3.0");
+        l.min_macos = Some("14.0".into());
+        let old_mac = Here {
+            samo: "0.3.0",
+            macos: "13.6",
+        };
+        let new_mac = Here {
+            samo: "0.3.0",
+            macos: "15.1",
+        };
+        assert_eq!(row_state(Some(&l), None, old_mac), RowState::NeedsNewerMac);
+        assert!(!can_run(&l, old_mac));
+        assert_eq!(row_state(Some(&l), None, new_mac), RowState::Available);
+        // A Samo that doesn't know a permission it asks for can't install it either.
+        l.permissions = vec!["camera".into()];
+        assert_eq!(row_state(Some(&l), None, new_mac), RowState::NeedsNewerSamo);
     }
 
     #[test]

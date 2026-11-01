@@ -9,8 +9,8 @@ use crate::art::dither_block;
 use crate::components::*;
 use crate::shell::{Head, Page};
 use crate::store_view::{
-    Block, InstalledAs, Row, RowState, SAMO_VERSION, Segment, can_run, description_blocks,
-    kept_backups, rows, size_words, visible,
+    Block, Here, InstalledAs, Row, RowState, Segment, can_run, capability_words,
+    description_blocks, kept_backups, rows, size_words, visible,
 };
 use crate::text_input::{Changed, TextInput};
 use crate::theme::*;
@@ -212,7 +212,7 @@ impl SamoWorkspaceApp {
     }
 
     pub(crate) fn render_extensions(&mut self, frame: &Frame, cx: &mut Context<Self>) -> Page {
-        let all = rows(frame.store.catalog.as_deref(), &frame.ext, SAMO_VERSION);
+        let all = rows(frame.store.catalog.as_deref(), &frame.ext, Here::now());
         if let Some(id) = self.store_ui.detail.clone() {
             if let Some(row) = all.iter().find(|r| r.listing.id == id) {
                 return self.render_detail(row, frame, cx);
@@ -590,6 +590,27 @@ impl SamoWorkspaceApp {
             );
         }
 
+        // What it may do beyond its page (ADR-004), before what it changes.
+        let may = capability_words(l.windows.as_deref(), &l.permissions, l.limits);
+        if !may.is_empty() {
+            content = content.child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .child(section_rule("What it may do", None))
+                    .children(may.into_iter().map(|words| {
+                        div()
+                            .py(px(6.0))
+                            .border_b_1()
+                            .border_color(pal.hairline)
+                            .font(body(FontWeight::NORMAL))
+                            .text_size(px(T_BODY))
+                            .text_color(pal.text)
+                            .child(words)
+                    })),
+            );
+        }
+
         // What it changes: the installed version's, or (when an update waits, or it isn't installed) the store's.
         let (changes, about): (&[Change], Option<String>) = match &row.installed {
             Some(i) if !update => (&i.changes, Some(format!("v{}", i.version))),
@@ -694,12 +715,24 @@ impl SamoWorkspaceApp {
                         .child(format!("Needs Samo {} or newer", l.min_samo)),
                 )
             }
+            (RowState::NeedsNewerMac, _) => {
+                buttons = buttons.child(
+                    div()
+                        .font(body(FontWeight::NORMAL))
+                        .text_size(px(T_META))
+                        .text_color(pal.text_2)
+                        .child(format!(
+                            "Needs macOS {} or newer",
+                            l.min_macos.as_deref().unwrap_or_default()
+                        )),
+                )
+            }
             (RowState::Update, _) => {
                 buttons = buttons
                     .child(uninstall(cx))
                     .child(install(format!("Update to {}", l.version), cx))
             }
-            (RowState::Dev, _) if row.in_store && can_run(l, SAMO_VERSION) => {
+            (RowState::Dev, _) if row.in_store && can_run(l, Here::now()) => {
                 let rid = id.clone();
                 buttons = buttons.child(uninstall(cx)).child(
                     button(
