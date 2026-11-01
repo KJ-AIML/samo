@@ -4389,6 +4389,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "samo-claude"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "samo-ext-protocol",
+ "samo-extensions",
+ "samo-primitives",
+ "serde",
+ "serde_json",
+ "sysinfo",
+ "tempfile",
+]
+
+[[package]]
 name = "samo-cli"
 version = "0.1.0"
 dependencies = [
@@ -4405,6 +4419,7 @@ name = "samo-domain"
 version = "0.1.0"
 dependencies = [
  "samo-blueprint",
+ "samo-ext-protocol",
  "samo-primitives",
  "serde",
 ]
@@ -4427,6 +4442,42 @@ dependencies = [
 ]
 
 [[package]]
+name = "samo-ext-hello"
+version = "0.1.0"
+dependencies = [
+ "samo-ext-protocol",
+ "samo-primitives",
+ "serde_json",
+]
+
+[[package]]
+name = "samo-ext-protocol"
+version = "0.1.0"
+dependencies = [
+ "samo-primitives",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "toml 0.8.23",
+]
+
+[[package]]
+name = "samo-extensions"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "samo-domain",
+ "samo-ext-protocol",
+ "samo-primitives",
+ "samo-testkit",
+ "serde",
+ "serde_json",
+ "sysinfo",
+ "tempfile",
+ "toml 0.8.23",
+]
+
+[[package]]
 name = "samo-gpui"
 version = "0.1.0"
 dependencies = [
@@ -4438,6 +4489,8 @@ dependencies = [
  "objc2-foundation",
  "samo-blueprint",
  "samo-domain",
+ "samo-ext-protocol",
+ "samo-extensions",
  "samo-macos",
  "samo-primitives",
  "tray-icon",

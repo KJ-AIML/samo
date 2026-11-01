@@ -3,6 +3,8 @@ mod assets;
 mod charts;
 mod components;
 mod disk_view;
+mod ext_view;
+mod extensions_page;
 mod hub;
 mod layout;
 mod live;
@@ -10,6 +12,7 @@ mod locations;
 mod menubar;
 mod overview;
 mod performance;
+mod popup;
 mod processes;
 mod projects;
 mod shell;
@@ -48,6 +51,10 @@ struct AppState {
     panel: Option<WindowHandle<menubar::QuickPanel>>,
     panel_closed_at: Option<Instant>,
     menubar: Option<menubar::MenuBar>,
+    /// The pop-up showing under the menu bar item, if any, and a count that tells its hide timer whether a newer
+    /// pop-up replaced it.
+    popup: Option<WindowHandle<popup::PopupView>>,
+    popup_gen: u64,
 }
 
 impl Global for AppState {}
@@ -67,8 +74,72 @@ fn snapshot(hub: &Hub, layout: Layout) -> Option<Frame> {
         telemetry_view: g.telemetry_view,
         busiest: g.busiest.clone(),
         thermal: g.thermal,
+        ext: hub
+            .ext
+            .get()
+            .map(samo_extensions::Host::snapshot)
+            .unwrap_or_default(),
         layout,
     })
+}
+
+/// Starts installed extensions' helpers (ADR-002). Without a home folder there is nowhere to keep them.
+fn start_extensions(hub: &Hub) {
+    let Some(root) = samo_extensions::ExtRoot::resolve() else {
+        return;
+    };
+    let waker = hub.clone();
+    let host = samo_extensions::Host::start(
+        root,
+        samo_extensions::HostConfig::new(env!("CARGO_PKG_VERSION")),
+        Arc::new(move || waker.wake_ui()),
+    );
+    let _ = hub.ext.set(host);
+}
+
+/// Shows what extensions asked to pop up, unless you're already looking at that extension's page.
+fn show_extension_popups(cx: &mut App) {
+    let Some(host) = cx.global::<AppState>().hub.ext.get().cloned() else {
+        return;
+    };
+    let Some(latest) = host.take_popups().pop() else {
+        return;
+    };
+    let looking = cx.global::<AppState>().main.and_then(|handle| {
+        handle
+            .update(cx, |view, window, _| (view.nav, window.is_window_active()))
+            .ok()
+    });
+    if !popup::should_show(latest.slot, looking) {
+        return;
+    }
+    let source = host
+        .snapshot()
+        .get(latest.slot)
+        .map(|e| e.name.clone())
+        .unwrap_or_default();
+    popup::show(
+        popup::Popup {
+            source,
+            kind: match latest.kind {
+                samo_extensions::PopupKind::NeedsYou => popup::PopupKind::NeedsYou,
+                samo_extensions::PopupKind::Finished => popup::PopupKind::Finished,
+                samo_extensions::PopupKind::Info => popup::PopupKind::Info,
+            },
+            title: latest.title,
+            body: latest.body,
+            target: Some(NavSection::Extension(latest.slot)),
+        },
+        cx,
+    );
+}
+
+/// Quits Samo, stopping extensions' helpers first (each gets 2 s to finish).
+fn quit(cx: &mut App) {
+    if let Some(host) = cx.global::<AppState>().hub.ext.get() {
+        host.shutdown_all();
+    }
+    cx.quit();
 }
 
 /// Brings the main window forward (opening it again if it was closed), optionally on a page.
@@ -123,6 +194,10 @@ enum NavSection {
     Storage,
     Processes,
     Performance,
+    /// What is installed, each with a switch.
+    Extensions,
+    /// One extension's own page.
+    Extension(samo_extensions::ExtSlot),
 }
 
 impl NavSection {
@@ -141,6 +216,16 @@ impl NavSection {
             Self::Storage => "Storage",
             Self::Processes => "Processes",
             Self::Performance => "Performance",
+            Self::Extensions => "Extensions",
+            Self::Extension(_) => "Extension",
+        }
+    }
+
+    /// Unique per page, for element ids (two extensions' pages share a title).
+    fn key(self) -> String {
+        match self {
+            Self::Extension(slot) => format!("Extension-{}", slot.0),
+            other => other.title().to_string(),
         }
     }
 
@@ -151,7 +236,17 @@ impl NavSection {
             Self::Storage => "bubbles",
             Self::Processes => "pulse",
             Self::Performance => "chip",
+            Self::Extensions | Self::Extension(_) => "plug",
         }
+    }
+
+    /// `SAMO_START_PAGE`'s words: a fixed page's title, in any case.
+    fn from_name(name: &str) -> Option<Self> {
+        let wanted = name.trim().to_ascii_lowercase();
+        NavSection::ALL
+            .into_iter()
+            .chain([NavSection::Extensions])
+            .find(|s| s.title().to_ascii_lowercase() == wanted)
     }
 }
 
@@ -229,6 +324,8 @@ struct Frame {
     /// The process using the most CPU right now, across all processes.
     busiest: Option<(String, f32)>,
     thermal: Option<hub::Thermal>,
+    /// Installed extensions and what their helpers last said.
+    ext: Arc<samo_extensions::ExtSnapshot>,
     layout: Layout,
 }
 
@@ -298,14 +395,16 @@ fn resolve_default_root() -> String {
     "/".to_string()
 }
 
-/// `SAMO_START_PAGE=projects|storage|processes|performance` opens on that page.
-fn resolve_start_page() -> NavSection {
-    let wanted = env::var("SAMO_START_PAGE")
-        .unwrap_or_default()
-        .to_ascii_lowercase();
-    NavSection::ALL
-        .into_iter()
-        .find(|s| s.title().to_ascii_lowercase() == wanted)
+/// `SAMO_START_PAGE=projects|storage|processes|performance|extensions` opens on that page; an installed
+/// extension's id (`SAMO_START_PAGE=hello`) opens on its page.
+fn resolve_start_page(hub: &Hub) -> NavSection {
+    let wanted = env::var("SAMO_START_PAGE").unwrap_or_default();
+    NavSection::from_name(&wanted)
+        .or_else(|| {
+            let ext = hub.ext.get()?.snapshot();
+            let found = ext.extensions.iter().find(|e| e.id == wanted)?;
+            Some(NavSection::Extension(found.slot))
+        })
         .unwrap_or(NavSection::Overview)
 }
 
@@ -363,9 +462,13 @@ impl SamoWorkspaceApp {
 
         let placeholder = hub.shared.lock().map(|g| g.telemetry.clone()).ok();
 
+        let nav = resolve_start_page(&hub);
+        if let (NavSection::Extension(slot), Some(host)) = (nav, hub.ext.get()) {
+            host.visible(slot, true);
+        }
         Self {
             hub,
-            nav: resolve_start_page(),
+            nav,
             proc_sort: ProcessSort::Memory,
             include_self: false,
             pending_confirm: None,
@@ -507,6 +610,17 @@ impl SamoWorkspaceApp {
     }
 
     fn set_nav(&mut self, section: NavSection, cx: &mut Context<Self>) {
+        // Tell extensions whether their page is on screen, so they can skip pop-ups you'd see anyway.
+        if let Some(host) = self.hub.ext.get() {
+            if let NavSection::Extension(old) = self.nav
+                && self.nav != section
+            {
+                host.visible(old, false);
+            }
+            if let NavSection::Extension(new) = section {
+                host.visible(new, true);
+            }
+        }
         self.nav = section;
         cx.notify();
     }
@@ -717,6 +831,8 @@ impl Render for SamoWorkspaceApp {
             NavSection::Storage => self.render_storage(&frame, cx),
             NavSection::Processes => self.render_processes(&frame, cx),
             NavSection::Performance => self.render_performance(&frame),
+            NavSection::Extensions => self.render_extensions(&frame, cx),
+            NavSection::Extension(slot) => self.render_extension(slot, &frame, cx),
         };
 
         div()
@@ -746,7 +862,7 @@ fn main() {
     app.on_reopen(|cx| open_main(cx, None));
     app.run(|cx: &mut App| {
         theme::init_fonts(cx);
-        cx.on_action(|_: &Quit, cx| cx.quit());
+        cx.on_action(|_: &Quit, cx| quit(cx));
         cx.on_action(|_: &ShowWindow, cx| open_main(cx, None));
         cx.bind_keys([
             KeyBinding::new("cmd-q", Quit, None),
@@ -771,12 +887,15 @@ fn main() {
             .map(|g| g.scan_root.clone())
             .unwrap_or_else(|_| resolve_default_root());
         SamoWorkspaceApp::spawn_scan(&hub, root, true);
+        start_extensions(&hub);
         cx.set_global(AppState {
             hub,
             main: None,
             panel: None,
             panel_closed_at: None,
             menubar: None,
+            popup: None,
+            popup_gen: 0,
         });
         let menubar = menubar::MenuBar::install(cx);
         cx.global_mut::<AppState>().menubar = menubar;
@@ -788,6 +907,7 @@ fn main() {
                 let drawn = cx.update(|cx| {
                     cx.refresh_windows();
                     menubar::refresh(cx);
+                    show_extension_popups(cx);
                 });
                 if drawn.is_err() {
                     break;
@@ -862,5 +982,27 @@ mod tests {
         assert!(is_within("/a/b/c", "/a/b"));
         assert!(!is_within("/a/bc", "/a/b"));
         assert!(!is_within("/a", "/a/b"));
+    }
+
+    #[test]
+    fn start_page_accepts_extensions() {
+        assert_eq!(
+            NavSection::from_name("extensions"),
+            Some(NavSection::Extensions)
+        );
+        assert_eq!(
+            NavSection::from_name("Performance"),
+            Some(NavSection::Performance)
+        );
+        assert_eq!(NavSection::from_name("extension"), None);
+        assert_eq!(NavSection::from_name(""), None);
+    }
+
+    #[test]
+    fn extension_pages_have_their_own_keys() {
+        let a = NavSection::Extension(samo_extensions::ExtSlot(0));
+        let b = NavSection::Extension(samo_extensions::ExtSlot(1));
+        assert_ne!(a.key(), b.key());
+        assert_eq!(NavSection::Overview.key(), "Overview");
     }
 }

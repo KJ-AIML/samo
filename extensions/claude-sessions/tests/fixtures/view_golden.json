@@ -1,0 +1,111 @@
+[
+  {
+    "widget": "section",
+    "title": "SESSIONS · LIVE",
+    "about": "2 running"
+  },
+  {
+    "widget": "rows",
+    "items": [
+      {
+        "lamp": "needs_you",
+        "title": "talvyn-mesh",
+        "detail": "permission: Bash · 12 s",
+        "trailing": "950",
+        "tag": null
+      },
+      {
+        "lamp": "working",
+        "title": "samo",
+        "detail": "working · 4 min",
+        "trailing": "12.3k",
+        "tag": null
+      },
+      {
+        "lamp": "done",
+        "title": "crm",
+        "detail": "done · 3 min ago",
+        "trailing": "",
+        "tag": null
+      }
+    ]
+  },
+  {
+    "widget": "section",
+    "title": "TODAY",
+    "about": null
+  },
+  {
+    "widget": "figure",
+    "label": "Tokens",
+    "value": {
+      "state": "available",
+      "value": 1234567.0,
+      "sampled_at_ms": 5
+    },
+    "unit": "tokens",
+    "note": "in 1.0k · out 20.0k · cache 200.0k written, 1.01M read"
+  },
+  {
+    "widget": "section",
+    "title": "PLAN LIMITS",
+    "about": null
+  },
+  {
+    "widget": "meter",
+    "label": "5-hour",
+    "fraction": {
+      "state": "available",
+      "value": 0.34,
+      "sampled_at_ms": 1000000
+    },
+    "note": "resets t2000 · as of t1000"
+  },
+  {
+    "widget": "meter",
+    "label": "Weekly",
+    "fraction": {
+      "state": "unsupported",
+      "reason": "not_reported"
+    },
+    "note": "not reported by Claude Code yet"
+  },
+  {
+    "widget": "note",
+    "text": "Limits come from Claude Code's status line, which runs in a terminal. Its VS Code panel and desktop app don't run it, so limits update when you use Claude Code in a terminal.",
+    "kind": "plain"
+  },
+  {
+    "widget": "section",
+    "title": "CONNECTION",
+    "about": null
+  },
+  {
+    "widget": "switch",
+    "key": "connect",
+    "label": "Connect to Claude Code",
+    "on": true,
+    "note": "Adds Samo's hooks to ~/.claude/settings.json, backed up first. Turning it off takes exactly them out."
+  },
+  {
+    "widget": "switch",
+    "key": "plan_limits",
+    "label": "Plan limits",
+    "on": true,
+    "note": "Sets Claude Code's status line to show your limits. Claude Code then hides some footer hints."
+  },
+  {
+    "widget": "switch",
+    "key": "popup_needs_you",
+    "label": "Pop up when a session needs you",
+    "on": true,
+    "note": null
+  },
+  {
+    "widget": "switch",
+    "key": "popup_finished",
+    "label": "Pop up when a turn of 15 s or more finishes",
+    "on": false,
+    "note": null
+  }
+]

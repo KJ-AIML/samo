@@ -1,0 +1,40 @@
+id = "claude-sessions"
+name = "Claude Sessions"
+version = "0.1.0"
+protocol = 1
+min_samo = "0.1.0"
+helper = "bin/samo-claude"
+summary = "Your Claude Code sessions at a glance: who's working, who needs you, today's tokens, plan limits"
+
+[[changes]]
+what = "Adds hooks to Claude Code's settings when you press Connect, after backing the file up"
+where = "~/.claude/settings.json (backup: settings.json.samo-bak)"
+undo = "Disconnect, Off or Remove takes exactly them out"
+
+[[changes]]
+what = "Sets Claude Code's status line when you turn on Plan limits, never replacing one you have"
+where = "~/.claude/settings.json"
+undo = "Turning Plan limits off, Off or Remove takes it out"
+
+[[changes]]
+what = "Reads today's Claude Code transcripts to count tokens; never changes them, never goes online"
+where = "~/.claude/projects"
+undo = "Nothing to undo"
+
+[[settings]]
+key = "connect"
+label = "Connect to Claude Code"
+
+[[settings]]
+key = "plan_limits"
+label = "Plan limits"
+
+[[settings]]
+key = "popup_needs_you"
+label = "Pop up when a session needs you"
+default = true
+
+[[settings]]
+key = "popup_finished"
+label = "Pop up when a turn finishes"
+default = true

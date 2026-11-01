@@ -1,0 +1,1 @@
+{"session_id":"SESSION","transcript_path":"TRANSCRIPT","cwd":"/Users/kj/Developer/samo","permission_mode":"default","hook_event_name":"PostToolUseFailure","tool_name":"Bash","tool_input":{},"tool_use_id":"t1","error":"exit 1","is_interrupt":false}

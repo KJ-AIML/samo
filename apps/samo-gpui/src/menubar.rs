@@ -6,7 +6,7 @@
 //! full window; clicking anywhere else closes it. The status item itself comes from `tray-icon`, which wraps
 //! `NSStatusItem` safely (Samo's own code stays free of `unsafe`).
 
-use crate::art::{Mood, Who, cell, logo_mark, probe_template, scan_step};
+use crate::art::{Mood, Who, cell, led_meter, logo_mark, probe_template, scan_step};
 use crate::components::*;
 use crate::layout::Layout;
 use crate::shell::{glass_panel, readout_cell, readout_dot_h, readouts, samo_mood, samo_status};
@@ -24,6 +24,10 @@ use tray_icon::{Icon, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent
 
 pub const PANEL_W: f32 = 340.0;
 pub const PANEL_H: f32 = 446.0;
+/// One quiet line under the readout.
+const FACT_H: f32 = 34.0;
+/// The quick panel shows a line for at most this many extensions.
+const MAX_EXT_FACTS: usize = 3;
 
 /// What the menu bar item currently shows, so it is only redrawn when something changed.
 #[derive(PartialEq)]
@@ -70,6 +74,16 @@ impl MenuBar {
         Some(Self { tray, shown: None })
     }
 
+    /// Where the item is on screen, in pixels; `None` before macOS has placed it.
+    pub fn tray_rect(&self) -> Option<crate::popup::TrayRect> {
+        self.tray.rect().map(|r| crate::popup::TrayRect {
+            x: r.position.x,
+            y: r.position.y,
+            w: f64::from(r.size.width),
+            h: f64::from(r.size.height),
+        })
+    }
+
     /// Brings the item up to date. Cheap when nothing changed (most ticks).
     fn refresh(&mut self, frame: &Frame) {
         let mood = samo_mood(frame);
@@ -80,7 +94,7 @@ impl MenuBar {
             } else {
                 0
             },
-            title: cpu_title(frame),
+            title: compose_title(cpu_pct(frame), frame.ext.attention()),
         };
         let (icon_changed, title_changed) = match &self.shown {
             Some(s) => (
@@ -118,11 +132,24 @@ fn probe_icon(mood: Mood, step: i32) -> Option<Icon> {
     Icon::from_rgba(rgba, w, h).ok()
 }
 
-/// `" 7%"`, `"37%"`: padded with figure spaces so the item doesn't shuffle as the figure changes width.
-fn cpu_title(frame: &Frame) -> String {
+fn cpu_pct(frame: &Frame) -> Option<f32> {
     match frame.telemetry.latest.cpu_overall_pct {
-        Reading::Available { value, .. } => pad_figure(format!("{:.0}%", value.clamp(0.0, 100.0))),
-        _ => String::new(),
+        Reading::Available { value, .. } => Some(value),
+        _ => None,
+    }
+}
+
+/// `" 7%"`, `"37%"`: padded with figure spaces so the item doesn't shuffle as the figure changes width. While
+/// extensions have something waiting for you, their count follows: `"23% !1"`. The probe's eyes stay Samo's own
+/// state (DESIGN.md rule 3); the count is text beside it.
+pub(crate) fn compose_title(cpu: Option<f32>, attention: u32) -> String {
+    let figure = cpu
+        .map(|value| pad_figure(format!("{:.0}%", value.clamp(0.0, 100.0))))
+        .unwrap_or_default();
+    match (attention, figure.is_empty()) {
+        (0, _) => figure,
+        (n, true) => format!("!{n}"),
+        (n, false) => format!("{figure} !{n}"),
     }
 }
 
@@ -137,7 +164,7 @@ fn pad_figure(s: String) -> String {
 }
 
 /// The main screen's points-to-pixels factor; the item's rectangle arrives in pixels.
-fn main_screen_scale() -> f64 {
+pub(crate) fn main_screen_scale() -> f64 {
     objc2::MainThreadMarker::new()
         .and_then(objc2_app_kit::NSScreen::mainScreen)
         .map(|screen| screen.backingScaleFactor())
@@ -173,11 +200,17 @@ fn toggle_panel(rect: tray_icon::Rect, cx: &mut App) {
         .clamp(8.0, (display_w - PANEL_W - 8.0).max(8.0));
     let y = icon_bottom as f32 + 6.0;
 
+    let ext_lines = state
+        .hub
+        .ext
+        .get()
+        .map_or(0, |host| ext_facts_count(&host.snapshot()));
+    let panel_h = PANEL_H + FACT_H * ext_lines as f32;
     let opened = cx.open_window(
         WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(Bounds {
                 origin: point(px(x), px(y)),
-                size: size(px(PANEL_W), px(PANEL_H)),
+                size: size(px(PANEL_W), px(panel_h)),
             })),
             titlebar: None,
             focus: true,
@@ -330,7 +363,13 @@ impl Render for QuickPanel {
                     .pt(px(6.0))
                     .flex()
                     .flex_col()
-                    .children(facts(&frame)),
+                    .children(facts(&frame))
+                    .children(ext_facts(&frame).into_iter().map(|(fact, go)| {
+                        fact.on_click(cx.listener(move |_, _, window, cx| {
+                            open_main(cx, go);
+                            QuickPanel::close(window, cx);
+                        }))
+                    })),
             )
             .child(div().flex_1())
             // into the app, or out
@@ -382,7 +421,7 @@ impl Render for QuickPanel {
                     )
                     .child(
                         icon_button("qp-quit", "power", "Quit Samo", Variant::Link, true)
-                            .on_click(|_, _, cx| cx.quit()),
+                            .on_click(|_, _, cx| crate::quit(cx)),
                     ),
             )
     }
@@ -456,9 +495,124 @@ fn facts(frame: &Frame) -> Vec<gpui::Div> {
     .collect()
 }
 
+fn ext_facts_count(ext: &samo_extensions::ExtSnapshot) -> usize {
+    ext.extensions
+        .iter()
+        .filter(|e| e.on)
+        .count()
+        .min(MAX_EXT_FACTS)
+}
+
+/// A badge meter's words: `5h 36%`, or `5h --` when unknown (never `0%`).
+pub(crate) fn meter_text(meter: &samo_ext_protocol::BadgeMeter) -> String {
+    match crate::ext_view::meter_share(&meter.fraction) {
+        Some(share) => format!("{} {:.0}%", meter.label, share * 100.0),
+        None => format!("{} --", meter.label),
+    }
+}
+
+/// A line for each extension that is on: what it says is waiting, its load bar if it sends one, and how many
+/// things wait. A click opens its page.
+fn ext_facts(frame: &Frame) -> Vec<(gpui::Stateful<gpui::Div>, Option<NavSection>)> {
+    let pal = p();
+    frame
+        .ext
+        .extensions
+        .iter()
+        .filter(|e| e.on)
+        .take(MAX_EXT_FACTS)
+        .map(|e| {
+            let text = if e.badge_summary.is_empty() {
+                format!("{} · nothing waiting", e.name)
+            } else {
+                e.badge_summary.clone()
+            };
+            let fact = div()
+                .id(("qp-ext", usize::from(e.slot.0)))
+                .h(px(FACT_H))
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap(px(S2))
+                .border_b_1()
+                .border_color(pal.hairline)
+                .cursor_pointer()
+                .child(icon("plug", 14.0, pal.text_2))
+                .child(line(text, FontWeight::NORMAL, 13.0, pal.text).flex_1())
+                .children(e.badge_meter.as_ref().map(|meter| {
+                    div()
+                        .flex_shrink_0()
+                        .flex()
+                        .flex_row()
+                        .items_center()
+                        .gap(px(6.0))
+                        .child(div().w(px(56.0)).child(led_meter(
+                            crate::ext_view::meter_share(&meter.fraction),
+                            pal.accent,
+                            pal.dot,
+                            6.0,
+                        )))
+                        .child(
+                            div()
+                                .min_w(px(52.0))
+                                .flex()
+                                .justify_end()
+                                .font(mono(FontWeight::MEDIUM))
+                                .text_size(px(12.0))
+                                .text_color(pal.text)
+                                .whitespace_nowrap()
+                                .child(meter_text(meter)),
+                        )
+                }))
+                .when(e.badge > 0, |row| {
+                    row.child(
+                        div()
+                            .flex_shrink_0()
+                            .font(mono(FontWeight::BOLD))
+                            .text_size(px(12.0))
+                            .text_color(pal.text)
+                            .child(format!("!{}", e.badge)),
+                    )
+                });
+            (fact, Some(NavSection::Extension(e.slot)))
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn meter_words_never_say_zero_for_unknown() {
+        use samo_ext_protocol::BadgeMeter;
+        use samo_primitives::{Reading, UnsupportedReason};
+        let meter = |fraction| BadgeMeter {
+            label: "5h".into(),
+            fraction,
+        };
+        assert_eq!(meter_text(&meter(Reading::available(0.36, 1))), "5h 36%");
+        assert_eq!(meter_text(&meter(Reading::available(0.0, 1))), "5h 0%");
+        assert_eq!(
+            meter_text(&meter(Reading::unsupported(UnsupportedReason::NotReported))),
+            "5h --"
+        );
+        assert_eq!(meter_text(&meter(Reading::stopped(5))), "5h --");
+    }
+
+    #[test]
+    fn title_appends_attention_count() {
+        assert_eq!(compose_title(Some(23.4), 1), "\u{2007}23% !1");
+        assert_eq!(compose_title(Some(100.0), 12), "100% !12");
+        assert_eq!(compose_title(None, 2), "!2");
+    }
+
+    #[test]
+    fn title_without_attention_is_unchanged() {
+        assert_eq!(compose_title(Some(7.0), 0), "\u{2007}\u{2007}7%");
+        assert_eq!(compose_title(Some(150.0), 0), "100%");
+        assert_eq!(compose_title(None, 0), "");
+    }
 
     #[test]
     fn titles_keep_one_width() {

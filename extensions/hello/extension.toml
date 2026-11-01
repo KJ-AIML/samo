@@ -1,0 +1,17 @@
+id = "hello"
+name = "Hello"
+version = "0.1.0"
+protocol = 1
+min_samo = "0.1.0"
+helper = "bin/samo-ext-hello"
+summary = "Samo's example extension: every widget, a badge and a pop-up"
+
+[[changes]]
+what = "Nothing outside its own folder"
+where = "~/Library/Application Support/Samo/Extensions/hello"
+undo = "Remove deletes the folder"
+
+[[settings]]
+key = "greet"
+label = "Wave from the menu bar"
+default = true

@@ -32,7 +32,7 @@ pub fn check_cleanup_source(rel_path: &str, content: &str) -> Result<(), String>
     Ok(())
 }
 
-fn visit_rs_files(
+pub fn visit_rs_files(
     root: &Path,
     dir: &Path,
     cb: &mut dyn FnMut(&str, &str) -> Result<(), String>,
@@ -62,6 +62,7 @@ pub fn check_purity(root: &Path) -> Result<(), String> {
         "crates/samo-primitives/src",
         "crates/samo-blueprint/src",
         "crates/samo-domain/src",
+        "crates/samo-ext-protocol/src",
     ] {
         visit_rs_files(root, &root.join(pure_dir), &mut check_pure_source)?;
     }
