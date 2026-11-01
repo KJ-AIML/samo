@@ -188,7 +188,7 @@ final class ShotsApp {
             macOS: Conflicts.macScreenshotShortcuts(symbolicHotKeys: symbolic),
             apps: Conflicts.runningScreenshotApps(bundleIds: running)
         )
-        let home = FileManager.default.homeDirectoryForCurrentUser
+        let home = URL(fileURLWithPath: Settings.home, isDirectory: true)
         let desktopSynced = FileManager.default.fileExists(
             atPath: home.appendingPathComponent("Library/Mobile Documents/com~apple~CloudDocs/Desktop").path
         )

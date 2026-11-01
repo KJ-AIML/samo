@@ -135,8 +135,7 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
         panel.directoryURL = get().folderURL
         guard panel.runModal() == .OK, let url = panel.url else { return }
         var settings = get()
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        settings.folder = url.path.hasPrefix(home) ? "~" + url.path.dropFirst(home.count) : url.path
+        settings.folder = Settings.abbreviate(url.path)
         set(settings)
         folderLabel?.stringValue = settings.folder
     }

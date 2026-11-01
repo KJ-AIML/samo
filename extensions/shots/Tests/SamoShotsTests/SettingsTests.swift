@@ -36,6 +36,23 @@ final class SettingsTests: XCTestCase {
         XCTAssertTrue(Shortcut.area.canBeGlobal)
     }
 
+    func testTildeIsHomeFromTheEnvironment() throws {
+        XCTAssertEqual(Settings.expand("~/Pictures/Shots", home: "/tmp/h"), "/tmp/h/Pictures/Shots")
+        XCTAssertEqual(Settings.expand("~", home: "/tmp/h"), "/tmp/h")
+        XCTAssertEqual(Settings.expand("/Volumes/Shots", home: "/tmp/h"), "/Volumes/Shots")
+        XCTAssertEqual(Settings.abbreviate("/tmp/h/Pictures", home: "/tmp/h"), "~/Pictures")
+        // A sibling that merely starts the same isn't inside the home.
+        XCTAssertEqual(Settings.abbreviate("/tmp/h2/Pictures", home: "/tmp/h"), "/tmp/h2/Pictures")
+
+        // Samo runs helpers with their own `HOME`; the folder follows it, not the account's home.
+        let before = ProcessInfo.processInfo.environment["HOME"]
+        setenv("HOME", "/tmp/shots-home", 1)
+        defer {
+            if let before { setenv("HOME", before, 1) } else { unsetenv("HOME") }
+        }
+        XCTAssertEqual(Settings().folderURL.path, "/tmp/shots-home/Pictures/Shots")
+    }
+
     func testRecentKeepsTwenty() throws {
         var recent = Recent()
         let start = Date(timeIntervalSince1970: 1_000_000)

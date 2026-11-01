@@ -5,7 +5,7 @@
 import Foundation
 
 public enum Conflicts {
-    /// Screenshot apps that take ⌘⇧ shortcuts, by bundle id prefix and name.
+    /// Screenshot apps that take ⇧⌘ shortcuts, by bundle id prefix and name.
     public static let screenshotApps: [(bundlePrefix: String, name: String)] = [
         ("cc.ffitch.shottr", "Shottr"),
         ("pl.maketheweb.cleanshotx", "CleanShot X"),
@@ -22,7 +22,7 @@ public enum Conflicts {
         return names
     }
 
-    /// macOS's own screenshot shortcuts (⌘⇧3, ⌃⌘⇧3, ⌘⇧4, ⌃⌘⇧4, ⌘⇧5) that are on, from `com.apple.symbolichotkeys`.
+    /// macOS's own screenshot shortcuts (⇧⌘3, ⌃⇧⌘3, ⇧⌘4, ⌃⇧⌘4, ⇧⌘5) that are on, from `com.apple.symbolichotkeys`.
     /// Missing entries are macOS's defaults, which are on.
     public static func macScreenshotShortcuts(symbolicHotKeys: [String: Any]?) -> [Shortcut] {
         let defaults: [String: Shortcut] = [

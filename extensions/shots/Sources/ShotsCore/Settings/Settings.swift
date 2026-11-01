@@ -64,7 +64,28 @@ public struct Settings: Codable, Equatable {
     public init() {}
 
     public var folderURL: URL {
-        URL(fileURLWithPath: (folder as NSString).expandingTildeInPath, isDirectory: true)
+        URL(fileURLWithPath: Settings.expand(folder), isDirectory: true)
+    }
+
+    /// The home folder: `$HOME`, which Samo sets for its helpers, else the account's. (`expandingTildeInPath`
+    /// reads the account's, so a Shots run under another home would save into the real one.)
+    public static var home: String {
+        if let home = ProcessInfo.processInfo.environment["HOME"], !home.isEmpty { return home }
+        return NSHomeDirectory()
+    }
+
+    /// `~` and `~/…` as paths in `home`.
+    public static func expand(_ path: String, home: String = Settings.home) -> String {
+        if path == "~" { return home }
+        if path.hasPrefix("~/") { return home + path.dropFirst() }
+        return path
+    }
+
+    /// A path in `home` as `~/…`, the way the folder is shown and kept.
+    public static func abbreviate(_ path: String, home: String = Settings.home) -> String {
+        if path == home { return "~" }
+        if path.hasPrefix(home + "/") { return "~" + path.dropFirst(home.count) }
+        return path
     }
 
     public static func load(dataDir: URL) -> Settings {

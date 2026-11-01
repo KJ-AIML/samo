@@ -1,7 +1,7 @@
 // The capture overlay on one display (ADR-004 S1): the frozen screen, dimmed, with the selection clear. A crosshair
 // and a magnifier follow the pointer; the selection's size is shown in pixels.
 //
-// Keys, as macOS's own ⌘⇧4 has them: drag to select (⇧ keeps a square; Space held while dragging moves it; arrows
+// Keys, as macOS's own ⇧⌘4 has them: drag to select (⇧ keeps a square; Space held while dragging moves it; arrows
 // nudge its corner by a point, ⇧ by ten); release, or Return, captures. Space before dragging switches to windows.
 // Esc cancels. S, T, C and R are for later versions.
 

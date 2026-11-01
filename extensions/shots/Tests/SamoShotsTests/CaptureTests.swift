@@ -16,6 +16,7 @@ private func image(_ width: Int, _ height: Int) throws -> CGImage {
 /// Records what happened, in order.
 private final class Log {
     var events: [String] = []
+    var copied: Data?
 }
 
 private struct FakeClipboard: Clipboard {
@@ -23,6 +24,7 @@ private struct FakeClipboard: Clipboard {
     var works = true
     func put(png: Data) -> Bool {
         log.events.append("copy")
+        log.copied = png
         return works
     }
 }
@@ -99,6 +101,25 @@ final class CaptureTests: XCTestCase {
                                       openPin: { _ in log.events.append("pin") })
         XCTAssertEqual(log.events, ["pin"])
         XCTAssertEqual(pinned.note, "Pinned")
+    }
+
+    func testCopyAndSaveShareOneEncode() throws {
+        let log = Log()
+        let shot = Shot(image: try image(64, 48), scale: 2, takenAt: Date())
+        let disk = FakeDisk(log: log)
+        let outcome = AfterCapture.run(shot, settings: Settings(), clipboard: FakeClipboard(log: log), disk: disk,
+                                       openPin: { _ in })
+        // Both PNG: the clipboard and the file get the very same bytes.
+        let saved = try XCTUnwrap(outcome.savedTo.flatMap { disk.files[$0] })
+        XCTAssertEqual(log.copied, saved)
+        // JPEG on disk is its own encode.
+        var settings = Settings()
+        settings.format = .jpeg
+        let jpeg = AfterCapture.run(shot, settings: settings, clipboard: FakeClipboard(log: log), disk: disk,
+                                    openPin: { _ in })
+        let file = try XCTUnwrap(jpeg.savedTo.flatMap { disk.files[$0] })
+        XCTAssertNotEqual(log.copied, file)
+        XCTAssertEqual(jpeg.savedTo?.pathExtension, "jpg")
     }
 
     func testFailedSaveIsShown() throws {

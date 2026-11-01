@@ -64,8 +64,11 @@ public enum AfterCapture {
     ) -> CaptureOutcome {
         var outcome = CaptureOutcome(savedTo: nil, bytes: 0, copied: false, pinned: false, problems: [])
         let image = settings.retina ? shot.image : (Encoding.scaled(shot.image, by: 1 / max(shot.scale, 1)) ?? shot.image)
+        // Encoded once when the clipboard and the file both want PNG (30–70 ms a whole screen).
+        var png: Data?
         if settings.after == .copy || settings.after == .both {
-            if let png = Encoding.data(image, format: .png), clipboard.put(png: png) {
+            png = Encoding.data(image, format: .png)
+            if let png, clipboard.put(png: png) {
                 outcome.copied = true
             } else {
                 outcome.problems.append("Couldn't copy the shot")
@@ -73,7 +76,8 @@ public enum AfterCapture {
         }
         if settings.after == .save || settings.after == .both {
             do {
-                guard let data = Encoding.data(image, format: settings.format) else {
+                let encoded = settings.format == .png ? png : nil
+                guard let data = encoded ?? Encoding.data(image, format: settings.format) else {
                     throw CocoaError(.fileWriteUnknown)
                 }
                 try disk.makeFolder(settings.folderURL)
