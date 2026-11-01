@@ -6,5 +6,9 @@
 //!
 //! Everything here is built on Claude Code's documented hooks and status line. It never goes online.
 
+pub mod ancestry;
+pub mod hook;
+pub mod paths;
+pub mod sessions;
 pub mod settings;
 pub mod settings_io;
