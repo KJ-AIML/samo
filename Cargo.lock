@@ -505,6 +505,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
+name = "base64"
+version = "0.23.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ac07cdecf99051d9a5238b80f35af32cdeba5b336e55d957b318b50137e18da5"
+
+[[package]]
 name = "base64ct"
 version = "1.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4291,6 +4297,7 @@ version = "0.23.46"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "48e13bd8c0e9365c43cfa5c9e8f9ad49d3c8444926c9aac819e0e4dc503c8fdf"
 dependencies = [
+ "log",
  "once_cell",
  "ring",
  "rustls-pki-types",
@@ -4382,7 +4389,7 @@ dependencies = [
 
 [[package]]
 name = "samo-blueprint"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "samo-primitives",
  "serde",
@@ -4390,12 +4397,14 @@ dependencies = [
 
 [[package]]
 name = "samo-claude"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "chrono",
+ "samo-domain",
  "samo-ext-protocol",
  "samo-extensions",
  "samo-primitives",
+ "samo-testkit",
  "serde",
  "serde_json",
  "sysinfo",
@@ -4404,7 +4413,7 @@ dependencies = [
 
 [[package]]
 name = "samo-cli"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "samo-blueprint",
  "samo-domain",
@@ -4416,17 +4425,20 @@ dependencies = [
 
 [[package]]
 name = "samo-domain"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
+ "chrono",
+ "ring",
  "samo-blueprint",
  "samo-ext-protocol",
  "samo-primitives",
  "serde",
+ "serde_json",
 ]
 
 [[package]]
 name = "samo-engine"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "futures",
@@ -4443,7 +4455,7 @@ dependencies = [
 
 [[package]]
 name = "samo-ext-hello"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "samo-ext-protocol",
  "samo-primitives",
@@ -4452,7 +4464,7 @@ dependencies = [
 
 [[package]]
 name = "samo-ext-protocol"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "samo-primitives",
  "serde",
@@ -4463,9 +4475,10 @@ dependencies = [
 
 [[package]]
 name = "samo-extensions"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "chrono",
+ "flate2",
  "samo-domain",
  "samo-ext-protocol",
  "samo-primitives",
@@ -4475,11 +4488,12 @@ dependencies = [
  "sysinfo",
  "tempfile",
  "toml 0.8.23",
+ "ureq",
 ]
 
 [[package]]
 name = "samo-gpui"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "futures",
@@ -4493,12 +4507,14 @@ dependencies = [
  "samo-extensions",
  "samo-macos",
  "samo-primitives",
+ "samo-testkit",
+ "tempfile",
  "tray-icon",
 ]
 
 [[package]]
 name = "samo-macos"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "samo-blueprint",
@@ -4511,7 +4527,7 @@ dependencies = [
 
 [[package]]
 name = "samo-primitives"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "serde",
@@ -4522,7 +4538,7 @@ dependencies = [
 
 [[package]]
 name = "samo-server"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "axum",
  "chrono",
@@ -4544,7 +4560,7 @@ dependencies = [
 
 [[package]]
 name = "samo-store"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "samo-blueprint",
@@ -4560,12 +4576,15 @@ dependencies = [
 
 [[package]]
 name = "samo-testkit"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
+ "ring",
  "samo-blueprint",
  "samo-domain",
+ "samo-ext-protocol",
  "samo-primitives",
  "samo-store",
+ "serde_json",
  "tempfile",
  "tokio",
 ]
@@ -4972,7 +4991,7 @@ version = "0.8.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ee6798b1838b6a0f69c007c133b8df5866302197e404e8b6ee8ed3e3a5e68dc6"
 dependencies = [
- "base64",
+ "base64 0.22.1",
  "bytes",
  "crc",
  "crossbeam-queue",
@@ -5043,7 +5062,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "aa003f0038df784eb8fecbbac13affe3da23b45194bd57dba231c8f48199c526"
 dependencies = [
  "atoi",
- "base64",
+ "base64 0.22.1",
  "bitflags 2.13.2",
  "byteorder",
  "bytes",
@@ -5084,7 +5103,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "db58fcd5a53cf07c184b154801ff91347e4c30d17a3562a635ff028ad5deda46"
 dependencies = [
  "atoi",
- "base64",
+ "base64 0.22.1",
  "bitflags 2.13.2",
  "byteorder",
  "crc",
@@ -5951,6 +5970,34 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
 
 [[package]]
+name = "ureq"
+version = "3.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cde93ff05758a36a851a398a772b0b79a82fbe3c186a46f2696baaeaf84c966b"
+dependencies = [
+ "base64 0.23.1",
+ "log",
+ "percent-encoding",
+ "rustls",
+ "rustls-pki-types",
+ "ureq-proto",
+ "utf8-zero",
+ "webpki-roots",
+]
+
+[[package]]
+name = "ureq-proto"
+version = "0.6.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "841583fc36089d7d59419568ae157f43a5a03a2e5a81ba87c77d1596ef46e922"
+dependencies = [
+ "base64 0.23.1",
+ "http",
+ "httparse",
+ "log",
+]
+
+[[package]]
 name = "url"
 version = "2.5.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5969,7 +6016,7 @@ version = "0.45.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "80be9b06fbae3b8b303400ab20778c80bbaf338f563afe567cf3c9eea17b47ef"
 dependencies = [
- "base64",
+ "base64 0.22.1",
  "data-url",
  "flate2",
  "fontdb",
@@ -5995,6 +6042,12 @@ name = "utf-8"
 version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "09cc8ee72d2a9becf2f2febe0205bbed8fc6615b7cb429ad062dc7b7ddd036a9"
+
+[[package]]
+name = "utf8-zero"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b8c0a043c9540bae7c578c88f91dda8bd82e59ae27c21baca69c8b191aaf5a6e"
 
 [[package]]
 name = "utf8_iter"
@@ -6227,6 +6280,15 @@ checksum = "5a6580f308b1fad9207618087a65c04e7a10bc77e02c8e84e9b00dd4b12fa0bb"
 dependencies = [
  "js-sys",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "webpki-roots"
+version = "1.0.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f5f280bbb2b287bc8e7de7e3852945a0ff50d1bbcb5ed42b6c7a568c546df171"
+dependencies = [
+ "rustls-pki-types",
 ]
 
 [[package]]
@@ -6814,10 +6876,16 @@ checksum = "ec7a2a501ed189703dba8b08142f057e887dfc4b2cc4db2d343ac6376ba3e0b9"
 
 [[package]]
 name = "xtask"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
+ "chrono",
+ "ring",
+ "samo-domain",
+ "samo-ext-protocol",
+ "security-framework",
  "serde",
  "serde_json",
+ "toml 0.8.23",
 ]
 
 [[package]]
@@ -6975,7 +7043,7 @@ version = "0.12.15-zed"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ac2d05756ff48539950c3282ad7acf3817ad3f08797c205ad1c34a2ce03b9970"
 dependencies = [
- "base64",
+ "base64 0.22.1",
  "bytes",
  "encoding_rs",
  "futures-core",

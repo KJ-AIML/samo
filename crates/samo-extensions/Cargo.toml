@@ -16,6 +16,8 @@ serde_json.workspace = true
 toml.workspace = true
 sysinfo.workspace = true
 chrono.workspace = true
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+ureq = { version = "3", default-features = false, features = ["rustls"] }
 
 [dev-dependencies]
 samo-testkit.workspace = true

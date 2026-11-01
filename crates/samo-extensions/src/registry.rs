@@ -109,6 +109,10 @@ impl Registry {
         }
     }
 
+    pub fn remove(&mut self, id: &str) {
+        self.extensions.retain(|i| i.id != id);
+    }
+
     pub fn set_on(&mut self, id: &str, on: bool) {
         if let Some(i) = self.extensions.iter_mut().find(|i| i.id == id) {
             i.on = on;

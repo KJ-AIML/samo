@@ -79,6 +79,8 @@ pub(crate) struct HostState {
 
 pub(crate) struct Runtime {
     pub slot: ExtSlot,
+    /// Uninstalled during this run: its slot is never reused, and the UI no longer sees it.
+    pub removed: bool,
     pub manifest: Manifest,
     pub source: Source,
     pub on: bool,
@@ -126,10 +128,20 @@ impl Inner {
     }
 }
 
+/// The installed name, if the dev package in `src` has the id of an extension installed from the store: a dev
+/// build never replaces a signed one.
+fn from_store(reg: &Registry, src: &Path) -> Option<String> {
+    let text = std::fs::read_to_string(src.join("extension.toml")).ok()?;
+    let manifest = Manifest::parse(&text).ok()?;
+    reg.get(&manifest.id)
+        .filter(|i| i.source == Source::Catalog)
+        .map(|_| manifest.name)
+}
+
 /// Samo's handle on its extensions. Cheap to clone.
 #[derive(Clone)]
 pub struct Host {
-    inner: Arc<Inner>,
+    pub(crate) inner: Arc<Inner>,
 }
 
 impl Host {
@@ -148,6 +160,14 @@ impl Host {
 
         if let (Some(dev_dir), Some(reg)) = (&config.dev_dir, registry.as_mut()) {
             for src in find_dev_packages(Path::new(dev_dir)) {
+                if let Some(name) = from_store(reg, &src) {
+                    problems.push(format!(
+                        "The dev build in {} wasn't used: {name} is installed from the store. Uninstall it to go \
+                         back to the dev build",
+                        src.display()
+                    ));
+                    continue;
+                }
                 match install_dev(&root, &src) {
                     Ok(done) => {
                         let id = done.manifest.id.clone();
@@ -203,6 +223,7 @@ impl Host {
             let slot = ExtSlot(u8::try_from(exts.len()).unwrap_or(u8::MAX));
             exts.push(Runtime {
                 slot,
+                removed: false,
                 manifest,
                 source: installed.source,
                 on: installed.on,
@@ -241,7 +262,7 @@ impl Host {
     }
 
     /// Starts the helper in `slot`, unless it can't run here.
-    fn launch(&self, slot: ExtSlot) {
+    pub(crate) fn launch(&self, slot: ExtSlot) {
         let config = &self.inner.config;
         let Some(mut state) = self.inner.lock() else {
             return;
@@ -293,7 +314,7 @@ impl Host {
     }
 
     /// Stops the helper in `slot` and waits for it to be gone.
-    fn stop(&self, slot: ExtSlot) {
+    pub(crate) fn stop(&self, slot: ExtSlot) {
         let taken = self.inner.lock().and_then(|mut state| {
             state
                 .exts
@@ -319,6 +340,7 @@ impl Host {
             extensions: state
                 .exts
                 .iter()
+                .filter(|rt| !rt.removed)
                 .map(|rt| ExtView {
                     slot: rt.slot,
                     id: rt.manifest.id.clone(),

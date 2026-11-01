@@ -3,6 +3,7 @@ mod layers;
 mod network;
 mod purity;
 mod rls;
+mod store;
 
 use std::env;
 use std::path::{Path, PathBuf};
@@ -43,13 +44,64 @@ fn run_tests(root: &Path) -> Result<(), String> {
 fn run() -> Result<(), String> {
     let args: Vec<String> = env::args().skip(1).collect();
     let subcmd = args.first().map(String::as_str).unwrap_or("verify");
-    if subcmd != "verify" {
-        return Err(format!(
-            "unknown xtask command `{subcmd}`; expected `verify`"
-        ));
-    }
-
     let root = workspace_root()?;
+    match subcmd {
+        "verify" => verify(&root),
+        "ext-keygen" => store::keygen(),
+        "ext-package" => {
+            let dir = args
+                .get(1)
+                .ok_or("usage: cargo run -p xtask -- ext-package <extension folder>")?;
+            store::package(&root, &root.join(dir)).map(|_| ())
+        }
+        "ext-publish" => store::publish(&publish_args(&root, &args[1..])?),
+        other => Err(format!(
+            "unknown xtask command `{other}`; expected `verify`, `ext-keygen`, `ext-package` or `ext-publish`"
+        )),
+    }
+}
+
+/// `cargo run -p xtask -- ext-publish --store <dir> [--packages target/ext-dist] [--samo <zip>] [--out dist] [--test-key <pkcs8>]`
+fn publish_args(root: &Path, args: &[String]) -> Result<store::PublishArgs, String> {
+    let mut store = None;
+    let mut packages = root.join("target/ext-dist");
+    let mut samo = None;
+    let mut out = None;
+    let mut test_key = None;
+    let mut it = args.iter();
+    while let Some(flag) = it.next() {
+        let value = it
+            .next()
+            .map(PathBuf::from)
+            .ok_or_else(|| format!("`{flag}` needs a value"))?;
+        match flag.as_str() {
+            "--store" => store = Some(value),
+            "--packages" => packages = value,
+            "--samo" => samo = Some(value),
+            "--out" => out = Some(value),
+            "--test-key" => test_key = Some(value),
+            other => return Err(format!("ext-publish: unknown flag `{other}`")),
+        }
+    }
+    let store =
+        store.ok_or("usage: cargo run -p xtask -- ext-publish --store <samo-extensions folder>")?;
+    let trusted = match &test_key {
+        Some(_) => None,
+        None => Some(store::trusted_key(root)?),
+    };
+    Ok(store::PublishArgs {
+        trusted,
+        out: out.unwrap_or_else(|| store.join("dist")),
+        store,
+        packages,
+        samo,
+        test_key,
+        published_at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+    })
+}
+
+fn verify(root: &Path) -> Result<(), String> {
+    let root = root.to_path_buf();
     println!("==> [xtask] gate 1/6: layers");
     layers::check_layers(&root)?;
     println!("    layers: ok");
@@ -84,7 +136,7 @@ fn main() -> ExitCode {
     match run() {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
-            eprintln!("xtask verify failed: {err}");
+            eprintln!("xtask failed: {err}");
             ExitCode::FAILURE
         }
     }

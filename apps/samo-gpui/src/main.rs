@@ -5,6 +5,7 @@ mod components;
 mod disk_view;
 mod ext_view;
 mod extensions_page;
+mod finish_update;
 mod hub;
 mod layout;
 mod live;
@@ -15,8 +16,11 @@ mod performance;
 mod popup;
 mod processes;
 mod projects;
+mod settings_page;
 mod shell;
 mod storage;
+mod store_view;
+mod text_input;
 mod theme;
 
 use disk_view::DiskView;
@@ -55,6 +59,8 @@ struct AppState {
     /// pop-up replaced it.
     popup: Option<WindowHandle<popup::PopupView>>,
     popup_gen: u64,
+    /// A new Samo has been started to finish an update; this one is quitting.
+    updating: bool,
 }
 
 impl Global for AppState {}
@@ -79,6 +85,11 @@ fn snapshot(hub: &Hub, layout: Layout) -> Option<Frame> {
             .get()
             .map(samo_extensions::Host::snapshot)
             .unwrap_or_default(),
+        store: hub
+            .store
+            .get()
+            .map(samo_extensions::worker::StoreWorker::view)
+            .unwrap_or_default(),
         layout,
     })
 }
@@ -94,7 +105,22 @@ fn start_extensions(hub: &Hub) {
         samo_extensions::HostConfig::new(env!("CARGO_PKG_VERSION")),
         Arc::new(move || waker.wake_ui()),
     );
+    if let Some(store) = samo_extensions::store::Store::from_env() {
+        let waker = hub.clone();
+        let _ = hub
+            .store
+            .set(start_store(store, &host, Arc::new(move || waker.wake_ui())));
+    }
     let _ = hub.ext.set(host);
+}
+
+/// The store at launch: it shows its cache, and goes online only when a click asks (R12).
+fn start_store(
+    store: samo_extensions::store::Store,
+    host: &samo_extensions::Host,
+    wake: Arc<dyn Fn() + Send + Sync>,
+) -> samo_extensions::worker::StoreWorker {
+    samo_extensions::worker::StoreWorker::start(store, host.clone(), wake)
 }
 
 /// Shows what extensions asked to pop up, unless you're already looking at that extension's page.
@@ -135,6 +161,34 @@ fn show_extension_popups(cx: &mut App) {
 }
 
 /// Quits Samo, stopping extensions' helpers first (each gets 2 s to finish).
+/// Once the worker has a new Samo downloaded and checked, starts its `--finish-update` and quits (R14).
+fn finish_samo_update(cx: &mut App) {
+    let state = cx.global::<AppState>();
+    if state.updating {
+        return;
+    }
+    let Some(store) = state.hub.store.get().cloned() else {
+        return;
+    };
+    let samo_extensions::worker::SamoUpdate::Ready(prepared) = store.view().samo else {
+        return;
+    };
+    let bundle = env::current_exe()
+        .map_err(|e| e.to_string())
+        .and_then(|exe| samo_extensions::update::can_update(&exe).map_err(|e| e.to_string()));
+    let started = bundle.and_then(|b| finish_update::launch(&prepared, &b.path));
+    match started {
+        Ok(()) => {
+            cx.global_mut::<AppState>().updating = true;
+            quit(cx);
+        }
+        Err(why) => store.samo_failed(format!(
+            "Couldn't restart into Samo {}: {why}",
+            prepared.version
+        )),
+    }
+}
+
 fn quit(cx: &mut App) {
     if let Some(host) = cx.global::<AppState>().hub.ext.get() {
         host.shutdown_all();
@@ -143,7 +197,21 @@ fn quit(cx: &mut App) {
 }
 
 /// Brings the main window forward (opening it again if it was closed), optionally on a page.
+///
+/// Samo is made the active app first, and the window is opened on the next turn of the run loop, after the
+/// click that asked for it (in the quick panel or a pop-up) has finished. Creating a window while Samo isn't
+/// active makes Cocoa send the previous key window a spurious "became key" message. gpui 0.2.2 answers it by
+/// resigning that window while holding its lock, the resign calls back into the same handler, and Samo hung (10 to
+/// 50 seconds measured: the spinning cursor) until macOS gave up.
 fn open_main(cx: &mut App, nav: Option<NavSection>) {
+    cx.activate(true);
+    cx.spawn(async move |cx| {
+        let _ = cx.update(|cx| open_main_now(cx, nav));
+    })
+    .detach();
+}
+
+fn open_main_now(cx: &mut App, nav: Option<NavSection>) {
     if let Some(handle) = cx.global::<AppState>().main {
         let reused = handle
             .update(cx, |view, window, cx| {
@@ -198,6 +266,8 @@ enum NavSection {
     Extensions,
     /// One extension's own page.
     Extension(samo_extensions::ExtSlot),
+    /// Samo's settings: Updates.
+    Settings,
 }
 
 impl NavSection {
@@ -218,6 +288,7 @@ impl NavSection {
             Self::Performance => "Performance",
             Self::Extensions => "Extensions",
             Self::Extension(_) => "Extension",
+            Self::Settings => "Settings",
         }
     }
 
@@ -237,6 +308,7 @@ impl NavSection {
             Self::Processes => "pulse",
             Self::Performance => "chip",
             Self::Extensions | Self::Extension(_) => "plug",
+            Self::Settings => "gear",
         }
     }
 
@@ -245,7 +317,7 @@ impl NavSection {
         let wanted = name.trim().to_ascii_lowercase();
         NavSection::ALL
             .into_iter()
-            .chain([NavSection::Extensions])
+            .chain([NavSection::Extensions, NavSection::Settings])
             .find(|s| s.title().to_ascii_lowercase() == wanted)
     }
 }
@@ -326,6 +398,8 @@ struct Frame {
     thermal: Option<hub::Thermal>,
     /// Installed extensions and what their helpers last said.
     ext: Arc<samo_extensions::ExtSnapshot>,
+    /// The store: its catalog (fetched or cached), images, and jobs.
+    store: samo_extensions::worker::StoreView,
     layout: Layout,
 }
 
@@ -379,6 +453,8 @@ struct SamoWorkspaceApp {
     /// How much history Overview's live charts show, and where the pointer is over each.
     live_span: live::Span,
     live_hover: [live::ChartHover; 3],
+    /// The store's list and detail page.
+    store_ui: extensions_page::StoreUi,
 }
 
 fn resolve_default_root() -> String {
@@ -486,6 +562,7 @@ impl SamoWorkspaceApp {
             proc_scroll: UniformListScrollHandle::new(),
             live_span: live::Span::TwoMin,
             live_hover: Default::default(),
+            store_ui: extensions_page::StoreUi::new(cx),
         }
     }
 
@@ -607,6 +684,15 @@ impl SamoWorkspaceApp {
         self.pending_confirm = None;
         Self::spawn_scan(&self.hub, root, true);
         cx.notify();
+    }
+
+    /// A click on a place in the sidebar or rail. Opening the store by a click may go online (R12).
+    fn nav_clicked(&mut self, section: NavSection, cx: &mut Context<Self>) {
+        match section {
+            NavSection::Extensions => self.store_opened_by_click(cx),
+            NavSection::Settings => self.settings_opened_by_click(cx),
+            other => self.set_nav(other, cx),
+        }
     }
 
     fn set_nav(&mut self, section: NavSection, cx: &mut Context<Self>) {
@@ -825,6 +911,7 @@ impl Render for SamoWorkspaceApp {
                 .child("Samo lost track of its own state. Quit and open it again to recover.");
         };
 
+        self.sweep_store_images(window, cx);
         let page = match self.nav {
             NavSection::Overview => self.render_overview(&frame, cx),
             NavSection::Projects => self.render_projects(&frame, cx),
@@ -833,6 +920,7 @@ impl Render for SamoWorkspaceApp {
             NavSection::Performance => self.render_performance(&frame),
             NavSection::Extensions => self.render_extensions(&frame, cx),
             NavSection::Extension(slot) => self.render_extension(slot, &frame, cx),
+            NavSection::Settings => self.render_settings(&frame, cx),
         };
 
         div()
@@ -857,11 +945,16 @@ impl Render for SamoWorkspaceApp {
 }
 
 fn main() {
+    // The new Samo, finishing an update the old one prepared: no window, just the swap.
+    if let Some(code) = finish_update::from_args(&env::args().collect::<Vec<_>>()) {
+        std::process::exit(code);
+    }
     let app = Application::new().with_assets(assets::Assets);
     // Closing the window leaves Samo in the menu bar; the Dock icon brings the window back.
     app.on_reopen(|cx| open_main(cx, None));
     app.run(|cx: &mut App| {
         theme::init_fonts(cx);
+        text_input::bind_keys(cx);
         cx.on_action(|_: &Quit, cx| quit(cx));
         cx.on_action(|_: &ShowWindow, cx| open_main(cx, None));
         cx.bind_keys([
@@ -896,6 +989,7 @@ fn main() {
             menubar: None,
             popup: None,
             popup_gen: 0,
+            updating: false,
         });
         let menubar = menubar::MenuBar::install(cx);
         cx.global_mut::<AppState>().menubar = menubar;
@@ -908,6 +1002,7 @@ fn main() {
                     cx.refresh_windows();
                     menubar::refresh(cx);
                     show_extension_popups(cx);
+                    finish_samo_update(cx);
                 });
                 if drawn.is_err() {
                     break;
@@ -923,6 +1018,69 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// R12, RF2: Samo starting, even on the store's page, shows the cache and makes no request.
+    #[test]
+    fn start_page_does_not_fetch() -> Result<(), String> {
+        use samo_testkit::store::{FakeStore, catalog, listing, png};
+        let shop = FakeStore::new()?;
+        let home = tempfile::tempdir().map_err(|e| e.to_string())?;
+        let icon = shop.put("hello-icon.png", &png(64, 64))?;
+        let pkg = shop.put("hello-0.1.0-macos-arm64.tar.gz", b"pkg")?;
+        let mut l = listing("hello", "0.1.0", pkg);
+        l.icon = Some(icon);
+        shop.publish(&catalog("2026-11-02T10:00:00Z", vec![l]))?;
+        let store = || {
+            samo_extensions::store::Store::new(
+                &shop.catalog_url(),
+                shop.public_key(),
+                &home.path().join("Caches/Store"),
+                &home.path().join("store-state.toml"),
+            )
+        };
+        let host = samo_extensions::Host::start(
+            samo_extensions::ExtRoot::at(home.path().join("Extensions")),
+            samo_extensions::HostConfig::new("0.2.0"),
+            Arc::new(|| {}),
+        );
+        let wait = |worker: &samo_extensions::worker::StoreWorker, what: &str| {
+            let deadline = Instant::now() + std::time::Duration::from_secs(10);
+            loop {
+                let v = worker.view();
+                if v.catalog.is_some() && !v.images.is_empty() && !v.refreshing {
+                    return Ok(());
+                }
+                if Instant::now() > deadline {
+                    return Err(format!("timed out waiting for {what}"));
+                }
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+        };
+
+        // A first launch, then a click: the catalog and its icon are fetched and cached.
+        let first = start_store(store(), &host, Arc::new(|| {}));
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        assert!(shop.server.hits().is_empty(), "nothing before a click");
+        first.submit(
+            samo_extensions::worker::StoreJob::Refresh { force: false },
+            samo_extensions::net::UserAction::clicked(),
+        );
+        wait(&first, "the click's fetch")?;
+        let fetched = shop.server.hits().len();
+
+        // Samo launches again (SAMO_START_PAGE=extensions): the store shows its cache, and asks nothing.
+        let again = start_store(store(), &host, Arc::new(|| {}));
+        wait(&again, "the cache")?;
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        assert_eq!(
+            shop.server.hits().len(),
+            fetched,
+            "{:?}",
+            shop.server.hits()
+        );
+        host.shutdown_all();
+        Ok(())
+    }
 
     fn view_of(root: &str) -> Arc<DiskView> {
         Arc::new(DiskView::build(Arc::new(ScanSnapshot {

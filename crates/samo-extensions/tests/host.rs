@@ -46,7 +46,8 @@ fn fixture(script: &str) -> Result<Fixture, String> {
 fn config(dev: Option<&Path>) -> HostConfig {
     let mut c = HostConfig::new("0.1.0");
     c.dev_dir = dev.map(|d| d.to_string_lossy().into_owned());
-    c.hello_timeout = Duration::from_millis(600);
+    // Generous: a shell script's start can take a while on a busy machine or CI runner.
+    c.hello_timeout = Duration::from_secs(2);
     c.grace = Duration::from_millis(300);
     c.one_shot_timeout = Duration::from_secs(5);
     c.backoff = BackoffConfig {

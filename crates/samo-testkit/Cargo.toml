@@ -14,3 +14,6 @@ samo-domain.workspace = true
 samo-store.workspace = true
 tempfile.workspace = true
 tokio.workspace = true
+samo-ext-protocol.workspace = true
+ring.workspace = true
+serde_json.workspace = true

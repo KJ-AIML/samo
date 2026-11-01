@@ -3,6 +3,7 @@ pub mod disk;
 pub mod extensions;
 pub mod packing;
 pub mod process;
+pub mod store;
 pub mod telemetry;
 
 pub use cleanup::{is_protected_system_path, validate_trash_target};

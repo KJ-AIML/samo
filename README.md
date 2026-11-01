@@ -109,13 +109,17 @@ A few environment variables, handy for scripts and screenshots:
 | Variable | Does |
 | --- | --- |
 | `SAMO_DEFAULT_SCAN_ROOT` | The folder to measure first (default: `~/Developer` if it exists, else your home folder) |
-| `SAMO_START_PAGE` | `overview`, `projects`, `storage`, `processes` or `performance` |
+| `SAMO_START_PAGE` | `overview`, `projects`, `storage`, `processes`, `performance`, `extensions` or `settings` |
 | `SAMO_THEME` | `light` or `dark` instead of following the system |
 
 ## Safety and privacy
 
-- **Local only.** No account, no telemetry, nothing sent anywhere. The optional web console listens on
-  `127.0.0.1` only.
+- **Online only when you click.** No account, no telemetry, nothing about you sent anywhere. Samo goes online only
+  when you open **Extensions** or **Settings** by a click, or press Refresh, Install, Update or Check now: then it
+  fetches its signed catalog, images and packages from GitHub. Never at launch, never in the background. The
+  optional web console listens on `127.0.0.1` only.
+- **Only what KJ signed.** The store's catalog is signed, and every package, image and Samo update is checked
+  against it before it is used.
 - **The Trash, never `rm`.** Before moving anything Samo checks it is still the same file (device and inode) it
   measured. Undo puts it back.
 - **The right process.** Quit checks the process's PID *and* start time, so a recycled PID never gets the signal.
@@ -142,15 +146,32 @@ Claude Code's documented hooks and status line).
   **Plan limits** sets Claude Code's status line, never replacing one you have. Both come out exactly when you
   turn them off. It never goes online.
 
-For now extensions come from a folder you build them into; downloading them from Samo comes next:
+### The store
+
+Open **All extensions** in the sidebar: every extension in Samo's store, and every one you have installed, with
+**All · Installed · Updates** and a search box. An extension's page shows its screenshots, what it does and
+*what it changes on your Mac*, with **Install**, **Update** or **Uninstall**. Uninstalling first undoes what it
+changed, then deletes it (Claude Sessions keeps its one-time backup, `~/.claude/settings.json.samo-bak`). The
+store's listings live in [`samo-extensions`](https://github.com/KJ-AIML/samo-extensions): a teammate adds one with
+a pull request, and KJ reviews and signs it. The design is [ADR-003](docs/decisions/ADR-003-samo-extension-store.md).
+
+### Developing an extension
+
+Build it into a folder and point Samo at it; it shows as *dev*, and never replaces a store install:
 
 ```sh
 scripts/ext-dev.sh extensions/claude-sessions     # build it and lay it out in target/ext-dev/
 SAMO_EXT_DEV_DIR="$PWD/target/ext-dev" cargo run --release -p samo-gpui
 ```
 
-Then open **All extensions** in the sidebar, and on Claude Sessions' page turn on **Connect to Claude Code**.
 `extensions/hello` is a small example extension that uses every part a page can have.
+
+## Updates
+
+**Settings → Updates** says which Samo you have and, when you open it, checks the store for a newer one. **Install
+and restart** downloads it, checks it (its signature in the catalog, then the app's id, version and code
+signature) before anything changes, then replaces Samo and opens the new one. The old app goes to the Trash, and if
+the swap fails it is put back. Samo 0.1.x has no updater: install 0.2.0 from its DMG once.
 
 ## Also in the box
 
@@ -174,7 +195,7 @@ pure, and runs the tests.
 | L4 | `samo-engine` | Commands, access policy, audit log |
 | L5 | `samo-macos` | The filesystem scanner, the Trash mover, telemetry and process collection |
 | L1 | `samo-ext-protocol` | What Samo and an extension agree on: the manifest, messages and widgets |
-| L5 | `samo-extensions` | Extensions on disk, and the supervisor that runs their helpers |
+| L5 | `samo-extensions` | Extensions on disk, the supervisor that runs their helpers, and the store: its HTTP client (only on a click), signed catalog, cache, installs and Samo's own update |
 | extensions | `claude-sessions`, `hello` | The Claude Sessions helper (`samo-claude`) and the example |
 | apps | `samo-gpui`, `samo-cli`, `samo-server` | The Mac app, the CLI, the local web server |
 

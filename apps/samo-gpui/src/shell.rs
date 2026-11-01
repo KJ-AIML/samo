@@ -190,9 +190,11 @@ impl SamoWorkspaceApp {
                     .child(self.nav_link(
                         NavSection::Extensions,
                         "All extensions".to_string(),
-                        None,
+                        updates_badge(frame),
                         cx,
-                    )),
+                    ))
+                    .child(rail_label("Samo", false))
+                    .child(self.nav_link(NavSection::Settings, "Settings".to_string(), None, cx)),
             )
             .child(self.side_foot(frame))
             .into_any_element()
@@ -224,7 +226,7 @@ impl SamoWorkspaceApp {
                 el.border_color(gpui::transparent_black())
                     .hover(|s| s.bg(pal.hover))
             })
-            .on_click(cx.listener(move |this, _, _, cx| this.set_nav(section, cx)))
+            .on_click(cx.listener(move |this, _, _, cx| this.nav_clicked(section, cx)))
             .child(icon(
                 section.icon(),
                 17.0,
@@ -309,7 +311,10 @@ impl SamoWorkspaceApp {
                                     .filter(|e| e.on)
                                     .map(|e| (NavSection::Extension(e.slot), e.name.clone())),
                             )
-                            .chain([(NavSection::Extensions, "All extensions".to_string())])
+                            .chain([
+                                (NavSection::Extensions, "All extensions".to_string()),
+                                (NavSection::Settings, "Settings".to_string()),
+                            ])
                             .map(|(section, name)| {
                                 rail_button(
                                     SharedString::from(format!("rail-{}", section.key())),
@@ -318,7 +323,9 @@ impl SamoWorkspaceApp {
                                     self.nav == section,
                                 )
                                 .on_click(
-                                    cx.listener(move |this, _, _, cx| this.set_nav(section, cx)),
+                                    cx.listener(move |this, _, _, cx| {
+                                        this.nav_clicked(section, cx)
+                                    }),
                                 )
                             }),
                     ),
@@ -1263,6 +1270,20 @@ fn titlebar_band() -> Stateful<Div> {
                 window.titlebar_double_click();
             }
         })
+}
+
+/// The store's update count for the sidebar, from the cached catalog: it never goes online.
+fn updates_badge(frame: &Frame) -> Option<String> {
+    let n = crate::store_view::update_count(
+        frame.store.catalog.as_deref(),
+        &frame.ext,
+        crate::store_view::SAMO_VERSION,
+    );
+    match n {
+        0 => None,
+        1 => Some("1 update".into()),
+        n => Some(format!("{n} updates")),
+    }
 }
 
 fn rail_label(text: &str, first: bool) -> Div {

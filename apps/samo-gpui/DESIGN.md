@@ -82,6 +82,10 @@ Samo uses them when installed and falls back to the system face otherwise.
 | Truncating line | `art.rs` `clip_text` (`components::line`, `mono_line`) | Any single line that may not fit. Give it `.flex_1()` in a row or `.w_full()` in a column. |
 | Pop-up | `popup.rs` | A short note under the menu bar item. A non-activating panel: it never takes the keyboard. The kind in Samo's ring (an Ink `!` when something waits for you, a Cobalt dial with a check when something finished) and a short bar of the same colour inside the left edge; a mono line with where it's from and when (`CLAUDE SESSIONS · FINISHED  08:44`); the title (the project) and one sentence. One at a time; 6 s, held while the pointer is on it (which shows a close button); a click opens the page it is about |
 | Extension page | `ext_view.rs`, `extensions_page.rs` | What an extension's helper sends, drawn with the components above: a section rule per section, figures and meters side by side in cells, rows with a lamp (`!` for "needs you"), switches, Default or Link buttons, notes |
+| Text field | `text_input.rs` | One line (the store's search): a `CONTROL_H` field on the card colour, Cobalt line when focused, Cobalt caret, Cobalt-wash selection; Escape clears |
+| Store list | `extensions_page.rs`, `store_view.rs` | One card of rows: a 40 pt icon, the name with `by author` in mono, the summary clipped to one line, a state tag (*installed*, *update* in Cobalt, *dev*, *off*, *needs a newer Samo*) and a chevron. Segments (All · Installed · Updates) and the search above; a line on where the list came from (*Offline: showing the store as of 14:02*) |
+| Store detail | `extensions_page.rs` | A back link, then a card: a 72 pt icon, name, *signed* or *dev*, a mono line of facts (version, author, size, categories), Homepage, and on the right one Primary (Install, Update to x, Install signed version) beside a Danger Uninstall, then Open and the switch. Asks before replacing a dev build or uninstalling (naming the backup it keeps). Screenshots one at a time on the glass with ‹ › and *1 of 3*; About as paragraphs and Cobalt-square bullets; What it changes; What's new |
+| Settings | `settings_page.rs` | The gear at the foot of the sidebar under SAMO. Updates: a card with the headline (*Samo 0.3.0 is available* / *You have the latest Samo*), a mono status (*Samo 0.2.0 · checked 14:02*), the Primary *Install 0.3.0 and restart* (or why it can't, with the release page), What's new as bullets |
 
 ## 6. Folders, the map, and colour
 
@@ -160,6 +164,8 @@ Samo lives in the menu bar too (`src/menubar.rs`, via `tray-icon`'s safe `NSStat
 - Sensors are read on their own thread (`src/hub.rs`) and the UI is woken by a channel only when there is news —
   never on the UI thread (a sensor read takes ~10 ms, which used to drop a frame every 1.2 s).
 - Scans build what the pages need (`DiskView`: rankings, the suggestion set) on the scan thread, once.
+- Store images are decoded by gpui off the UI thread, only after their size was read from their header; leaving a
+  detail page drops its screenshots from gpui's textures and caches (memory stays flat after 20 pages).
 - The process table is virtualised: only the rows on screen are built. While the pointer is over it, its rows hold
   still so a row can't move under a click; a tag says when updates are being held.
 - The thermal state is one `NSProcessInfo` call on the sampler thread (no sensors, no privileges).
@@ -168,7 +174,8 @@ Samo lives in the menu bar too (`src/menubar.rs`, via `tray-icon`'s safe `NSStat
 ## 11. Rules
 
 1. One Ink action per view. Signal only for wrong or irreversible, and never filled.
-2. Dither only for what Samo suggests. Never as decoration.
+2. Dither only for what Samo suggests. Never as decoration. (One exception, from ADR-003: an image that hasn't
+   arrived yet is a dithered placeholder, never a broken image.)
 3. A cell's state is always something true. Idle cells hold still.
 4. Unknown is never zero: dashes, empty meters, "not sampled yet".
 5. Every colour is a token in `theme.rs`.
