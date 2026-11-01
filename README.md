@@ -122,6 +122,36 @@ A few environment variables, handy for scripts and screenshots:
 - **Readings carry their state.** Every sensor value is `Available`, `Unsupported` or `Stopped`, and the UI shows
   which.
 
+## Extensions
+
+Extensions add to what Samo watches, and you choose which to run: without one, Samo is exactly as above. Each
+runs as its own small program, so one that misbehaves is stopped without taking Samo down, and Samo draws its
+page with its own parts. Turning one off undoes what it changed outside its own folder; turning it back on puts
+that back. The design is [ADR-002](docs/decisions/ADR-002-samo-extensions-design.md).
+
+**Claude Sessions** is the first: your Claude Code sessions at a glance, in the spirit of
+[Glance](https://github.com/whoisnaisu/glance) by whoisnaisu (none of its code is used; Claude Sessions is built on
+Claude Code's documented hooks and status line).
+
+- Each session's state: *working*, *waiting for you* (a permission, a question, a plan to review) or *done*.
+  While one waits, the menu bar shows it beside the CPU figure (`23% !1`) and a pop-up says so, without taking
+  the keyboard.
+- Today's tokens, per session and in all, read from Claude Code's transcripts (only today's part).
+- Your 5-hour and weekly plan limits, from Claude Code's status line, if you turn Plan limits on.
+- **Connect** adds Samo's hooks to `~/.claude/settings.json`, after backing it up to `settings.json.samo-bak`;
+  **Plan limits** sets Claude Code's status line, never replacing one you have. Both come out exactly when you
+  turn them off. It never goes online.
+
+For now extensions come from a folder you build them into; downloading them from Samo comes next:
+
+```sh
+scripts/ext-dev.sh extensions/claude-sessions     # build it and lay it out in target/ext-dev/
+SAMO_EXT_DEV_DIR="$PWD/target/ext-dev" cargo run --release -p samo-gpui
+```
+
+Then open **All extensions** in the sidebar, and on Claude Sessions' page turn on **Connect to Claude Code**.
+`extensions/hello` is a small example extension that uses every part a page can have.
+
 ## Also in the box
 
 - **`samo-cli`** — the same measurements in a terminal:
@@ -143,6 +173,9 @@ pure, and runs the tests.
 | L3 | `samo-store` | SQLite (WAL), the only database user |
 | L4 | `samo-engine` | Commands, access policy, audit log |
 | L5 | `samo-macos` | The filesystem scanner, the Trash mover, telemetry and process collection |
+| L1 | `samo-ext-protocol` | What Samo and an extension agree on: the manifest, messages and widgets |
+| L5 | `samo-extensions` | Extensions on disk, and the supervisor that runs their helpers |
+| extensions | `claude-sessions`, `hello` | The Claude Sessions helper (`samo-claude`) and the example |
 | apps | `samo-gpui`, `samo-cli`, `samo-server` | The Mac app, the CLI, the local web server |
 
 The workspace forbids `unsafe` and denies `unwrap`, `expect` and `panic!`. In the Mac app, sensors are read on

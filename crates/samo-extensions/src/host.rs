@@ -38,6 +38,9 @@ pub struct HostConfig {
     pub rss_limit_bytes: u64,
     /// The UI is woken at most once per this.
     pub wake_every: Duration,
+    /// The home folder helpers are given; `None` passes on Samo's own. Tests point it at a temporary folder so
+    /// a helper never touches the real `~`.
+    pub home: Option<PathBuf>,
 }
 
 impl HostConfig {
@@ -55,6 +58,7 @@ impl HostConfig {
             cpu_limit_pct: 10.0,
             rss_limit_bytes: 150 * 1024 * 1024,
             wake_every: Duration::from_millis(250),
+            home: None,
         }
     }
 }
@@ -419,7 +423,7 @@ impl Host {
                 &inner.helper(manifest),
                 verb,
                 &inner.data_dir(id),
-                inner.config.one_shot_timeout,
+                &inner.config,
             )
         } else {
             Ok(())

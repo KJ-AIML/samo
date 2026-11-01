@@ -2,7 +2,7 @@
 //! a crash (backing off), and stops it cleanly.
 
 use crate::History;
-use crate::host::Inner;
+use crate::host::{HostConfig, Inner};
 use crate::limits::{HelperLog, Line, MAX_LINE, read_line_capped};
 use crate::state::{ExtSlot, PendingPopup, Status};
 use samo_domain::extensions::{Backoff, RateGate, Restart};
@@ -60,15 +60,19 @@ fn now_ms() -> i64 {
 }
 
 /// The only environment a helper gets.
-fn helper_env(data_dir: &Path) -> Vec<(&'static str, String)> {
+fn helper_env(data_dir: &Path, config: &HostConfig) -> Vec<(&'static str, String)> {
     let var = |name: &str, fallback: &str| {
         env::var(name)
             .ok()
             .filter(|v| !v.is_empty())
             .unwrap_or_else(|| fallback.to_string())
     };
+    let home = config
+        .home
+        .as_ref()
+        .map_or_else(|| var("HOME", "/"), |h| h.to_string_lossy().into_owned());
     vec![
-        ("HOME", var("HOME", "/")),
+        ("HOME", home),
         ("PATH", var("PATH", "/usr/bin:/bin:/usr/sbin:/sbin")),
         ("LANG", var("LANG", "en_US.UTF-8")),
         ("SAMO_EXT_DATA_DIR", data_dir.to_string_lossy().into_owned()),
@@ -81,13 +85,14 @@ pub(crate) fn one_shot(
     helper: &Path,
     verb: &str,
     data_dir: &Path,
-    timeout: Duration,
+    config: &HostConfig,
 ) -> Result<(), String> {
+    let timeout = config.one_shot_timeout;
     let _ = std::fs::create_dir_all(data_dir);
     let mut child = Command::new(helper)
         .arg(verb)
         .env_clear()
-        .envs(helper_env(data_dir))
+        .envs(helper_env(data_dir, config))
         .current_dir(data_dir)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -196,7 +201,7 @@ fn run_once(job: &Job, rx: &Receiver<Event>, log: &HelperLog, generation: u64) -
     let mut child = match Command::new(&job.helper)
         .arg("serve")
         .env_clear()
-        .envs(helper_env(&job.data_dir))
+        .envs(helper_env(&job.data_dir, config))
         .current_dir(&job.data_dir)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
