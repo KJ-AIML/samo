@@ -10,6 +10,7 @@ mod locations;
 mod menubar;
 mod overview;
 mod performance;
+mod popup;
 mod processes;
 mod projects;
 mod shell;
@@ -48,6 +49,10 @@ struct AppState {
     panel: Option<WindowHandle<menubar::QuickPanel>>,
     panel_closed_at: Option<Instant>,
     menubar: Option<menubar::MenuBar>,
+    /// The pop-up showing under the menu bar item, if any, and a count that tells its hide timer whether a newer
+    /// pop-up replaced it.
+    popup: Option<WindowHandle<popup::PopupView>>,
+    popup_gen: u64,
 }
 
 impl Global for AppState {}
@@ -777,6 +782,8 @@ fn main() {
             panel: None,
             panel_closed_at: None,
             menubar: None,
+            popup: None,
+            popup_gen: 0,
         });
         let menubar = menubar::MenuBar::install(cx);
         cx.global_mut::<AppState>().menubar = menubar;
@@ -795,6 +802,38 @@ fn main() {
             }
         })
         .detach();
+
+        // A test pop-up every 5 s, to check by hand that pop-ups never take the keyboard (plan Task 1, check M1).
+        if env::var("SAMO_POPUP_SPIKE").as_deref() == Ok("1") {
+            cx.spawn(async move |cx| {
+                let mut n = 0u32;
+                loop {
+                    cx.background_executor()
+                        .timer(std::time::Duration::from_secs(5))
+                        .await;
+                    n += 1;
+                    let shown = cx.update(|cx| {
+                        popup::show(
+                            popup::Popup {
+                                kind: match n % 3 {
+                                    1 => popup::PopupKind::NeedsYou,
+                                    2 => popup::PopupKind::Finished,
+                                    _ => popup::PopupKind::Info,
+                                },
+                                title: format!("Test pop-up {n}"),
+                                body: "Keep typing: this shouldn't take the keyboard".into(),
+                                target: None,
+                            },
+                            cx,
+                        );
+                    });
+                    if shown.is_err() {
+                        break;
+                    }
+                }
+            })
+            .detach();
+        }
 
         open_main(cx, None);
     });

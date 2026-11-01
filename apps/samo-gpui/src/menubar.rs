@@ -70,6 +70,16 @@ impl MenuBar {
         Some(Self { tray, shown: None })
     }
 
+    /// Where the item is on screen, in pixels; `None` before macOS has placed it.
+    pub fn tray_rect(&self) -> Option<crate::popup::TrayRect> {
+        self.tray.rect().map(|r| crate::popup::TrayRect {
+            x: r.position.x,
+            y: r.position.y,
+            w: f64::from(r.size.width),
+            h: f64::from(r.size.height),
+        })
+    }
+
     /// Brings the item up to date. Cheap when nothing changed (most ticks).
     fn refresh(&mut self, frame: &Frame) {
         let mood = samo_mood(frame);
@@ -137,7 +147,7 @@ fn pad_figure(s: String) -> String {
 }
 
 /// The main screen's points-to-pixels factor; the item's rectangle arrives in pixels.
-fn main_screen_scale() -> f64 {
+pub(crate) fn main_screen_scale() -> f64 {
     objc2::MainThreadMarker::new()
         .and_then(objc2_app_kit::NSScreen::mainScreen)
         .map(|screen| screen.backingScaleFactor())
