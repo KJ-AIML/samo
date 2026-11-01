@@ -117,6 +117,10 @@ pub fn listing(id: &str, version: &str, package: FileRef) -> Listing {
             place: "-".into(),
             undo: "-".into(),
         }],
+        windows: None,
+        permissions: Vec::new(),
+        min_macos: None,
+        limits: None,
     }
 }
 
@@ -138,6 +142,10 @@ pub fn listing_for(manifest: &Manifest, package: FileRef) -> Listing {
         icon: None,
         screenshots: Vec::new(),
         changes: manifest.changes.clone(),
+        windows: manifest.windows.clone(),
+        permissions: manifest.permissions.clone(),
+        min_macos: manifest.min_macos.clone(),
+        limits: manifest.limits,
     }
 }
 

@@ -122,6 +122,10 @@ pub fn rows(catalog: Option<&Catalog>, ext: &ExtSnapshot, samo: &str) -> Vec<Row
                 icon: None,
                 screenshots: Vec::new(),
                 changes: e.changes.clone(),
+                windows: None,
+                permissions: Vec::new(),
+                min_macos: None,
+                limits: None,
             });
             Row {
                 listing,
@@ -265,6 +269,10 @@ mod tests {
             icon: None,
             screenshots: Vec::new(),
             changes: Vec::new(),
+            windows: None,
+            permissions: Vec::new(),
+            min_macos: None,
+            limits: None,
         }
     }
 

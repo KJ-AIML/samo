@@ -192,6 +192,10 @@ pub fn merge(
         icon: None,
         screenshots: Vec::new(),
         changes: manifest.changes.clone(),
+        windows: manifest.windows.clone(),
+        permissions: manifest.permissions.clone(),
+        min_macos: manifest.min_macos.clone(),
+        limits: manifest.limits,
     })
 }
 
@@ -591,6 +595,31 @@ mod tests {
         let agreeing: ListingFile =
             toml::from_str("name = \"Hello\"\n").map_err(|e| e.to_string())?;
         assert!(merge(&manifest(), &agreeing, pkg()).is_ok());
+        Ok(())
+    }
+
+    #[test]
+    fn publish_copies_capabilities() -> Result<(), String> {
+        let mut m = manifest();
+        m.windows = Some("Opens its own windows: the capture overlay".into());
+        m.permissions = vec!["screen-recording".into()];
+        m.min_macos = Some("14.0".into());
+        m.limits = Some(samo_ext_protocol::Limits {
+            memory_mb: Some(800),
+            cpu_pct: Some(60),
+        });
+        let listing: ListingFile =
+            toml::from_str("author = \"KJ\"\n").map_err(|e| e.to_string())?;
+        let l = merge(&m, &listing, pkg())?;
+        assert_eq!(
+            (l.windows, l.permissions, l.min_macos, l.limits),
+            (
+                m.windows.clone(),
+                m.permissions.clone(),
+                m.min_macos.clone(),
+                m.limits
+            )
+        );
         Ok(())
     }
 
