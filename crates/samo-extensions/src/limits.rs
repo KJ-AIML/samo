@@ -208,15 +208,20 @@ mod tests {
             }),
             Duration::from_millis(250),
         );
-        // 100 pokes over about half a second.
+        // 100 pokes, 5 ms apart: half a second on an idle Mac, much longer on a busy CI runner.
+        let started = std::time::Instant::now();
         for _ in 0..100 {
             waker.poke();
             thread::sleep(Duration::from_millis(5));
         }
+        let poking = started.elapsed();
         thread::sleep(Duration::from_millis(600));
         let n = calls.load(Ordering::SeqCst);
-        // At most one per 250 ms, plus the trailing one after the last poke.
-        assert!((1..=4).contains(&n), "{n} wakes");
+        // At most one per 250 ms while poking, plus the trailing one after the last poke.
+        let allowed = usize::try_from(poking.as_millis() / 250).unwrap_or(usize::MAX) + 2;
+        assert!(n >= 1, "never woke");
+        assert!(n <= allowed, "{n} wakes in {poking:?} (at most {allowed})");
+        assert!(n < 100, "not coalesced: {n} wakes for 100 pokes");
         waker.close();
     }
 }
