@@ -41,7 +41,7 @@ public enum Geometry {
     public static func lineWidth(_ mark: Mark, scale: CGFloat) -> CGFloat {
         switch mark.kind {
         case .highlighter: return mark.style.width.highlighter * scale
-        case .arrow: return mark.style.width.stroke * 1.5 * scale
+        case .arrow: return mark.style.width.stroke * 1.25 * scale
         default: return mark.style.width.stroke * scale
         }
     }
@@ -92,7 +92,8 @@ public enum Geometry {
             let r = stepDiameter(mark, scale: scale) / 2 + scale
             return CGRect(x: centre.x - r, y: centre.y - r, width: 2 * r, height: 2 * r)
         case .text:
-            let halo = textFont(mark, scale: scale).pointSize / 6
+            // The renderer's halo is a shadow blurred by a sixth of the size; it fades out within a quarter.
+            let halo = textFont(mark, scale: scale).pointSize / 4 + scale
             return textBox(mark, scale: scale).insetBy(dx: -halo, dy: -halo)
         }
     }
@@ -176,9 +177,9 @@ public enum Geometry {
 
     /// The head for a shaft `width` wide, as `width` across and `height` along the arrow; shrunk for a short one.
     public static func arrowHead(width: CGFloat, length: CGFloat) -> CGSize {
-        let full = max(width * 3.6, 9)
+        let full = max(width * 3, 9)
         let headLength = min(full, length * 0.6)
-        return CGSize(width: headLength * 1.05, height: headLength)
+        return CGSize(width: headLength, height: headLength)
     }
 
     /// A filled arrow from `start` to its tip at `end`: the shaft tapers from the tail and meets a pointed head.
