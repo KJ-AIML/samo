@@ -13,6 +13,7 @@ pub mod net;
 mod paths;
 mod registry;
 mod state;
+pub mod store;
 mod supervisor;
 
 pub use error::InstallError;

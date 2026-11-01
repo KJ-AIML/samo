@@ -1,4 +1,5 @@
 pub mod http;
+pub mod store;
 
 use samo_primitives::{ErrorCode, SamoError, SamoResult};
 use samo_store::StorePool;

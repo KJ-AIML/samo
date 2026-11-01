@@ -4573,10 +4573,13 @@ dependencies = [
 name = "samo-testkit"
 version = "0.1.1"
 dependencies = [
+ "ring",
  "samo-blueprint",
  "samo-domain",
+ "samo-ext-protocol",
  "samo-primitives",
  "samo-store",
+ "serde_json",
  "tempfile",
  "tokio",
 ]
