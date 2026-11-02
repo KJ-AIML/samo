@@ -5,7 +5,7 @@ import CoreGraphics
 import Foundation
 
 public enum Tool: String, CaseIterable {
-    case select, arrow, line, rectangle, ellipse, text, highlighter, pen, step, blur, pixelate, spotlight, crop
+    case select, arrow, line, rectangle, ellipse, text, highlighter, pen, step, blur, pixelate, spotlight, crop, measure
 
     /// The key that picks it, in the editor.
     public var key: Character {
@@ -23,6 +23,7 @@ public enum Tool: String, CaseIterable {
         case .pixelate: return "x"
         case .spotlight: return "s"
         case .crop: return "c"
+        case .measure: return "m"
         }
     }
 
@@ -41,10 +42,11 @@ public enum Tool: String, CaseIterable {
         case .pixelate: return "Pixelate"
         case .spotlight: return "Spotlight"
         case .crop: return "Crop"
+        case .measure: return "Measure"
         }
     }
 
-    /// The mark it makes; `nil` for select and crop.
+    /// The mark it makes; `nil` for select, crop and measure (measuring is a view, never exported).
     public var kind: Mark.Kind? {
         Mark.Kind(rawValue: rawValue)
     }

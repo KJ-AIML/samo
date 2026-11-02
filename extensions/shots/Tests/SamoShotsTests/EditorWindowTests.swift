@@ -40,7 +40,7 @@ final class EditorWindowTests: XCTestCase {
     private let clipboard = MemoryClipboard()
     private let calls = Calls()
 
-    private func makeEditor(_ shot: Shot? = nil) throws -> EditorWindow {
+    private func makeEditor(_ shot: Shot? = nil, text: [String] = [], codes: [String] = []) throws -> EditorWindow {
         let shot = try shot ?? Shot(image: stripes(400, 300), scale: 2, takenAt: Date(timeIntervalSince1970: 1_793_543_712))
         var settings = Settings()
         settings.folder = "/tmp/Shots"
@@ -52,7 +52,9 @@ final class EditorWindowTests: XCTestCase {
             pin: { calls.pinned.append($0) },
             opened: { _, edits in calls.edits = edits },
             closed: { _ in calls.closed += 1 },
-            note: { words, _ in calls.notes.append(words) }
+            note: { words, _ in calls.notes.append(words) },
+            readText: { _ in text },
+            readCodes: { _ in codes }
         )
         let editor = EditorWindow(shot: shot, hooks: hooks)
         editor.prepare()
@@ -347,6 +349,96 @@ final class EditorWindowTests: XCTestCase {
             }
         }
         editor.close()
+    }
+
+    /// Lets the main run loop turn until `done` or a second passes.
+    private func wait(_ done: () -> Bool) {
+        let deadline = Date().addingTimeInterval(1)
+        while !done(), Date() < deadline {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+        }
+    }
+
+    func testTabCopiesTheHexUnderThePointer() throws {
+        let space = try XCTUnwrap(CGColorSpace(name: CGColorSpace.sRGB))
+        let context = try XCTUnwrap(CGContext(data: nil, width: 200, height: 100, bitsPerComponent: 8, bytesPerRow: 0,
+                                              space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        context.setFillColor(CGColor(srgbRed: 0xF1 / 255.0, green: 0x5B / 255.0, blue: 0x2A / 255.0, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: 200, height: 100))
+        context.setFillColor(CGColor(srgbRed: 0, green: 0, blue: 1, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: 200, height: 10))
+        let editor = try makeEditor(Shot(image: XCTUnwrap(context.makeImage()), scale: 2, takenAt: Date()))
+        editor.window.makeFirstResponder(editor.canvas.marks)
+        // Nothing under the pointer yet.
+        try press(editor, "\t", code: 48)
+        XCTAssertNil(clipboard.text)
+        editor.canvas.marks.pointer(at: CGPoint(x: 50, y: 50))
+        XCTAssertEqual(editor.colourUnderPointer?.hex, "#F15B2A")
+        try press(editor, "\t", code: 48)
+        XCTAssertEqual(clipboard.text, "#F15B2A")
+        try press(editor, "\t", code: 48, flags: .shift)
+        XCTAssertEqual(clipboard.text, "rgb(241, 91, 42)")
+        // The bottom rows, origin bottom-left as the shot's points run.
+        editor.canvas.marks.pointer(at: CGPoint(x: 50, y: 5))
+        XCTAssertEqual(editor.colourUnderPointer?.hex, "#0000FF")
+        editor.canvas.marks.pointer(at: CGPoint(x: 500, y: 5))
+        XCTAssertNil(editor.colourUnderPointer, "off the shot")
+        editor.close()
+    }
+
+    func testMeasureIsNeverExported() throws {
+        let editor = try makeEditor()
+        editor.window.makeFirstResponder(editor.canvas.marks)
+        try press(editor, "m", code: 46)
+        XCTAssertEqual(editor.tool, .measure)
+        try drag(editor, CGPoint(x: 40, y: 40), CGPoint(x: 160, y: 100))
+        XCTAssertEqual(editor.canvas.marks.measureBox, CGRect(x: 40, y: 40, width: 120, height: 60))
+        XCTAssertEqual(clipboard.text, "120 × 60 px · 60 × 30 pt")
+        // Never a mark, never in an export, never dirty.
+        XCTAssertEqual(editor.document.canvas, Canvas())
+        XCTAssertFalse(editor.document.dirty)
+        XCTAssertFalse(editor.document.canUndo)
+        // A click measures the gaps around it: the stripes are 3 pixels wide.
+        try click(editor, CGPoint(x: 1, y: 50))
+        XCTAssertNil(editor.canvas.marks.measureBox)
+        XCTAssertEqual(clipboard.text, "3 × 300 px · 1.5 × 150 pt")
+        // Esc clears a box; leaving the tool does too.
+        try drag(editor, CGPoint(x: 40, y: 40), CGPoint(x: 160, y: 100))
+        try press(editor, "\u{1b}", code: 53)
+        XCTAssertNil(editor.canvas.marks.measureBox)
+        XCTAssertFalse(editor.asking, "Esc cleared the box; it didn't close")
+        editor.close()
+    }
+
+    func testCopyTextCopiesTheShotsText() throws {
+        let editor = try makeEditor(text: ["สวัสดี", "world"])
+        try press(editor, "c", code: 8, flags: [.command, .shift])
+        wait { clipboard.text != nil }
+        XCTAssertEqual(clipboard.text, "สวัสดี\nworld")
+        XCTAssertEqual(calls.notes.last, "Copied: สวัสดี (+1 more line)")
+        XCTAssertNil(clipboard.png, "the text, not the shot")
+        // Nothing to read: said, not copied.
+        clipboard.text = nil
+        let blank = try makeEditor()
+        blank.copyText()
+        wait { calls.notes.last == "No text found" }
+        XCTAssertEqual(calls.notes.last, "No text found")
+        XCTAssertNil(clipboard.text)
+        editor.close()
+        blank.close()
+    }
+
+    func testQRChipAppearsForAShotWithACode() throws {
+        let editor = try makeEditor(codes: ["https://github.com/KJ-AIML/samo"])
+        wait { !editor.codes.isEmpty }
+        XCTAssertEqual(editor.codes, ["https://github.com/KJ-AIML/samo"])
+        XCTAssertFalse(editor.footer.codeChip.isHidden)
+        XCTAssertEqual(editor.footer.codeChip.title, "QR · github.com")
+        let none = try makeEditor()
+        wait { false }
+        XCTAssertTrue(none.footer.codeChip.isHidden)
+        editor.close()
+        none.close()
     }
 
     func testEditorReleasesItsShot() throws {

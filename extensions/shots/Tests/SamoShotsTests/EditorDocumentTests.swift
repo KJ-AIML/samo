@@ -201,6 +201,8 @@ final class EditorDocumentTests: XCTestCase {
         XCTAssertEqual(Set(Tool.allCases.map(\.key)).count, Tool.allCases.count)
         XCTAssertNil(Tool.select.kind)
         XCTAssertNil(Tool.crop.kind)
+        XCTAssertNil(Tool.measure.kind)
+        XCTAssertEqual(Tool.forKey("m"), .measure)
         XCTAssertEqual(Tool.blur.kind, .blur)
     }
 }

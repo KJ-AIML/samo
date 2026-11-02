@@ -1,6 +1,7 @@
 // The marks, and the pointer and keys that make them. A drag is one undo step. A click on a mark selects it, and
 // a drag then moves it; the selected mark's handles reshape it. A drawing tool can still draw inside a rectangle;
-// the select tool picks it there.
+// the select tool picks it there. Measuring (M) draws over the shot but is never a mark: Esc clears it, and it is
+// never exported.
 
 import AppKit
 import ShotsCore
@@ -9,6 +10,9 @@ final class MarksView: NSView {
     weak var canvas: CanvasView?
     private var drag: Drag = .none
     private(set) var text: TextMarkEditor?
+    /// Measuring: where the pointer is, and a box being or last measured, in the shot's pixels.
+    private(set) var hover: CGPoint?
+    private(set) var measureBox: CGRect?
 
     enum Drag {
         case none
@@ -18,6 +22,7 @@ final class MarksView: NSView {
         case cropNew(start: CGPoint)
         case cropMove(last: CGPoint)
         case cropResize(opposite: CGPoint)
+        case measuring(start: CGPoint)
     }
 
     private var editor: EditorWindow? { canvas?.editor }
@@ -54,9 +59,132 @@ final class MarksView: NSView {
 
         if let box = canvas.cropBox {
             drawCrop(box, in: ctx)
+        } else if editor.tool == .measure {
+            drawMeasure(in: ctx)
         } else if let id = doc.selected, let mark = doc.mark(id), text?.id != id {
             drawSelection(mark, in: ctx)
         }
+    }
+
+    // MARK: Measuring
+
+    /// The pixel under a shot point, rows from the top, if it is on the shot.
+    private func gridPixel(_ p: CGPoint) -> (x: Int, y: Int)? {
+        guard let editor, let grid = editor.grid else { return nil }
+        let x = Int(p.x.rounded(.down))
+        let y = grid.height - 1 - Int(p.y.rounded(.down))
+        guard x >= 0, y >= 0, x < grid.width, y < grid.height else { return nil }
+        return (x, y)
+    }
+
+    /// The gaps around the pointer, as a span in pixels.
+    func span(at p: CGPoint) -> Span? {
+        guard let grid = editor?.grid, let px = gridPixel(p) else { return nil }
+        return Edges.around(grid, x: px.x, y: px.y)
+    }
+
+    private func drawMeasure(in ctx: CGContext) {
+        guard let canvas, let editor else { return }
+        let scale = editor.document.scale
+        let px = 1 / max(editor.scroll.magnification, 0.05)
+        let ink = editor.palette.accent.color.cgColor
+        ctx.saveGState()
+        ctx.setStrokeColor(ink)
+        ctx.setLineWidth(px)
+        if let box = measureBox {
+            let rect = canvas.viewRect(forShot: box)
+            ctx.stroke(rect)
+            ctx.restoreGState()
+            pill(Ruler.size(Int(box.width.rounded()), Int(box.height.rounded()), scale: scale),
+                 at: CGPoint(x: rect.midX, y: rect.maxY + 6 * px), px: px)
+            return
+        }
+        guard let hover, let span = span(at: hover), let grid = editor.grid, let pixel = gridPixel(hover) else {
+            ctx.restoreGState()
+            return
+        }
+        // The run's ends in shot pixels (origin bottom-left), then on the canvas.
+        let row = CGFloat(grid.height - 1 - pixel.y)
+        let left = canvas.viewPoint(forShot: CGPoint(x: CGFloat(pixel.x - span.left), y: row + 0.5))
+        let right = canvas.viewPoint(forShot: CGPoint(x: CGFloat(pixel.x + span.right + 1), y: row + 0.5))
+        let top = canvas.viewPoint(forShot: CGPoint(x: CGFloat(pixel.x) + 0.5, y: row + 1 + CGFloat(span.up)))
+        let bottom = canvas.viewPoint(forShot: CGPoint(x: CGFloat(pixel.x) + 0.5, y: row - CGFloat(span.down)))
+        ctx.move(to: left)
+        ctx.addLine(to: right)
+        ctx.move(to: bottom)
+        ctx.addLine(to: top)
+        for end in [left, right] {
+            ctx.move(to: CGPoint(x: end.x, y: end.y - 4 * px))
+            ctx.addLine(to: CGPoint(x: end.x, y: end.y + 4 * px))
+        }
+        for end in [top, bottom] {
+            ctx.move(to: CGPoint(x: end.x - 4 * px, y: end.y))
+            ctx.addLine(to: CGPoint(x: end.x + 4 * px, y: end.y))
+        }
+        ctx.strokePath()
+        ctx.restoreGState()
+        pill(Ruler.label(span.width, scale: scale), at: CGPoint(x: (left.x + right.x) / 2, y: left.y + 6 * px), px: px)
+        pill(Ruler.label(span.height, scale: scale), at: CGPoint(x: top.x + 8 * px, y: (top.y + bottom.y) / 2), px: px,
+             leftAligned: true)
+    }
+
+    /// A mono label on the readout's glass, the same size on screen at any zoom (`px` is a screen point here).
+    private func pill(_ words: String, at point: CGPoint, px: CGFloat, leftAligned: Bool = false) {
+        guard let editor else { return }
+        let palette = editor.palette
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: Fonts.mono(12 * px, weight: .medium), .foregroundColor: palette.glassText.color,
+        ]
+        let size = (words as NSString).size(withAttributes: attrs)
+        let box = CGRect(x: leftAligned ? point.x : point.x - size.width / 2 - 6 * px, y: point.y,
+                         width: size.width + 12 * px, height: size.height + 6 * px)
+        palette.glass.color.withAlphaComponent(0.92).setFill()
+        NSBezierPath(roundedRect: box, xRadius: Metrics.radiusChip * px, yRadius: Metrics.radiusChip * px).fill()
+        (words as NSString).draw(at: CGPoint(x: box.minX + 6 * px, y: box.minY + 3 * px), withAttributes: attrs)
+    }
+
+    /// Copies a measurement, as the overlay's ruler does.
+    private func copyMeasure(_ words: String) {
+        guard let editor else { return }
+        if editor.hooks.clipboard.put(text: words) {
+            editor.hooks.note("Copied \(words)", false)
+        } else {
+            editor.hooks.note("Couldn't copy the size", true)
+        }
+    }
+
+    func clearMeasure() {
+        measureBox = nil
+        needsDisplay = true
+    }
+
+    // MARK: Following the pointer
+
+    override func updateTrackingAreas() {
+        trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(rect: bounds, options: [.mouseMoved, .mouseEnteredAndExited,
+                                                               .activeInKeyWindow, .inVisibleRect], owner: self))
+        super.updateTrackingAreas()
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        let p = shotPoint(event)
+        pointer(at: p)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        hover = nil
+        editor?.pointerMoved(shot: nil)
+        if editor?.tool == .measure { needsDisplay = true }
+    }
+
+    /// The pointer is over the shot at `p`: the footer's colour follows it, and so does the ruler.
+    func pointer(at p: CGPoint) {
+        guard let editor else { return }
+        let onShot = editor.document.fullRect.contains(p)
+        hover = onShot ? p : nil
+        editor.pointerMoved(shot: onShot ? p : nil)
+        if editor.tool == .measure, measureBox == nil { needsDisplay = true }
     }
 
     private func drawSelection(_ mark: Mark, in ctx: CGContext) {
@@ -141,6 +269,12 @@ final class MarksView: NSView {
             cropDown(at: p, box: box)
             return
         }
+        if editor.tool == .measure {
+            measureBox = nil
+            drag = .measuring(start: p)
+            needsDisplay = true
+            return
+        }
         // Double-click a text mark to type in it.
         if event.clickCount == 2, let id = doc.hitTest(p, tolerance: tolerance, interiors: true),
            doc.mark(id)?.kind == .text {
@@ -219,6 +353,8 @@ final class MarksView: NSView {
             drag = .cropMove(last: p)
         case let .cropResize(opposite):
             canvas?.cropBox = Geometry.box(opposite, clamp(shift ? Geometry.squared(p, from: opposite) : p))
+        case let .measuring(start):
+            measureBox = Geometry.box(clamp(start), clamp(shift ? Geometry.squared(p, from: start) : p))
         }
         needsDisplay = true
         editor.footer.refresh()
@@ -240,6 +376,14 @@ final class MarksView: NSView {
         case .cropNew, .cropMove, .cropResize:
             if let box = canvas?.cropBox, box.width < 4 || box.height < 4 {
                 canvas?.cropBox = doc.visibleRect
+            }
+        case let .measuring(start):
+            // A drag measures a box; a click, the gaps around the pointer. Either is copied.
+            if let box = measureBox, box.width >= 1, box.height >= 1 {
+                copyMeasure(Ruler.size(Int(box.width.rounded()), Int(box.height.rounded()), scale: doc.scale))
+            } else if let span = span(at: start) {
+                measureBox = nil
+                copyMeasure(Ruler.size(span.width, span.height, scale: doc.scale))
             }
         case .none:
             break
@@ -287,7 +431,9 @@ final class MarksView: NSView {
                 doc.cancelLive()
                 drag = .none
             }
-            if canvas.cropBox != nil {
+            if measureBox != nil {
+                clearMeasure()
+            } else if canvas.cropBox != nil {
                 canvas.cropBox = doc.visibleRect
                 editor.select(.arrow)
             } else if doc.selected != nil {
@@ -302,6 +448,8 @@ final class MarksView: NSView {
             } else if let id = doc.selected, doc.mark(id)?.kind == .text {
                 beginTextEditing(id, isNew: false)
             }
+        case 48:  // Tab: the colour under the pointer.
+            editor.copyColour(css: event.modifierFlags.contains(.shift))
         case 51, 117:  // Delete
             if let id = doc.selected {
                 doc.delete(id)

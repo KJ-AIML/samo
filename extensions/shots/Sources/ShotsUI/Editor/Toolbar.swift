@@ -1,6 +1,6 @@
 // The editor's bars, in Samo's tokens (DESIGN.md rule 10): the tools, colours, widths and backdrop on top, Cobalt
-// for what is chosen; at the foot, the size and zoom in mono, then the drag handle, Pin, Save and Copy, the
-// window's one Ink action.
+// for what is chosen; at the foot, the size and zoom in mono, the colour under the pointer, a chip for a QR code,
+// then Copy text, the drag handle, Pin, Save and Copy, the window's one Ink action.
 
 import AppKit
 import ShotsCore
@@ -8,7 +8,7 @@ import ShotsCore
 final class ToolbarView: NSView {
     static let height: CGFloat = 46
     /// Every tool, colour, width, the backdrop, undo and redo, without overlapping.
-    static let minimumWidth: CGFloat = 868
+    static let minimumWidth: CGFloat = 900
 
     weak var editor: EditorWindow?
     private var tools: [Tool: ToolButton] = [:]
@@ -22,7 +22,7 @@ final class ToolbarView: NSView {
 
     static let groups: [[Tool]] = [
         [.select], [.arrow, .line, .rectangle, .ellipse], [.text, .highlighter, .pen, .step],
-        [.blur, .pixelate, .spotlight], [.crop],
+        [.blur, .pixelate, .spotlight], [.crop, .measure],
     ]
 
     static func symbol(_ tool: Tool) -> String {
@@ -40,6 +40,7 @@ final class ToolbarView: NSView {
         case .pixelate: return "squareshape.split.3x3"
         case .spotlight: return "flashlight.on.fill"
         case .crop: return "crop"
+        case .measure: return "ruler"
         }
     }
 
@@ -363,6 +364,9 @@ final class FooterView: NSView {
         didSet { handle.editor = editor }
     }
     let status = NSTextField(labelWithString: "")
+    let colour = ColourReadout()
+    let codeChip = ActionButton("QR", kind: .plain)
+    let textButton = ActionButton("Copy text", kind: .plain)
     let handle = DragHandle()
     let pinButton = ActionButton("Pin", kind: .plain)
     let saveButton = ActionButton("Save", kind: .plain)
@@ -373,6 +377,14 @@ final class FooterView: NSView {
         wantsLayer = true
         status.lineBreakMode = .byTruncatingTail
         addSubview(status)
+        addSubview(colour)
+        codeChip.isHidden = true
+        codeChip.toolTip = "A QR code in the shot"
+        codeChip.onPress = { [weak self] in self?.editor?.showCode() }
+        addSubview(codeChip)
+        textButton.toolTip = "Copy the shot's text  ⇧⌘C"
+        textButton.onPress = { [weak self] in self?.editor?.copyText() }
+        addSubview(textButton)
         addSubview(handle)
         pinButton.toolTip = "Pin  ⌘P"
         saveButton.toolTip = "Save  ⌘S"
@@ -399,15 +411,39 @@ final class FooterView: NSView {
             x -= 8
         }
         handle.frame = CGRect(x: x - 40, y: y, width: 40, height: h)
-        x -= 52
-        status.frame = CGRect(x: 14, y: y + 6, width: max(0, x - 14), height: 18)
+        x -= 48 + textButton.width
+        textButton.frame = CGRect(x: x, y: y, width: textButton.width, height: h)
+        let right = x - 12
+        // Left: the status as wide as it needs, then the colour, then the QR chip, all within what is left.
+        let statusWidth = min(ceil(status.attributedStringValue.size().width) + 4, max(0, right - 14))
+        status.frame = CGRect(x: 14, y: y + 6, width: statusWidth, height: 18)
+        var left = status.frame.maxX + 14
+        colour.frame = CGRect(x: left, y: y + 4, width: min(110, max(0, right - left)), height: 20)
+        left = colour.frame.maxX + 8
+        codeChip.frame = CGRect(x: left, y: y, width: min(codeChip.width, max(0, right - left)), height: h)
+    }
+
+    /// The colour under the pointer changed.
+    func refreshColour() {
+        colour.colour = editor?.colourUnderPointer
+        colour.palette = editor?.palette ?? .light
+        colour.needsDisplay = true
     }
 
     func refresh() {
         guard let editor else { return }
         let palette = editor.palette
         layer?.backgroundColor = palette.card.color.cgColor
-        for button in [pinButton, saveButton, copyButton] { button.paint(palette: palette) }
+        for button in [pinButton, saveButton, copyButton, textButton, codeChip] { button.paint(palette: palette) }
+        if let code = editor.codes.first {
+            let shown = Links.web(code)?.host ?? code
+            codeChip.title = "QR · " + (shown.count > 26 ? String(shown.prefix(25)) + "…" : shown)
+            codeChip.paint(palette: palette)
+            codeChip.isHidden = false
+        } else {
+            codeChip.isHidden = true
+        }
+        needsLayout = true
         handle.palette = palette
         handle.needsDisplay = true
         status.attributedStringValue = NSAttributedString(string: FooterView.status(editor), attributes: [
@@ -523,5 +559,34 @@ final class DragHandle: NSView, NSDraggingSource {
 
     func draggingSession(_ session: NSDraggingSession, endedAt screenPoint: NSPoint, operation: NSDragOperation) {
         if !operation.isEmpty { editor?.dragLanded() }
+    }
+}
+
+/// The colour under the pointer: a swatch and its hex, in mono. Tab copies it.
+final class ColourReadout: NSView {
+    var colour: Pixel?
+    var palette = Palette.light
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        toolTip = "The colour under the pointer: Tab copies the hex, ⇧Tab rgb()"
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard let colour else { return }
+        let side = bounds.height - 6
+        let swatch = CGRect(x: 0, y: 3, width: side, height: side)
+        colour.rgba.color.setFill()
+        NSBezierPath(roundedRect: swatch, xRadius: 3, yRadius: 3).fill()
+        palette.hairlineStrong.color.setStroke()
+        NSBezierPath(roundedRect: swatch.insetBy(dx: 0.5, dy: 0.5), xRadius: 3, yRadius: 3).stroke()
+        (colour.hex as NSString).draw(at: CGPoint(x: side + 6, y: 2), withAttributes: [
+            .font: Fonts.mono(12), .foregroundColor: palette.text2.color,
+        ])
     }
 }

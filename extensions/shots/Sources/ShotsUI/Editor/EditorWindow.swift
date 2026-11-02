@@ -2,9 +2,10 @@
 // and a drag handle at the foot. It asks before discarding changes that weren't copied or saved (R19), and lets the
 // shot go when it closes (R17).
 //
-// Keys: a tool's letter picks it; ⌘Z, ⇧⌘Z; ⌫ deletes; [ ] change the width; ⌘C copy, ⌘S save, ⇧⌘S save as,
-// ⌘P pin, ⌘↩ copy and close, ⌘W close; ⌘+ ⌘− zoom, ⌘0 fit, ⌘1 real size; Esc deselects, then closes. While a text
-// mark is typed, keys are text.
+// Keys: a tool's letter picks it (M measures); ⌘Z, ⇧⌘Z; ⌫ deletes; [ ] change the width; ⌘C copy, ⇧⌘C copy the
+// shot's text, ⌘S save, ⇧⌘S save as, ⌘P pin, ⌘↩ copy and close, ⌘W close; ⌘+ ⌘− zoom, ⌘0 fit, ⌘1 real size; Tab
+// copies the colour under the pointer (⇧Tab as rgb()); Esc deselects, then closes. While a text mark is typed, keys
+// are text.
 
 import AppKit
 import ShotsCore
@@ -24,12 +25,17 @@ public struct EditorHooks {
     /// The editor closed: let the shot go.
     public var closed: (EditorWindow) -> Void
     public var note: (String, Bool) -> Void
+    /// Reading text and QR codes (Vision, on the Mac); tests stand in for them.
+    public var readText: (CGImage) async -> [String]
+    public var readCodes: (CGImage) async -> [String]
 
     public init(
         settings: @escaping () -> Settings, clipboard: Clipboard, disk: Disk, dragFolder: URL,
         saved: @escaping (Shot, ExportResult) -> Void, pin: @escaping (Shot) -> Void,
         opened: @escaping (Shot, @escaping () -> CGImage?) -> Void, closed: @escaping (EditorWindow) -> Void,
-        note: @escaping (String, Bool) -> Void = { Note.show($0, problem: $1) }
+        note: @escaping (String, Bool) -> Void = { Note.show($0, problem: $1) },
+        readText: @escaping (CGImage) async -> [String] = { await TextReader.read($0) },
+        readCodes: @escaping (CGImage) async -> [String] = { await QRReader.read($0) }
     ) {
         self.settings = settings
         self.clipboard = clipboard
@@ -40,6 +46,8 @@ public struct EditorHooks {
         self.opened = opened
         self.closed = closed
         self.note = note
+        self.readText = readText
+        self.readCodes = readCodes
     }
 }
 
@@ -80,6 +88,14 @@ public final class EditorWindow: NSObject, NSWindowDelegate {
     private var closing = false
     /// The zoom follows the window until the person zooms.
     var fitting = true
+    /// The shot's pixels in sRGB, made when the pointer first needs a colour or a measurement.
+    private(set) lazy var grid: PixelGrid? = PixelGrid(shot.image)
+    /// The colour under the pointer, for the footer and Tab.
+    public private(set) var colourUnderPointer: Pixel?
+    /// QR codes in the shot, found in the background when the editor opens.
+    public private(set) var codes: [String] = []
+    /// Text being read for ⇧⌘C.
+    public private(set) var readingText = false
 
     public init(shot: Shot, hooks: EditorHooks) {
         self.shot = shot
@@ -110,6 +126,19 @@ public final class EditorWindow: NSObject, NSWindowDelegate {
             return Renderer.export(self.document, base: self.shot.image, redaction: self.redaction, retina: true)
         }
         changed()
+        findCodes()
+    }
+
+    /// Looks for QR codes in the background; a chip appears in the footer if there are any.
+    private func findCodes() {
+        let image = shot.image
+        let read = hooks.readCodes
+        Task { @MainActor [weak self] in
+            let codes = await read(image)
+            guard let self, !self.isClosed, !codes.isEmpty else { return }
+            self.codes = codes
+            self.footer.refresh()
+        }
     }
 
     static func title(for shot: Shot) -> String {
@@ -197,6 +226,7 @@ public final class EditorWindow: NSObject, NSWindowDelegate {
         guard tool != self.tool else { return }
         canvas.marks.endTextEditing()
         if self.tool == .crop { canvas.leaveCrop(apply: true) }
+        if self.tool == .measure { canvas.marks.clearMeasure() }
         self.tool = tool
         if tool == .crop { canvas.enterCrop() }
         if tool != .select, tool != .crop { document.selected = nil }
@@ -232,6 +262,7 @@ public final class EditorWindow: NSObject, NSWindowDelegate {
         case ("z", false): undo()
         case ("z", true): redo()
         case ("c", false): copyShot()
+        case ("c", true): copyText()
         case ("s", false): save()
         case ("s", true): saveAs()
         case ("p", false): pin()
@@ -326,6 +357,59 @@ public final class EditorWindow: NSObject, NSWindowDelegate {
     public func copyAndClose() {
         copyShot()
         if !document.dirty { close() }
+    }
+
+    // MARK: Reading and measuring
+
+    /// The pointer is over the shot at `p` (its pixels, origin bottom-left), or left it.
+    func pointerMoved(shot p: CGPoint?) {
+        guard let p, let grid else {
+            colourUnderPointer = nil
+            footer.refreshColour()
+            return
+        }
+        colourUnderPointer = grid.pixel(Int(p.x.rounded(.down)), grid.height - 1 - Int(p.y.rounded(.down)))
+        footer.refreshColour()
+    }
+
+    /// Tab: the colour under the pointer as hex, or `rgb()` with ⇧.
+    public func copyColour(css: Bool) {
+        guard let colour = colourUnderPointer else {
+            hooks.note("Point at a colour first", false)
+            return
+        }
+        let text = css ? colour.css : colour.hex
+        if hooks.clipboard.put(text: text) {
+            hooks.note("Copied \(text)", false)
+        } else {
+            hooks.note("Couldn't copy the colour", true)
+        }
+    }
+
+    /// ⇧⌘C: the text in the shot (the kept part, without marks), copied.
+    public func copyText() {
+        canvas.marks.endTextEditing()
+        guard !readingText else { return }
+        let visible = document.visibleRect
+        let rows = CGRect(x: visible.minX, y: CGFloat(shot.image.height) - visible.maxY, width: visible.width,
+                          height: visible.height)
+        guard let image = shot.image.cropping(to: rows) else { return }
+        readingText = true
+        let read = hooks.readText
+        let clipboard = hooks.clipboard
+        Task { @MainActor [weak self] in
+            let lines = await read(image)
+            guard let self else { return }
+            self.readingText = false
+            let outcome = Reading.outcome(lines: lines, codes: [], clipboard: clipboard)
+            self.hooks.note(outcome.note, outcome.problem)
+        }
+    }
+
+    /// The footer's QR chip: the first code on the card.
+    func showCode() {
+        guard let code = codes.first else { return }
+        ResultCard(.code(code), clipboard: hooks.clipboard, note: hooks.note).show(near: NSEvent.mouseLocation)
     }
 
     /// The file a drag carries, or `nil` with the problem said.
