@@ -131,7 +131,7 @@ fn clips_phase1_demo() -> Fallible<()> {
     );
     assert_eq!(
         rows(&snap, "SHORTCUT").first().map(|r| r.detail.as_str()),
-        Some("No shortcut")
+        Some("No shortcut: the list can't open")
     );
     assert_eq!(
         snap.get(SLOT).map(|e| e.badge_summary.clone()),
