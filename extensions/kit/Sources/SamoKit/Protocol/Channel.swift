@@ -1,9 +1,9 @@
 // The protocol's pipes: lines in from Samo on a background thread, lines out to Samo in order. A write to a
-// closed pipe fails quietly (Samo has gone; stdin's end will stop Shots).
+// closed pipe fails quietly (Samo has gone; stdin's end will stop the extension).
 
 import Foundation
 
-/// Where Shots' messages go.
+/// Where an extension's messages go.
 public protocol Output: AnyObject {
     func send(_ msg: HelperMsg)
 }
@@ -11,7 +11,7 @@ public protocol Output: AnyObject {
 /// Writes messages to a file handle (stdout), one line each, in order.
 public final class LineWriter: Output {
     private let handle: FileHandle
-    private let queue = DispatchQueue(label: "dev.talvyn.samo.shots.out")
+    private let queue = DispatchQueue(label: "dev.talvyn.samo.ext.out")
 
     public init(handle: FileHandle) {
         self.handle = handle
@@ -65,7 +65,7 @@ public enum LineReader {
                 }
             }
         }
-        thread.name = "samo-shots-in"
+        thread.name = "samo-ext-in"
         thread.start()
     }
 }

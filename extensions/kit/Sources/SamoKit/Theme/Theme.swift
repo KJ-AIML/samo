@@ -1,4 +1,5 @@
-// Samo's palette (`apps/samo-gpui/src/theme.rs`), ported with the same mixes, so Shots' windows look like Samo.
+// Samo's palette (`apps/samo-gpui/src/theme.rs`), ported with the same mixes, so an extension's windows look like
+// Samo.
 
 import AppKit
 
@@ -22,7 +23,7 @@ public struct RGBA: Equatable {
                   a: Double(c.alphaComponent))
     }
 
-    static func hex(_ v: UInt32) -> RGBA {
+    public static func hex(_ v: UInt32) -> RGBA {
         RGBA(r: Double((v >> 16) & 0xFF) / 255, g: Double((v >> 8) & 0xFF) / 255, b: Double(v & 0xFF) / 255, a: 1)
     }
 
@@ -49,7 +50,7 @@ private let orange = RGBA.hex(0xF15B2A)
 private let orangeInk = RGBA.hex(0xA83B17)
 private let black = RGBA.hex(0x000000)
 
-/// The tokens Shots draws with.
+/// The tokens an extension draws with.
 public struct Palette: Equatable {
     public var card: RGBA
     public var shell: RGBA
@@ -63,7 +64,7 @@ public struct Palette: Equatable {
     public var signalText: RGBA
     public var primaryBg: RGBA
     public var primaryFg: RGBA
-    /// The readout's dark glass, in both themes; Shots' overlay labels sit on it.
+    /// The readout's dark glass, in both themes; labels over the screen sit on it.
     public var glass: RGBA
     public var glassLine: RGBA
     public var glassText: RGBA

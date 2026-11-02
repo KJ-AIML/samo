@@ -2,17 +2,16 @@
 // macOS refuses is reported, never forced (R18).
 
 import Carbon.HIToolbox
-import ShotsCore
 
-final class HotKeys {
-    static let shared = HotKeys()
+public final class HotKeys {
+    public static let shared = HotKeys()
 
     private var refs: [UInt32: EventHotKeyRef] = [:]
     private var handlers: [UInt32: () -> Void] = [:]
     private var installed = false
 
     /// Registers `shortcut` under `id`. `false` if macOS refused it.
-    func register(id: UInt32, _ shortcut: Shortcut, handler: @escaping () -> Void) -> Bool {
+    public func register(id: UInt32, _ shortcut: Shortcut, handler: @escaping () -> Void) -> Bool {
         installIfNeeded()
         unregister(id)
         var ref: EventHotKeyRef?
@@ -26,14 +25,14 @@ final class HotKeys {
         return true
     }
 
-    func unregister(_ id: UInt32) {
+    public func unregister(_ id: UInt32) {
         if let ref = refs.removeValue(forKey: id) {
             UnregisterEventHotKey(ref)
         }
         handlers[id] = nil
     }
 
-    func unregisterAll() {
+    public func unregisterAll() {
         for id in Array(refs.keys) {
             unregister(id)
         }

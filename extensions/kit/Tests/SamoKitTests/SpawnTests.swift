@@ -1,5 +1,5 @@
 import XCTest
-@testable import ShotsCore
+@testable import SamoKit
 
 final class SpawnTests: XCTestCase {
     func testDisclaimFallbackIsReported() throws {
@@ -15,7 +15,8 @@ final class SpawnTests: XCTestCase {
 
         // ...and says so to Samo, first thing after hello.
         let out = MemoryOutput()
-        Session(out: out, shared: true, handlers: Session.Handlers(page: { [] })).start()
+        Session(out: out, shared: true, sharedNote: "Shots couldn't start as its own app, so Screen Recording is "
+                    + "shared with Samo", handlers: Session.Handlers(page: { [] })).start()
         guard case let .log(event, detail) = out.sent.dropFirst().first else {
             return XCTFail("no log after hello: \(out.sent)")
         }

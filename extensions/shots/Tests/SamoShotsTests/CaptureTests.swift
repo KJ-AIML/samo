@@ -1,5 +1,6 @@
 import CoreGraphics
 import XCTest
+import SamoKit
 @testable import ShotsCore
 
 private func image(_ width: Int, _ height: Int) throws -> CGImage {

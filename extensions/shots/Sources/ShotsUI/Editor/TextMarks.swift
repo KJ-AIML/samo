@@ -3,6 +3,7 @@
 // undo step, and a mark left empty goes.
 
 import AppKit
+import SamoKit
 import ShotsCore
 
 final class TextMarkEditor: NSObject, NSTextViewDelegate {

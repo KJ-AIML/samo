@@ -2,6 +2,7 @@
 // soft shadow.
 
 import CoreGraphics
+import SamoKit
 
 extension Backdrop {
     /// Padding for a shot this big: 8 % of its shorter side, from 24 to 96 points.

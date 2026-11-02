@@ -1,5 +1,5 @@
 import XCTest
-@testable import ShotsCore
+@testable import SamoKit
 
 final class ProtocolTests: XCTestCase {
     private func object(_ line: String?) throws -> [String: Any] {
@@ -53,7 +53,7 @@ final class ProtocolTests: XCTestCase {
     func testHelloComesFirst() {
         let out = MemoryOutput()
         var shutDown = false
-        let session = Session(out: out, shared: false, handlers: Session.Handlers(
+        let session = Session(out: out, shared: false, sharedNote: "shared", handlers: Session.Handlers(
             page: { [.note(text: "hi", kind: .plain)] },
             shutdown: { shutDown = true }
         ))

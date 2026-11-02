@@ -2,7 +2,6 @@
 // the keyboard, and fades by itself. A problem stays a little longer, in Signal.
 
 import AppKit
-import ShotsCore
 
 public enum Note {
     private static var current: NSPanel?

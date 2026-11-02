@@ -1,5 +1,6 @@
 import CoreGraphics
 import XCTest
+import SamoKit
 @testable import ShotsCore
 
 /// A button on a white page, with rows from the top: the button at `button`, its label block at `label`, and

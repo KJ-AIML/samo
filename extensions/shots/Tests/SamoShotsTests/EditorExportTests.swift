@@ -1,6 +1,7 @@
 import CoreGraphics
 import ImageIO
 import XCTest
+import SamoKit
 @testable import ShotsCore
 
 private final class Disk: ShotsCore.Disk {

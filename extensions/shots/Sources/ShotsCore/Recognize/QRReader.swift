@@ -1,6 +1,7 @@
 // Reading QR codes in a picture (ADR-004 S4), on the Mac with Vision. Each code's text, once, in the order found.
 
 import CoreGraphics
+import SamoKit
 import Foundation
 import Vision
 

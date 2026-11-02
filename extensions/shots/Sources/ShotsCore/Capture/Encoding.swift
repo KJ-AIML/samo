@@ -1,6 +1,7 @@
 // Turning a shot into a file's bytes, and Retina into 1x.
 
 import CoreGraphics
+import SamoKit
 import Foundation
 import ImageIO
 import UniformTypeIdentifiers

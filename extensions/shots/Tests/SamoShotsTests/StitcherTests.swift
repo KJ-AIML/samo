@@ -1,5 +1,6 @@
 import CoreGraphics
 import XCTest
+import SamoKit
 @testable import ShotsCore
 
 /// A synthetic web page, rows from the top: bands of colour, sparse dark dots unique to every row (like text), and a

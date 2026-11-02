@@ -2,6 +2,7 @@
 // the Mac's other languages macOS can read. Nothing leaves the Mac (R16).
 
 import CoreGraphics
+import SamoKit
 import Foundation
 import Vision
 

@@ -12,12 +12,16 @@ let package = Package(
     products: [
         .executable(name: "samo-shots", targets: ["SamoShots"]),
     ],
+    dependencies: [
+        .package(path: "../kit"),
+    ],
     targets: [
-        .target(name: "ShotsCore", path: "Sources/ShotsCore"),
-        .target(name: "ShotsUI", dependencies: ["ShotsCore"], path: "Sources/ShotsUI"),
+        .target(name: "ShotsCore", dependencies: [.product(name: "SamoKit", package: "kit")], path: "Sources/ShotsCore"),
+        .target(name: "ShotsUI", dependencies: ["ShotsCore", .product(name: "SamoKit", package: "kit")],
+                path: "Sources/ShotsUI"),
         .executableTarget(
             name: "SamoShots",
-            dependencies: ["ShotsCore", "ShotsUI"],
+            dependencies: ["ShotsCore", "ShotsUI", .product(name: "SamoKit", package: "kit")],
             path: "Sources/SamoShots",
             exclude: ["Info.plist"],
             // Its own Info.plist, so macOS treats the worker as its own app, "Shots", for Screen Recording.
@@ -28,7 +32,8 @@ let package = Package(
                 ]),
             ]
         ),
-        .testTarget(name: "SamoShotsTests", dependencies: ["ShotsCore", "ShotsUI"], path: "Tests/SamoShotsTests"),
+        .testTarget(name: "SamoShotsTests", dependencies: ["ShotsCore", "ShotsUI", .product(name: "SamoKit", package: "kit")],
+                    path: "Tests/SamoShotsTests"),
     ],
     swiftLanguageVersions: [.v5]
 )

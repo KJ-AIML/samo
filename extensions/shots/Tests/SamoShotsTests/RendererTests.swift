@@ -1,5 +1,6 @@
 import CoreGraphics
 import XCTest
+import SamoKit
 @testable import ShotsCore
 
 /// An image's pixels as sRGB RGBA bytes, read with `y` from the bottom, as the editor's coordinates run.

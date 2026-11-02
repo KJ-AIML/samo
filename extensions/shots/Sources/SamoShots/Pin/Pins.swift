@@ -3,6 +3,7 @@
 // closes (R17).
 
 import AppKit
+import SamoKit
 import ShotsCore
 import ShotsUI
 

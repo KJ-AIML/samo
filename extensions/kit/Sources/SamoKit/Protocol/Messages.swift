@@ -1,11 +1,11 @@
-// Samo's extension protocol (ADR-002, protocol 1 with ADR-004's additions), as Shots speaks it: one JSON object per
+// Samo's extension protocol (ADR-002, protocol 1 with ADR-004's additions), as Samo's Swift extensions speak it: one JSON object per
 // line, `type` naming the message. These mirror `crates/samo-ext-protocol` field for field.
 
 import Foundation
 
 public let protocolVersion = 1
 
-/// Samo to Shots.
+/// Samo to the extension.
 public enum HostMsg: Equatable {
     case hello(protocolVersion: Int, samoVersion: String, dataDir: String)
     case setting(key: String, value: Bool)
@@ -14,7 +14,7 @@ public enum HostMsg: Equatable {
     case visible(page: Bool)
     case shutdown
 
-    /// One line from Samo; `nil` for anything Shots doesn't understand (it is ignored, never fatal).
+    /// One line from Samo; `nil` for anything the extension doesn't understand (it is ignored, never fatal).
     public static func decode(_ line: String) -> HostMsg? {
         guard let data = line.data(using: .utf8),
               let object = try? JSONSerialization.jsonObject(with: data),
@@ -107,7 +107,7 @@ public enum NoteKind: String {
     case error
 }
 
-/// What Shots' page in Samo is built from; Samo draws each with its own parts.
+/// What an extension's page in Samo is built from; Samo draws each with its own parts.
 public enum Widget: Equatable {
     case section(title: String, about: String?)
     case rows([RowItem])
@@ -153,7 +153,7 @@ public enum Widget: Equatable {
     }
 }
 
-/// Shots to Samo.
+/// The extension to Samo.
 public enum HelperMsg: Equatable {
     case hello
     case view([Widget])

@@ -2,6 +2,7 @@
 // and the handles that resize a mark. Everything is in the shot's pixels.
 
 import AppKit
+import SamoKit
 import CoreGraphics
 
 public enum Geometry {

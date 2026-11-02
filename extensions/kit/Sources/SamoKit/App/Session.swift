@@ -1,5 +1,5 @@
-// One conversation with Samo: `hello` first, then the page, then whatever Samo asks. Shots' features plug in
-// through `handlers`; the session itself knows only the protocol.
+// One conversation with Samo: `hello` first, then the page, then whatever Samo asks. An extension's features plug
+// in through `handlers`; the session itself knows only the protocol.
 
 import Foundation
 
@@ -27,25 +27,25 @@ public final class Session {
     }
 
     public let out: Output
-    /// The worker couldn't be made its own app, so Screen Recording is Samo's (and so every extension's).
+    /// The worker couldn't be made its own app, so its permissions are Samo's (and so every extension's).
     public let shared: Bool
+    /// What the first log says when `shared`.
+    private let sharedNote: String
     public private(set) var dataDir: String = ""
     public private(set) var pageVisible = false
     private let handlers: Handlers
 
-    public init(out: Output, shared: Bool, handlers: Handlers) {
+    public init(out: Output, shared: Bool, sharedNote: String, handlers: Handlers) {
         self.out = out
         self.shared = shared
+        self.sharedNote = sharedNote
         self.handlers = handlers
     }
 
     public func start() {
         out.send(.hello)
         if shared {
-            out.send(.log(
-                event: "permission",
-                detail: "Shots couldn't start as its own app, so Screen Recording is shared with Samo"
-            ))
+            out.send(.log(event: "permission", detail: sharedNote))
         }
         refresh()
     }
@@ -55,7 +55,7 @@ public final class Session {
         out.send(.view(handlers.page()))
     }
 
-    /// Handles one message; `false` once Shots should quit.
+    /// Handles one message; `false` once the extension should quit.
     @discardableResult
     public func handle(_ msg: HostMsg) -> Bool {
         switch msg {

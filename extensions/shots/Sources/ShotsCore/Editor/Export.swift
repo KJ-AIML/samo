@@ -3,6 +3,7 @@
 // A failure is said, never swallowed, and leaves the document dirty.
 
 import CoreGraphics
+import SamoKit
 import Foundation
 
 public struct ExportResult: Equatable {

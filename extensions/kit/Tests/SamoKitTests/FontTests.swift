@@ -1,13 +1,17 @@
 import AppKit
 import XCTest
-@testable import ShotsCore
+@testable import SamoKit
 
 final class FontTests: XCTestCase {
     func testFontsLoadFromShareOrFallBack() throws {
-        let package = URL(fileURLWithPath: #filePath)
+        // A helper at `<package>/bin/<helper>` finds `<package>/share/fonts`.
+        let packaged = Fonts.directory(forExecutable: URL(fileURLWithPath: "/x/shots/bin/samo-shots"))
+        XCTAssertEqual(packaged.path, "/x/shots/share/fonts")
+        // Each extension ships a copy of Samo's own fonts; register those.
+        let repo = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-        let dir = Fonts.directory(forExecutable: package.appendingPathComponent("bin/samo-shots"))
-        XCTAssertEqual(dir.lastPathComponent, "fonts")
+            .deletingLastPathComponent().deletingLastPathComponent()
+        let dir = repo.appendingPathComponent("apps/samo-gpui/assets/fonts")
         XCTAssertTrue(FileManager.default.fileExists(atPath: dir.path), dir.path)
         // Missing fonts register nothing, and every face still comes back.
         XCTAssertEqual(Fonts.register(directory: URL(fileURLWithPath: "/nonexistent")), 0)

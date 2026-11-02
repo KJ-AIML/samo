@@ -1,6 +1,6 @@
 // Samo's fonts: IBM Plex Mono from `share/fonts` beside the helper (the same files Samo bundles), Cabinet Grotesk and
 // Switzer if this Mac has them, the system's otherwise, as Samo does. No SwiftPM resources: they'd point at the Mac
-// that built Shots.
+// that built the extension.
 
 import AppKit
 import CoreText

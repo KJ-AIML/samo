@@ -3,6 +3,7 @@
 // screenshot shortcuts.
 
 import Foundation
+import SamoKit
 
 public enum Conflicts {
     /// Screenshot apps that take ⇧⌘ shortcuts, by bundle id prefix and name.
@@ -43,22 +44,12 @@ public enum Conflicts {
             }
             let parameters = (entry["value"] as? [String: Any])?["parameters"] as? [Int]
             if let p = parameters, p.count == 3, let code = UInt32(exactly: p[1]) {
-                found.append(Shortcut(keyCode: code, modifiers: carbonModifiers(cocoa: p[2])))
+                found.append(Shortcut(keyCode: code, modifiers: Shortcut.carbonModifiers(cocoa: p[2])))
             } else {
                 found.append(fallback)
             }
         }
         return found
-    }
-
-    /// NSEvent modifier flags (as `com.apple.symbolichotkeys` stores them) to Carbon's.
-    static func carbonModifiers(cocoa: Int) -> UInt32 {
-        var m: UInt32 = 0
-        if cocoa & 0x20000 != 0 { m |= Shortcut.shift }
-        if cocoa & 0x40000 != 0 { m |= Shortcut.control }
-        if cocoa & 0x80000 != 0 { m |= Shortcut.option }
-        if cocoa & 0x100000 != 0 { m |= Shortcut.command }
-        return m
     }
 
     /// For each of Shots' shortcuts, what it may clash with, in words; empty when nothing is known to.

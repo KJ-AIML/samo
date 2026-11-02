@@ -1,14 +1,14 @@
-// How the worker is started (ADR-004, KJ's decision: Screen Recording belongs to Shots alone).
+// How the worker is started (ADR-004, ADR-005: an extension's macOS permissions belong to it alone).
 //
-// Samo starts `samo-shots serve`. That first process starts the same binary again as `samo-shots --worker`, with
-// macOS's "responsibility disclaim" spawn attribute, so macOS treats the worker as its own app (the Info.plist
-// built into the binary names it "Shots") and asks for Screen Recording for Shots, not for Samo. The worker
-// inherits stdin, stdout and stderr, so it talks to Samo directly; the first process only waits for it.
+// Samo starts `<helper> serve`. That first process starts the same binary again as `<helper> --worker`, with macOS's
+// "responsibility disclaim" spawn attribute, so macOS treats the worker as its own app (the Info.plist built into
+// the binary names it, e.g. "Shots") and asks for its permissions for it, not for Samo. The worker inherits stdin,
+// stdout and stderr, so it talks to Samo directly; the first process only waits for it.
 //
 // The attribute is private API, looked up by name. If it is missing or refused, the worker starts without it and
-// is told so (`--shared`): Screen Recording would then be Samo's, and Shots' page says so.
+// is told so (`--shared`): its permissions would then be Samo's, and its page says so.
 //
-// This is the only file in Shots that may call `posix_spawn` (R16, checked by the network gate).
+// This is the only file in an extension that may call `posix_spawn` (R16, checked by the network gate).
 
 import Darwin
 import Foundation
@@ -68,7 +68,7 @@ public enum Spawn {
     public static func relay(executable: String) -> Int32 {
         for _ in 0..<5 {
             guard let (pid, _) = startWorker(executable: executable) else {
-                FileHandle.standardError.write(Data("samo-shots: couldn't start the worker\n".utf8))
+                FileHandle.standardError.write(Data("\((executable as NSString).lastPathComponent): couldn't start the worker\n".utf8))
                 return 1
             }
             let code = wait(pid)
@@ -85,3 +85,7 @@ public enum Spawn {
         return (status & 0x7F) == 0 ? (status >> 8) & 0xFF : 1
     }
 }
+
+/// The worker's exit code that asks the first process to start it again (after a permission was granted: macOS
+/// applies a grant only to a process started after it), instead of ending.
+public let restartExitCode: Int32 = 75

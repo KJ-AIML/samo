@@ -3,6 +3,7 @@
 // still stops the ruler, and a screenshot's faint noise doesn't.
 
 import CoreGraphics
+import SamoKit
 import Foundation
 
 /// How far the pointer's colour runs each way, in pixels, not counting the pointer's own pixel.

@@ -1,6 +1,7 @@
 import AppKit
 import CoreImage
 import XCTest
+import SamoKit
 @testable import ShotsCore
 
 /// Black text on white, one line each, as a web page would show it.

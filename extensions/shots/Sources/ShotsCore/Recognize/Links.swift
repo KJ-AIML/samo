@@ -4,13 +4,12 @@
 // copied.
 
 import AppKit
+import SamoKit
 
 public enum Links {
     /// System Settings → Privacy & Security → Screen Recording.
     public static func openScreenRecordingSettings() {
-        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") {
-            NSWorkspace.shared.open(url)
-        }
+        SystemSettings.open(.screenRecording)
     }
 
     /// `text` as a web link (`http` or `https`, with a host), or `nil`.
