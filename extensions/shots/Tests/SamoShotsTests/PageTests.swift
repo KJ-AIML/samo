@@ -100,7 +100,7 @@ final class PageTests: XCTestCase {
             if case let .button(action, _, _) = widget { return action }
             return nil
         }
-        for action in ["area", "window", "screen", "text", "colour", "ruler"] {
+        for action in ["area", "window", "screen", "scroll", "text", "colour", "ruler"] {
             XCTAssertTrue(actions.contains(action), action)
         }
         // Every mode has a shortcut row; the new ones say they have none.
@@ -108,7 +108,8 @@ final class PageTests: XCTestCase {
             if case let .rows(items) = widget, items.first?.id == nil { return items }
             return nil
         }.first ?? []
-        XCTAssertEqual(rows.map(\.title), ["Whole screen", "An area", "Copy text", "Pick a colour", "Measure"])
+        XCTAssertEqual(rows.map(\.title), ["Whole screen", "An area", "Scrolling capture", "Copy text", "Pick a colour",
+                                           "Measure"])
         XCTAssertEqual(rows[2].detail, "No shortcut")
         XCTAssertEqual(rows[2].lamp, .off)
     }

@@ -66,6 +66,7 @@ public enum Page {
         page.append(.button(action: "area", label: "Capture an area", kind: .plain))
         page.append(.button(action: "window", label: "Capture a window", kind: .plain))
         page.append(.button(action: "screen", label: "Capture the screen", kind: .plain))
+        page.append(.button(action: "scroll", label: "Scrolling capture", kind: .plain))
         page.append(.button(action: "text", label: "Copy text from an area", kind: .plain))
         page.append(.button(action: "colour", label: "Pick a colour", kind: .plain))
         page.append(.button(action: "ruler", label: "Measure", kind: .plain))
@@ -92,8 +93,8 @@ public enum Page {
             return RowItem(lamp: shortcut == nil ? .off : .done, title: mode.label,
                            detail: shortcut == nil ? "No shortcut" : "Ready", trailing: keys)
         }))
-        page.append(.note(text: "In the overlay: Space for a window, T to copy text, C for a colour, R to measure; Esc "
-            + "cancels.", kind: .plain))
+        page.append(.note(text: "In the overlay: Space for a window, S to scroll, T to copy text, C for a colour, R to "
+            + "measure; Esc cancels.", kind: .plain))
         page.append(.button(action: "change-shortcuts", label: "Change shortcuts…", kind: .link))
 
         page.append(.section(title: "AFTER A CAPTURE", about: nil))

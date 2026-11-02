@@ -68,6 +68,7 @@ final class ShotsApp {
         refused = []
         let modes: [(id: UInt32, mode: String, capture: CaptureController.Mode)] = [
             (1, "screen", .screen), (2, "area", .area), (3, "text", .text), (4, "colour", .colour), (5, "ruler", .ruler),
+            (6, "scroll", .scroll),
         ]
         for entry in modes {
             guard let shortcut = settings.shortcuts[entry.mode] else { continue }
@@ -120,6 +121,7 @@ final class ShotsApp {
         case "text": capture?.start(.text, fromPage: true)
         case "colour": capture?.start(.colour, fromPage: true)
         case "ruler": capture?.start(.ruler, fromPage: true)
+        case "scroll": capture?.start(.scroll, fromPage: true)
         case "allow": permission.request()
         case "open-settings": Links.openScreenRecordingSettings()
         case "restart":

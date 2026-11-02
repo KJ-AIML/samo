@@ -97,32 +97,38 @@ fn shots_phase3_demo() -> Fallible<()> {
         );
     }
 
-    // 3. Every mode has a shortcut row; copying text has the one it was given, registered and ready, and the other
-    //    two have none.
+    // 3. Copying text, picking a colour and measuring have shortcut rows (found by name: later versions add more).
+    //    Copying text has the one it was given, registered and ready; the others have none.
     let rows = shortcut_rows(&snap);
-    let titles: Vec<&str> = rows.iter().map(|r| r.title.as_str()).collect();
-    assert_eq!(
-        titles,
-        [
-            "Whole screen",
-            "An area",
-            "Copy text",
-            "Pick a colour",
-            "Measure"
-        ]
-    );
-    let text = &rows[2];
+    let row = |title: &str| rows.iter().find(|r| r.title == title).cloned();
+    for title in [
+        "Whole screen",
+        "An area",
+        "Copy text",
+        "Pick a colour",
+        "Measure",
+    ] {
+        assert!(row(title).is_some(), "no {title} row");
+    }
+    let text = row("Copy text").ok_or("no Copy text row")?;
     assert_eq!(
         text.detail, "Ready",
         "the shortcut registered: {:?}",
         text.trailing
     );
     assert_eq!(text.trailing, "⌃⌥⇧⌘key 80");
-    for row in &rows[3..] {
-        assert_eq!(row.detail, "No shortcut", "{}", row.title);
+    for title in ["Pick a colour", "Measure"] {
+        assert_eq!(
+            row(title).map(|r| r.detail),
+            Some("No shortcut".to_string()),
+            "{title}"
+        );
     }
     // Shottr's two keys aren't in these settings, so they aren't taken either.
-    assert_eq!(rows[0].detail, "No shortcut");
+    assert_eq!(
+        row("Whole screen").map(|r| r.detail),
+        Some("No shortcut".to_string())
+    );
 
     // 4. It stays up (R15, its limits), then Off leaves nothing running.
     thread::sleep(Duration::from_secs(3));

@@ -77,7 +77,7 @@ final class SettingsTests: XCTestCase {
     func testNewModesHaveNoShortcutByDefault() {
         let fresh = Settings()
         XCTAssertEqual(Set(fresh.shortcuts.keys), ["screen", "area"])
-        for mode in ["text", "colour", "ruler"] {
+        for mode in ["scroll", "text", "colour", "ruler"] {
             XCTAssertNil(fresh.shortcuts[mode], mode)
             XCTAssertTrue(Settings.modes.contains { $0.key == mode }, mode)
         }

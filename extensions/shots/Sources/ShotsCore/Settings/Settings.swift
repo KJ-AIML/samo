@@ -68,14 +68,14 @@ public struct Settings: Codable, Equatable {
     /// Full Retina resolution, or 1x (half the pixels on a Retina display).
     public var retina: Bool = true
     public var sound: Bool = false
-    /// By capture mode: `screen`, `area`, and, only if chosen, `text`, `colour`, `ruler`.
+    /// By capture mode: `screen`, `area`, and, only if chosen, `text`, `colour`, `ruler`, `scroll`.
     public var shortcuts: [String: Shortcut] = ["screen": .wholeScreen, "area": .area]
 
     /// Everything a shortcut can start, in order: Shottr's two keys are set; the rest wait to be chosen, so Shots
     /// takes nothing more from the Mac (R18).
     public static let modes: [(key: String, label: String)] = [
-        ("screen", "Whole screen"), ("area", "An area"), ("text", "Copy text"), ("colour", "Pick a colour"),
-        ("ruler", "Measure"),
+        ("screen", "Whole screen"), ("area", "An area"), ("scroll", "Scrolling capture"), ("text", "Copy text"),
+        ("colour", "Pick a colour"), ("ruler", "Measure"),
     ]
 
     public init() {}
