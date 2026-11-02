@@ -174,6 +174,17 @@ shot as you go, with a preview at the side, up to 30,000 px. Esc or a click outs
 leaves your Mac. It opens its own windows, which the store says before you install it; an extension that opens windows
 without saying so is stopped.
 
+### Clips
+
+**Clips** is a clipboard history in the store ([ADR-005](docs/decisions/ADR-005-samo-clips.md)), in the spirit of
+Maccy. Press ⇧⌘C: everything you copied is listed at the pointer, newest first, pins on top. Type to find it, then
+Return or ⌘1–⌘9 pastes it into the app you were in (⌥Return without formatting; ⌥P pins, ⌥⌫ deletes). It keeps
+text, rich text, images and files, 200 by default, on this Mac only; uninstalling deletes them. What password
+managers mark as secret, and anything copied in 1Password, Bitwarden, Keychain Access or Passwords, is never kept,
+not even in memory. macOS asks for two permissions, for **Clips** alone: Paste from Other Apps (choose Always Allow),
+and Accessibility, so it can press ⌘V for you; without it, picking copies and you press ⌘V. It checks the clipboard
+for a new copy twice a second and does nothing else while idle.
+
 ### Developing an extension
 
 Build it into a folder and point Samo at it; it shows as *dev*, and never replaces a store install:

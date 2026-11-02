@@ -186,7 +186,8 @@ Samo lives in the menu bar too (`src/menubar.rs`, via `tray-icon`'s safe `NSStat
    Signal only for its errors. Waiting for you is Ink with `!`, not Signal: it isn't wrong.
 10. An extension that declares windows (ADR-004) draws them with Samo's tokens, ported (Shots' `Theme.swift`): the
     readout's glass for anything over the screen, the mono face for figures, Cobalt for what is chosen. Its windows
-    never take a click they weren't asked for, and a note near the pointer fades by itself.
+    never take a click they weren't asked for, and a note near the pointer fades by itself. Clips' list at ⇧⌘C sits on
+    the same glass: the selected row in a Pale cobalt wash, ⌘1–⌘9 and figures in mono, a pin in Pale cobalt.
 
 ## Decisions
 
