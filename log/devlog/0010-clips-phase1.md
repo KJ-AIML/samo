@@ -68,4 +68,11 @@
   - Its settings: no shortcut and "Keep what I copy" off, so the run takes nothing from this Mac.
 - **The demos' shared module is now `swift_common`,** for Shots and Clips.
 - **Store:** Clips 0.1.0 packages signed with Talvyn's identity (260 KB), and a test-key catalog verifies.
-- **KJ's checks (M1–M6)** need a Samo 0.4.0 test build, and KJ's hands to allow the two permissions.
+- **KJ's checks (M1–M6), passed on 2026-11-02** ("Done all good now"), with a test-key Samo 0.4.0 and Clips 0.1.0
+  signed with Talvyn's identity, from the local test store. These were the checks:
+  - what it may do shown before install;
+  - both permissions allowed for Clips;
+  - copy in three apps, then ⇧⌘C, search and Return pastes where you were;
+  - a password not kept;
+  - history and pins kept over a restart, and gone on uninstall;
+  - idle CPU unchanged.
