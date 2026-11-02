@@ -67,7 +67,7 @@ final class ShotsApp {
         HotKeys.shared.unregisterAll()
         refused = []
         let modes: [(id: UInt32, mode: String, capture: CaptureController.Mode)] = [
-            (1, "screen", .screen), (2, "area", .area),
+            (1, "screen", .screen), (2, "area", .area), (3, "text", .text), (4, "colour", .colour), (5, "ruler", .ruler),
         ]
         for entry in modes {
             guard let shortcut = settings.shortcuts[entry.mode] else { continue }
@@ -117,6 +117,9 @@ final class ShotsApp {
         case "area": capture?.start(.area, fromPage: true)
         case "window": capture?.start(.window, fromPage: true)
         case "screen": capture?.start(.screen, fromPage: true)
+        case "text": capture?.start(.text, fromPage: true)
+        case "colour": capture?.start(.colour, fromPage: true)
+        case "ruler": capture?.start(.ruler, fromPage: true)
         case "allow": permission.request()
         case "open-settings": Links.openScreenRecordingSettings()
         case "restart":

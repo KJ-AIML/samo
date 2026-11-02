@@ -94,6 +94,25 @@ final class PageTests: XCTestCase {
         })
     }
 
+    func testPageHasReadAndMeasureButtons() {
+        let page = Page.build(PageState(access: .allowed, shared: false, settings: Settings(), recent: Recent()))
+        let actions = page.compactMap { widget -> String? in
+            if case let .button(action, _, _) = widget { return action }
+            return nil
+        }
+        for action in ["area", "window", "screen", "text", "colour", "ruler"] {
+            XCTAssertTrue(actions.contains(action), action)
+        }
+        // Every mode has a shortcut row; the new ones say they have none.
+        let rows = page.compactMap { widget -> [RowItem]? in
+            if case let .rows(items) = widget, items.first?.id == nil { return items }
+            return nil
+        }.first ?? []
+        XCTAssertEqual(rows.map(\.title), ["Whole screen", "An area", "Copy text", "Pick a colour", "Measure"])
+        XCTAssertEqual(rows[2].detail, "No shortcut")
+        XCTAssertEqual(rows[2].lamp, .off)
+    }
+
     func testRecorderRefusesTypingKeys() {
         // ⇧2 types "@": refused. ⇧⌘2 is fine. Cocoa flags: shift 0x20000, command 0x100000.
         XCTAssertNil(Shortcut.recorded(keyCode: 0x13, cocoaModifiers: 0x20000))

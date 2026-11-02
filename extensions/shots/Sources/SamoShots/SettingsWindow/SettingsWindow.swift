@@ -1,5 +1,6 @@
 // Shots' own small settings window, for what Samo's widgets can't do: choosing a folder, and recording a shortcut.
-// A shortcut needs ⌘, ⌃ or ⌥, so it never takes a key you type.
+// A shortcut needs ⌘, ⌃ or ⌥, so it never takes a key you type. While recording, Delete clears it and Esc leaves it
+// as it was.
 
 import AppKit
 import ShotsCore
@@ -27,7 +28,8 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
             return
         }
         let palette = Palette.current(NSApp.effectiveAppearance)
-        let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 460, height: 230),
+        let height = CGFloat(130 + 34 * Settings.modes.count)
+        let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 460, height: height),
                               styleMask: [.titled, .closable], backing: .buffered, defer: false)
         window.title = "Shots"
         window.isReleasedWhenClosed = false
@@ -36,9 +38,9 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
         content.wantsLayer = true
         content.layer?.backgroundColor = palette.card.color.cgColor
 
-        var y: CGFloat = 180
+        var y: CGFloat = height - 50
         content.addSubview(heading("Shortcuts", y: y, palette: palette))
-        for (mode, label) in [("screen", "Whole screen"), ("area", "An area")] {
+        for (mode, label) in Settings.modes {
             y -= 34
             content.addSubview(text(label, y: y, palette: palette))
             let button = NSButton(title: get().shortcuts[mode]?.display ?? "Set…", target: self,
@@ -89,7 +91,7 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
         guard let mode = sender.identifier?.rawValue else { return }
         stopRecording()
         recording = mode
-        sender.title = "Type a shortcut…"
+        sender.title = "Type a shortcut, or ⌫"
         pauseShortcuts(true)
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             self?.recorded(event)
@@ -100,6 +102,13 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
     private func recorded(_ event: NSEvent) {
         guard let mode = recording else { return }
         if event.keyCode == 53 {
+            stopRecording()
+            return
+        }
+        if event.keyCode == 51 || event.keyCode == 117 {
+            var settings = get()
+            settings.shortcuts[mode] = nil
+            set(settings)
             stopRecording()
             return
         }

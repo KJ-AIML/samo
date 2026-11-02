@@ -74,6 +74,32 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(Settings.load(dataDir: dir), changed)
     }
 
+    func testNewModesHaveNoShortcutByDefault() {
+        let fresh = Settings()
+        XCTAssertEqual(Set(fresh.shortcuts.keys), ["screen", "area"])
+        for mode in ["text", "colour", "ruler"] {
+            XCTAssertNil(fresh.shortcuts[mode], mode)
+            XCTAssertTrue(Settings.modes.contains { $0.key == mode }, mode)
+        }
+        // Letters are named, not numbered.
+        XCTAssertEqual(Shortcut(keyCode: 17, modifiers: Shortcut.command | Shortcut.shift).display, "⇧⌘T")
+        XCTAssertEqual(Shortcut(keyCode: 0x3A, modifiers: Shortcut.option).display, "⌥key 58")
+    }
+
+    func testSettingsFromPhase2StillLoad() throws {
+        let dir = try temporaryDirectory()
+        try Data(#"{"after":"both","then":"edit","folder":"~/Pictures/Shots","format":"png","retina":true,"sound":false,"shortcuts":{"screen":{"keyCode":18,"modifiers":768},"area":{"keyCode":19,"modifiers":768}}}"#.utf8)
+            .write(to: dir.appendingPathComponent("settings.json"))
+        let loaded = Settings.load(dataDir: dir)
+        XCTAssertEqual(loaded.shortcuts["area"], .area)
+        XCTAssertNil(loaded.shortcuts["text"])
+        // A chosen one is kept.
+        var chosen = loaded
+        chosen.shortcuts["text"] = Shortcut(keyCode: 17, modifiers: Shortcut.control | Shortcut.shift)
+        try chosen.save(dataDir: dir)
+        XCTAssertEqual(Settings.load(dataDir: dir).shortcuts["text"]?.display, "⌃⇧T")
+    }
+
     func testTildeIsHomeFromTheEnvironment() throws {
         XCTAssertEqual(Settings.expand("~/Pictures/Shots", home: "/tmp/h"), "/tmp/h/Pictures/Shots")
         XCTAssertEqual(Settings.expand("~", home: "/tmp/h"), "/tmp/h")

@@ -18,9 +18,12 @@ public struct Shortcut: Codable, Equatable, Hashable {
         self.modifiers = modifiers
     }
 
-    /// Digits' virtual key codes on an ANSI keyboard.
-    static let digitKeys: [UInt32: String] = [
+    /// Digits' and letters' virtual key codes on an ANSI keyboard.
+    static let keyNames: [UInt32: String] = [
         0x12: "1", 0x13: "2", 0x14: "3", 0x15: "4", 0x17: "5", 0x16: "6", 0x1A: "7", 0x1C: "8", 0x19: "9", 0x1D: "0",
+        0: "A", 11: "B", 8: "C", 2: "D", 14: "E", 3: "F", 5: "G", 4: "H", 34: "I", 38: "J", 40: "K", 37: "L",
+        46: "M", 45: "N", 31: "O", 35: "P", 12: "Q", 15: "R", 1: "S", 17: "T", 32: "U", 9: "V", 13: "W", 7: "X",
+        16: "Y", 6: "Z",
     ]
 
     public static let wholeScreen = Shortcut(keyCode: 0x12, modifiers: command | shift)
@@ -33,7 +36,7 @@ public struct Shortcut: Codable, Equatable, Hashable {
         if modifiers & Shortcut.option != 0 { s += "⌥" }
         if modifiers & Shortcut.shift != 0 { s += "⇧" }
         if modifiers & Shortcut.command != 0 { s += "⌘" }
-        return s + (Shortcut.digitKeys[keyCode] ?? "key \(keyCode)")
+        return s + (Shortcut.keyNames[keyCode] ?? "key \(keyCode)")
     }
 
     /// A global shortcut needs ⌘, ⌃ or ⌥: with only ⇧, or none, it would take a key you type.
@@ -65,8 +68,15 @@ public struct Settings: Codable, Equatable {
     /// Full Retina resolution, or 1x (half the pixels on a Retina display).
     public var retina: Bool = true
     public var sound: Bool = false
-    /// By capture mode: `screen`, `area`.
+    /// By capture mode: `screen`, `area`, and, only if chosen, `text`, `colour`, `ruler`.
     public var shortcuts: [String: Shortcut] = ["screen": .wholeScreen, "area": .area]
+
+    /// Everything a shortcut can start, in order: Shottr's two keys are set; the rest wait to be chosen, so Shots
+    /// takes nothing more from the Mac (R18).
+    public static let modes: [(key: String, label: String)] = [
+        ("screen", "Whole screen"), ("area", "An area"), ("text", "Copy text"), ("colour", "Pick a colour"),
+        ("ruler", "Measure"),
+    ]
 
     public init() {}
 

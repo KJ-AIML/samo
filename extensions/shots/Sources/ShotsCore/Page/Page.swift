@@ -33,7 +33,6 @@ public struct PageState {
 }
 
 public enum Page {
-    static let modes: [(key: String, label: String)] = [("screen", "Whole screen"), ("area", "An area")]
 
     public static func build(_ s: PageState) -> [Widget] {
         var page: [Widget] = [.section(title: "SCREEN RECORDING", about: nil)]
@@ -67,6 +66,9 @@ public enum Page {
         page.append(.button(action: "area", label: "Capture an area", kind: .plain))
         page.append(.button(action: "window", label: "Capture a window", kind: .plain))
         page.append(.button(action: "screen", label: "Capture the screen", kind: .plain))
+        page.append(.button(action: "text", label: "Copy text from an area", kind: .plain))
+        page.append(.button(action: "colour", label: "Pick a colour", kind: .plain))
+        page.append(.button(action: "ruler", label: "Measure", kind: .plain))
 
         let today = s.recent.count(since: Calendar.current.startOfDay(for: s.now))
         page.append(.section(title: "RECENT", about: today > 0 ? "\(today) today" : nil))
@@ -77,7 +79,7 @@ public enum Page {
         }
 
         page.append(.section(title: "SHORTCUTS", about: nil))
-        page.append(.rows(modes.map { mode in
+        page.append(.rows(Settings.modes.map { mode in
             let shortcut = s.settings.shortcuts[mode.key]
             let keys = shortcut?.display ?? "none"
             if s.refused.contains(mode.key) {
@@ -90,7 +92,8 @@ public enum Page {
             return RowItem(lamp: shortcut == nil ? .off : .done, title: mode.label,
                            detail: shortcut == nil ? "No shortcut" : "Ready", trailing: keys)
         }))
-        page.append(.note(text: "Space in the overlay switches to windows; Esc cancels.", kind: .plain))
+        page.append(.note(text: "In the overlay: Space for a window, T to copy text, C for a colour, R to measure; Esc "
+            + "cancels.", kind: .plain))
         page.append(.button(action: "change-shortcuts", label: "Change shortcuts…", kind: .link))
 
         page.append(.section(title: "AFTER A CAPTURE", about: nil))
