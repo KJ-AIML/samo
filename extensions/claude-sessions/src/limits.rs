@@ -1,6 +1,7 @@
 //! Plan limits from Claude Code's status line (ADR-002 C3). Claude Code documents `rate_limits.five_hour` and
 //! `rate_limits.seven_day`, each with `used_percentage` and `resets_at` (Unix seconds), for Pro and Max plans
-//! and only after the first reply. Pure: the time is passed in.
+//! and only after the first reply. A report can leave a window out (KJ's had the 5-hour one without the weekly),
+//! so the last one seen is kept until it resets. Pure: the time is passed in.
 
 use samo_primitives::{Reading, UnsupportedReason};
 use serde::{Deserialize, Serialize};
@@ -11,6 +12,9 @@ pub struct Window {
     pub used_percentage: f64,
     /// Unix seconds.
     pub resets_at: i64,
+    /// When it was reported, if before the rest: kept from an earlier report that had it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub observed_at_ms: Option<i64>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
@@ -30,6 +34,7 @@ fn window(v: &Value, name: &str) -> Option<Window> {
     used.is_finite().then_some(Window {
         used_percentage: used,
         resets_at,
+        observed_at_ms: None,
     })
 }
 
@@ -46,6 +51,33 @@ impl Limits {
     pub fn any(&self) -> bool {
         self.five_hour.is_some() || self.seven_day.is_some()
     }
+
+    /// This report, with each window it leaves out taken from `previous` while that one hasn't reset.
+    pub fn keeping(self, previous: Option<&Limits>) -> Limits {
+        let Some(prev) = previous else {
+            return self;
+        };
+        let now = self.observed_at_ms;
+        let kept = |new: Option<Window>, old: Option<Window>| {
+            new.or_else(|| {
+                old.filter(|w| now < w.resets_at.saturating_mul(1_000))
+                    .map(|w| Window {
+                        observed_at_ms: Some(w.observed_at_ms.unwrap_or(prev.observed_at_ms)),
+                        ..w
+                    })
+            })
+        };
+        Limits {
+            five_hour: kept(self.five_hour, prev.five_hour),
+            seven_day: kept(self.seven_day, prev.seven_day),
+            observed_at_ms: now,
+        }
+    }
+}
+
+/// When `window` was reported: its own time if it was kept from an earlier report, else the report's.
+pub fn observed_at(window: &Window, report_ms: i64) -> i64 {
+    window.observed_at_ms.unwrap_or(report_ms)
 }
 
 /// A window's share used, `0..=1`. Not reported is unknown; once its reset time has passed, the old figure no
@@ -56,7 +88,10 @@ pub fn reading(window: Option<&Window>, observed_at_ms: i64, now_ms: i64) -> Rea
         Some(w) if now_ms >= w.resets_at.saturating_mul(1_000) => {
             Reading::stopped(w.resets_at.saturating_mul(1_000))
         }
-        Some(w) => Reading::available((w.used_percentage / 100.0).clamp(0.0, 1.0), observed_at_ms),
+        Some(w) => Reading::available(
+            (w.used_percentage / 100.0).clamp(0.0, 1.0),
+            observed_at(w, observed_at_ms),
+        ),
     }
 }
 
@@ -113,6 +148,57 @@ mod tests {
             reading(l.seven_day.as_ref(), l.observed_at_ms, later),
             Reading::Available { .. }
         ));
+    }
+
+    #[test]
+    fn a_window_left_out_is_kept_until_it_resets() {
+        let both = from_status_json(
+            &json!({"rate_limits": {
+                "five_hour": {"used_percentage": 30, "resets_at": 1_800_000_100},
+                "seven_day": {"used_percentage": 47, "resets_at": 1_800_500_000}
+            }}),
+            NOW,
+        );
+        let later = NOW + 60_000;
+        let only_5h = json!({"rate_limits": {
+            "five_hour": {"used_percentage": 40, "resets_at": 1_800_018_000},
+            "seven_day": null
+        }});
+        let l = from_status_json(&only_5h, later).keeping(Some(&both));
+        assert_eq!(l.observed_at_ms, later);
+        assert_eq!(l.five_hour.map(|w| w.used_percentage), Some(40.0));
+        assert_eq!(l.five_hour.and_then(|w| w.observed_at_ms), None);
+        // The weekly 47% stays, as of the report that had it.
+        assert_eq!(
+            reading(l.seven_day.as_ref(), l.observed_at_ms, later),
+            Reading::available(0.47, NOW)
+        );
+        // Kept again, it keeps its first time.
+        let again = from_status_json(&only_5h, later + 60_000).keeping(Some(&l));
+        assert_eq!(again.seven_day.and_then(|w| w.observed_at_ms), Some(NOW));
+
+        // A window past its reset isn't kept: it is unknown until Claude Code reports it.
+        let after_reset = 1_800_000_200_000;
+        let only_week = json!({"rate_limits": {
+            "seven_day": {"used_percentage": 50, "resets_at": 1_800_500_000}
+        }});
+        let l = from_status_json(&only_week, after_reset).keeping(Some(&both));
+        assert_eq!(l.five_hour, None);
+        assert_eq!(l.seven_day.map(|w| w.used_percentage), Some(50.0));
+        assert_eq!(
+            from_status_json(&only_week, NOW).keeping(None).five_hour,
+            None
+        );
+    }
+
+    #[test]
+    fn old_limits_files_still_read() -> Result<(), String> {
+        let old = r#"{"five_hour":{"used_percentage":40.0,"resets_at":1793640600},"seven_day":null,"observed_at_ms":1793632683646}"#;
+        let l: Limits = serde_json::from_str(old).map_err(|e| e.to_string())?;
+        assert_eq!(l.five_hour.and_then(|w| w.observed_at_ms), None);
+        let text = serde_json::to_string(&l).map_err(|e| e.to_string())?;
+        assert_eq!(text, old);
+        Ok(())
     }
 
     #[test]

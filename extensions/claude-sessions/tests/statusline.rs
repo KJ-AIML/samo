@@ -40,3 +40,28 @@ fn statusline_prints_one_line_and_exits_zero_on_garbage() -> Result<(), String> 
     assert!(saved.contains("\"used_percentage\":34"), "{saved}");
     Ok(())
 }
+
+#[test]
+fn a_report_without_the_weekly_window_keeps_it() -> Result<(), String> {
+    let dir = tempfile::tempdir().map_err(|e| e.to_string())?;
+    let soon = chrono::Utc::now().timestamp() + 7_200;
+    let week = soon + 4 * 86_400;
+    let both = format!(
+        r#"{{"rate_limits":{{"five_hour":{{"used_percentage":30,"resets_at":{soon}}},"seven_day":{{"used_percentage":47,"resets_at":{week}}}}}}}"#
+    );
+    statusline(dir.path(), both.as_bytes())?;
+    // KJ's Claude Code then reported only the 5-hour window.
+    let only_5h = format!(
+        r#"{{"rate_limits":{{"five_hour":{{"used_percentage":40,"resets_at":{soon}}},"seven_day":null}}}}"#
+    );
+    let out = statusline(dir.path(), only_5h.as_bytes())?;
+    assert_eq!(String::from_utf8_lossy(&out.stdout), "5h 40%\n");
+    let saved: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(dir.path().join("limits.json")).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())?;
+    assert_eq!(saved["five_hour"]["used_percentage"], 40.0);
+    assert_eq!(saved["seven_day"]["used_percentage"], 47.0);
+    assert!(saved["seven_day"]["observed_at_ms"].is_i64(), "{saved}");
+    Ok(())
+}

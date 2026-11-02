@@ -1,7 +1,7 @@
 //! Claude Sessions' page and badge, as protocol v1 widgets (ADR-002 C1–C3). Pure: everything shown is passed in,
 //! including how to write a time of day.
 
-use crate::limits::{Limits, reading};
+use crate::limits::{Limits, observed_at, reading};
 use crate::sessions::{Row, State};
 use crate::usage::Tokens;
 use samo_ext_protocol::{BadgeMeter, Lamp, NoteKind, RowItem, Widget};
@@ -30,7 +30,7 @@ pub struct Input<'a> {
     /// The last thing that went wrong (a setting that couldn't be changed), said once on the page.
     pub problem: Option<String>,
     pub now_ms: i64,
-    /// Writes a Unix time in ms as a time of day (`18:40`).
+    /// Writes a Unix time in ms as a time (`18:40`, or `Thu 22:00` on another day).
     pub clock: &'a dyn Fn(i64) -> String,
 }
 
@@ -137,7 +137,7 @@ fn limit_meter(
         (Reading::Available { .. }, Some(w)) => format!(
             "resets {} · as of {}",
             (input.clock)(w.resets_at.saturating_mul(1_000)),
-            (input.clock)(limits.observed_at_ms)
+            (input.clock)(observed_at(w, limits.observed_at_ms))
         ),
         (Reading::Stopped { .. }, Some(w)) => format!(
             "reset at {}; waiting for Claude Code to report again",
@@ -339,6 +339,7 @@ mod tests {
                 five_hour: Some(Window {
                     used_percentage: 34.0,
                     resets_at: 2_000,
+                    observed_at_ms: None,
                 }),
                 seven_day: None,
                 observed_at_ms: 1_000_000,
@@ -381,6 +382,7 @@ mod tests {
             five_hour: Some(Window {
                 used_percentage: 36.0,
                 resets_at: 2_000,
+                observed_at_ms: None,
             }),
             seven_day: None,
             observed_at_ms: 1_000_000,

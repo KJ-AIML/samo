@@ -2,16 +2,23 @@
 //! saves the limits for Samo, prints one short line, and always exits 0.
 
 use crate::hook::now_ms;
-use crate::limits::{from_status_json, status_text};
+use crate::limits::{Limits, from_status_json, status_text};
 use crate::paths;
 use serde_json::Value;
 use std::fs;
 use std::io::{Read, Write};
+use std::path::Path;
 use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
 const MAX_INPUT: u64 = 1024 * 1024;
+
+/// The limits saved last time, if any.
+fn previous(dir: &Path) -> Option<Limits> {
+    let bytes = fs::read(dir.join("limits.json")).ok()?;
+    serde_json::from_slice(&bytes).ok()
+}
 
 pub fn run() {
     let (tx, rx) = mpsc::channel();
@@ -30,7 +37,7 @@ pub fn run() {
     if limits.any()
         && let Some(dir) = paths::data_dir()
         && fs::create_dir_all(&dir).is_ok()
-        && let Ok(text) = serde_json::to_vec(&limits)
+        && let Ok(text) = serde_json::to_vec(&limits.keeping(previous(&dir).as_ref()))
     {
         let tmp = dir.join(format!(".limits.{}.tmp", std::process::id()));
         if fs::write(&tmp, text).is_ok() && fs::rename(&tmp, dir.join("limits.json")).is_err() {
