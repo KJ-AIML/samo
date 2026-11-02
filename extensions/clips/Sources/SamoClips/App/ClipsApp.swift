@@ -21,6 +21,7 @@ final class ClipsApp {
     private let paste = MacPaste.flow()
     private var thumbnails: [UUID: CGImage] = [:]
     private(set) var refused = false
+    private var confirmClear = false
     private var stopped = false
 
     private lazy var list = ListWindow(hooks: ListHooks(
@@ -41,7 +42,9 @@ final class ClipsApp {
 
     func start(out: Output) {
         let session = Session(out: out, shared: shared, sharedNote: ClipsPage.sharedNote, handlers: Session.Handlers(
-            page: { ClipsPage.starting() },
+            page: { [unowned self] in self.page() },
+            action: { [unowned self] id, row in self.action(id, row: row) },
+            choice: { [unowned self] key, value in self.choice(key, value) },
             shutdown: { [unowned self] in self.shutdown() }
         ))
         self.session = session
@@ -54,6 +57,7 @@ final class ClipsApp {
         self.timer = timer
         registerShortcut()
         session.start()
+        session.out.send(ClipsPage.badge(history))
     }
 
     private func registerShortcut() {
@@ -79,6 +83,85 @@ final class ClipsApp {
         try? store.save(history)
         if list.isOpen { list.reload() }
         session?.refresh()
+        session?.out.send(ClipsPage.badge(history))
+    }
+
+    // MARK: The page
+
+    func page() -> [Widget] {
+        let running = NSWorkspace.shared.runningApplications.compactMap(\.bundleIdentifier)
+        return ClipsPage.build(PageState(
+            paste: ClipsApp.pasteAccess(), accessibility: AXIsProcessTrusted(), shared: shared, history: history,
+            refused: refused, clash: ClipsPage.runningClipboardApp(bundleIds: running),
+            pausedUntil: watcher?.pausedUntil, ignoreNext: watcher?.ignoreNext ?? false, confirmClear: confirmClear,
+            appName: ClipsApp.appName
+        ))
+    }
+
+    /// Paste from Other Apps, as macOS reports it for Clips (macOS 26 and later ask; before, it was always allowed).
+    static func pasteAccess() -> PasteAccess {
+        if #available(macOS 26.0, *) {
+            switch NSPasteboard.general.accessBehavior {
+            case .alwaysAllow: return .allowed
+            case .alwaysDeny: return .denied
+            default: return .asks
+            }
+        }
+        return .allowed
+    }
+
+    static func appName(_ bundleId: String) -> String? {
+        NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId)
+            .map { FileManager.default.displayName(atPath: $0.path) }
+            .map { $0.hasSuffix(".app") ? String($0.dropLast(4)) : $0 }
+    }
+
+    private func action(_ id: String, row: String?) {
+        if id != "clear" { confirmClear = false }
+        if let row, let uuid = UUID(uuidString: row), let item = history.item(uuid) {
+            switch id {
+            case "copy":
+                let data = item.dataFile.flatMap(store.read)
+                let text: String? = item.kind == .image || item.kind == .files ? nil : store.fullText(item)
+                watcher?.own(board.put(text: text, data: data, dataType: data == nil ? nil : item.dataType,
+                                       files: item.files))
+                Note.show("Copied", problem: false)
+            case "pin", "unpin":
+                history.pin(uuid, id == "pin")
+                save()
+            case "delete":
+                delete(item)
+            default:
+                break
+            }
+            return
+        }
+        switch id {
+        case "open-paste-settings": SystemSettings.open(.pasteFromOtherApps)
+        case "allow-accessibility":
+            MacPaste.askForAccessibility()
+            SystemSettings.open(.accessibility)
+        case "pause": watcher?.pausedUntil = Date().addingTimeInterval(15 * 60)
+        case "resume": watcher?.pausedUntil = nil
+        case "ignore-next": watcher?.ignoreNext = true
+        case "clear": confirmClear = true
+        case "clear-confirm":
+            for gone in history.clear() {
+                store.delete(gone)
+                thumbnails[gone.id] = nil
+            }
+            save()
+        default: break
+        }
+    }
+
+    private func choice(_ key: String, _ value: String) {
+        guard key == "limit", let limit = Int(value), [50, 200, 500].contains(limit) else { return }
+        for gone in history.setLimit(limit) {
+            store.delete(gone)
+            thumbnails[gone.id] = nil
+        }
+        save()
     }
 
     // MARK: The list

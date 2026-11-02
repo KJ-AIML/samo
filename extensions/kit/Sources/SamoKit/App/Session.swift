@@ -72,6 +72,8 @@ public final class Session {
             refresh()
         case let .visible(page):
             pageVisible = page
+            // Shown again: what may have changed meanwhile (a permission granted in System Settings) is current.
+            if page { refresh() }
         case .shutdown:
             handlers.shutdown()
             return false
