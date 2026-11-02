@@ -50,5 +50,5 @@
   - The demos share `shots_common`, which now allows unused helpers: each demo is its own test crate.
 - **Store:** 0.4.0 packages signed with a throwaway identity in a throwaway keychain (515 KB), and a test-key catalog
   verifies against it. The throwaway package was deleted.
-- **Live:** the stream needs Screen Recording for the new build, so the done-when check (M19) is KJ's: a real page
-  three screens long, scrolled by hand.
+- **M19, by KJ on 2026-11-02:** Shots 0.4.0, signed with the Talvyn identity, installed through the test store. A
+  page about three screens long, scrolled by hand, came out as one shot. KJ: "All good".

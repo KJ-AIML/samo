@@ -90,7 +90,8 @@
   - A second Shots process, beside the test Samo's, asked for the screen 50 times; ScreenCaptureKit never answered
     the first.
   - That led to rule 11. The test Samo's own Shots is idle at 27 MB after KJ's four shots, down from 60 MB.
-- **Left for KJ:**
+- **By KJ on 2026-11-02, with 0.4.0:** capture opening the editor, the tools with undo and redo, ⌘S, dragging out,
+  and closing with changes. KJ: "All good". These were the items left:
   - Capture with 0.2.0: M8, M10–M12, and the drawing feel in M9. These need Screen Recording allowed for the new
     build.
   - Phase 1's M3, M5 and M6.

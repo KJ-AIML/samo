@@ -64,7 +64,8 @@
   verifies against it. The throwaway package was deleted.
 - **Live, on KJ's Mac:** the 0.3.0 editor opened on a Thai page with a QR code. Real Vision found the code in the
   background, and the footer showed *QR · github.com*.
-- **Left for KJ** (these need Screen Recording allowed for the new build):
+- **By KJ on 2026-11-02, with 0.4.0:** copying Thai text, a QR card's Open, a colour's hex and a button's padding.
+  KJ: "All good". These were the items:
   - M14: copy the text of a Thai web page.
   - M15: open a QR code's link.
   - M16: a colour's hex against the page's CSS.
