@@ -1,6 +1,9 @@
 //! What the Shots demos share: building the real `samo-shots`, staging it as `ext-package` would, and reading
 //! its page as Samo draws it.
 
+// Each demo is its own test crate and uses only some of these, so the others count as unused there.
+#![allow(dead_code)]
+
 use samo_ext_protocol::{Manifest, Widget};
 use samo_extensions::{ExtRoot, ExtSlot, ExtSnapshot, Host};
 use std::fs;

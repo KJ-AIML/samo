@@ -43,5 +43,12 @@
     sticky header and footer, uneven scrolls, a pause and a scroll back.
   - So does one without sticky bands.
   - A jump stops it and keeps what it had; a blank page never repeats; the cap stops it at its height.
+- **Local CI:** `scripts/ci-local.sh` passes: 247 Rust tests (all four Shots demos), 99 Swift tests, all seven gates.
+- **`shots_phase4_demo`:** installs 0.4.0 from a test-key store under a temporary home.
+  - The page has *Scrolling capture*, and its shortcut row says *No shortcut*.
+  - Off leaves nothing running.
+  - The demos share `shots_common`, which now allows unused helpers: each demo is its own test crate.
+- **Store:** 0.4.0 packages signed with a throwaway identity in a throwaway keychain (515 KB), and a test-key catalog
+  verifies against it. The throwaway package was deleted.
 - **Live:** the stream needs Screen Recording for the new build, so the done-when check (M19) is KJ's: a real page
   three screens long, scrolled by hand.
