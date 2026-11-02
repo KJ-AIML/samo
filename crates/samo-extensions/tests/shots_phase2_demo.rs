@@ -11,7 +11,8 @@ use samo_extensions::windows::{SystemWindows, WindowOwners};
 use samo_extensions::{ExtRoot, Host, HostConfig, Status};
 use samo_testkit::store::{FakeStore, listing_for};
 use shots_common::{
-    Fallible, SLOT, build_shots, chosen, has_section, io, page, shots_processes, stage, wait,
+    Fallible, SLOT, build_shots, chosen, has_section, io, page, shots_processes, stage,
+    version_at_least, wait,
 };
 use std::fs;
 use std::io::Write;
@@ -116,7 +117,10 @@ fn shots_phase2_demo() -> Fallible<()> {
 
     let shop = FakeStore::new()?;
     let manifest = stage(&dir.path().join("stage"), &binary, |t| t)?;
-    assert_eq!(manifest.version, "0.2.0");
+    assert!(
+        version_at_least(&manifest.version, (0, 2, 0)),
+        "the editor came in 0.2.0"
+    );
     assert!(
         manifest
             .windows

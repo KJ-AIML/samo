@@ -118,3 +118,15 @@ pub fn shots_processes(root: &ExtRoot) -> usize {
         .map(|o| String::from_utf8_lossy(&o.stdout).lines().count())
         .unwrap_or(0)
 }
+
+/// Whether `version` is `at_least` or later (the demos check the version that brought what they test, so later
+/// versions still pass).
+pub fn version_at_least(version: &str, at_least: (u32, u32, u32)) -> bool {
+    let mut parts = version.split('.').map(|p| p.parse::<u32>().unwrap_or(0));
+    let v = (
+        parts.next().unwrap_or(0),
+        parts.next().unwrap_or(0),
+        parts.next().unwrap_or(0),
+    );
+    v >= at_least
+}

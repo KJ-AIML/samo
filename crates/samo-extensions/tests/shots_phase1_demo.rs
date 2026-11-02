@@ -9,7 +9,8 @@ mod shots_common;
 use samo_extensions::{ExtRoot, Host, HostConfig, Status};
 use samo_testkit::store::{FakeStore, listing_for};
 use shots_common::{
-    Fallible, SLOT, build_shots, chosen, has_section, io, shots_processes, stage, wait,
+    Fallible, SLOT, build_shots, chosen, has_section, io, shots_processes, stage, version_at_least,
+    wait,
 };
 use std::fs;
 use std::sync::Arc;
@@ -32,6 +33,7 @@ fn shots_phase1_demo() -> Fallible<()> {
 
     let shop = FakeStore::new()?;
     let manifest = stage(&dir.path().join("stage"), &binary, |t| t)?;
+    assert!(version_at_least(&manifest.version, (0, 1, 0)));
     let package = shop.put_package(&dir.path().join("stage"), "shots", &manifest.version)?;
     let bytes = fs::read(shop.dir.path().join(&package.file)).map_err(io)?;
     let listing = listing_for(&manifest, package);

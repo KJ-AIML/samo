@@ -43,4 +43,31 @@
    without marks. It reads through its hooks, so its tests stand in for Vision.
 
 ## Verification
-- See Task 8 below.
+- **Shots' tests:** 92 Swift tests, including:
+  - Real Vision reads four mixed Thai and English lines exactly, and reads a QR link.
+  - Only `http` and `https` links open; `javascript:` and `file:` are refused.
+  - A P3 capture's hex comes out in sRGB.
+  - Button padding is measured exactly, through anti-aliased edges and faint noise.
+  - The overlay's mode keys work only before a drag.
+  - Reading copies text and saves nothing.
+  - The card shows Open only for web links, copies, and leaves on Esc.
+  - In the editor: Tab, M (never exported), ⇧⌘C and the QR chip, driven headless.
+- **`shots_phase3_demo`:** installs 0.3.0 from a test-key store under a temporary home.
+  - The page has Copy text, Pick a colour and Measure.
+  - A shortcut set only for copying text (⌃⌥⇧⌘F19) registers and shows Ready. The other modes, and Shottr's two
+    keys left unset in those settings, show *No shortcut*.
+  - Off leaves nothing running.
+- **Local CI:** `scripts/ci-local.sh` passes: 246 Rust tests (all three Shots demos and the signing test), 92 Swift
+  tests, all seven gates. The bump to 0.3.0 broke the Phase 2 demo, which pinned the version to 0.2.0; each demo now
+  checks only for at least the version that brought what it tests.
+- **Store:** 0.3.0 packages signed with a throwaway identity in a throwaway keychain (484 KB), and a test-key catalog
+  verifies against it. The throwaway package was deleted.
+- **Live, on KJ's Mac:** the 0.3.0 editor opened on a Thai page with a QR code. Real Vision found the code in the
+  background, and the footer showed *QR · github.com*.
+- **Left for KJ** (these need Screen Recording allowed for the new build):
+  - M14: copy the text of a Thai web page.
+  - M15: open a QR code's link.
+  - M16: a colour's hex against the page's CSS.
+  - M17: a button's padding against its CSS.
+  - M18: in the editor, Tab, M and ⇧⌘C on a real shot.
+  - Phase 1 and 2's open checks.
