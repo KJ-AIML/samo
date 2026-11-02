@@ -6,8 +6,8 @@
 //! `off` and `uninstall` to undo or restore whatever the extension changes outside its own folder.
 
 use samo_ext_protocol::{
-    BadgeMeter, ButtonKind, HelperMsg, HostMsg, Lamp, NoteKind, PROTOCOL_VERSION, PopupKind,
-    RowItem, Widget, decode_host_line, encode,
+    BadgeMeter, ButtonKind, ChoiceOption, HelperMsg, HostMsg, Lamp, NoteKind, PROTOCOL_VERSION,
+    PopupKind, RowAction, RowItem, Widget, decode_host_line, encode,
 };
 use samo_primitives::{Reading, UnsupportedReason};
 use std::io::{self, BufRead, Write};
@@ -33,6 +33,8 @@ fn main() -> ExitCode {
 struct State {
     greet: bool,
     pings: u32,
+    /// The `choice`'s pick: how Hello greets.
+    style: String,
 }
 
 fn now_ms() -> i64 {
@@ -82,6 +84,14 @@ fn view(state: &State) -> Vec<Widget> {
                 row(Lamp::Done, "Something done", "at 14:02"),
                 row(Lamp::Off, "Something off", ""),
                 row(Lamp::Error, "Something wrong", "stopped: an error"),
+                RowItem {
+                    id: Some("row-with-button".into()),
+                    actions: vec![RowAction {
+                        id: "ping".into(),
+                        label: "Ping".into(),
+                    }],
+                    ..row(Lamp::Done, "A row with a button", "its button pings too")
+                },
             ],
         },
         Widget::Section {
@@ -93,6 +103,21 @@ fn view(state: &State) -> Vec<Widget> {
             label: "Wave from the menu bar".into(),
             on: state.greet,
             note: Some("While on, Hello keeps a badge beside Samo's menu bar figure".into()),
+        },
+        Widget::Choice {
+            key: "style".into(),
+            label: "Greeting".into(),
+            options: vec![
+                ChoiceOption {
+                    id: "wave".into(),
+                    label: "Wave".into(),
+                },
+                ChoiceOption {
+                    id: "nod".into(),
+                    label: "Nod".into(),
+                },
+            ],
+            selected: state.style.clone(),
         },
         Widget::Button {
             action: "ping".into(),
@@ -109,11 +134,13 @@ fn view(state: &State) -> Vec<Widget> {
 
 fn row(lamp: Lamp, title: &str, detail: &str) -> RowItem {
     RowItem {
+        id: None,
         lamp,
         title: title.into(),
         detail: detail.into(),
         trailing: String::new(),
         tag: None,
+        actions: Vec::new(),
     }
 }
 
@@ -138,6 +165,7 @@ fn serve() -> ExitCode {
     let mut state = State {
         greet: true,
         pings: 0,
+        style: "wave".into(),
     };
     let started = send(
         &mut out,
@@ -171,7 +199,19 @@ fn serve() -> ExitCode {
                 )
                 .and_then(|()| send(&mut out, &badge(&state)))
             }
-            Ok(HostMsg::Action { id }) if id == "ping" => {
+            Ok(HostMsg::Choice { key, value })
+                if key == "style" && matches!(value.as_str(), "wave" | "nod") =>
+            {
+                state.style = value;
+                send(
+                    &mut out,
+                    &HelperMsg::View {
+                        sections: view(&state),
+                    },
+                )
+            }
+            // The Ping button, or the row's.
+            Ok(HostMsg::Action { id, .. }) if id == "ping" => {
                 state.pings += 1;
                 send(
                     &mut out,

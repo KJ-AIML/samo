@@ -1,0 +1,265 @@
+//! ADR-004 in the host: windows only when declared (R15), whole process trees, declared limits (R17), and macOS
+//! versions. Helpers are shell scripts; the window server is a fake, so a test can say who "owns windows".
+
+use samo_domain::extensions::BackoffConfig;
+use samo_extensions::windows::{WindowCheck, WindowOwners};
+use samo_extensions::{ExtRoot, ExtSlot, ExtSnapshot, Host, HostConfig, Status};
+use std::fs;
+use std::path::PathBuf;
+use std::process::{Command, Stdio};
+use std::sync::Arc;
+use std::thread;
+use std::time::{Duration, Instant};
+
+type Fallible<T> = Result<T, String>;
+
+const SLOT: ExtSlot = ExtSlot(0);
+const HELLO: &str = r#"echo '{"type":"hello","protocol":1}'"#;
+const WAIT_FOR_SHUTDOWN: &str =
+    r#"while read -r line; do case "$line" in *shutdown*) exit 0;; esac; done"#;
+
+/// A window server that says what the test wants.
+struct Fake(fn(&[u32]) -> Option<usize>);
+
+impl WindowOwners for Fake {
+    fn count(&self, pids: &[u32]) -> Option<usize> {
+        (self.0)(pids)
+    }
+}
+
+struct Fixture {
+    _dir: tempfile::TempDir,
+    root: ExtRoot,
+    dev: PathBuf,
+}
+
+/// A dev extension `test` whose manifest has `extra` top-level lines (and tables after them), running `script`.
+fn fixture(extra: &str, tables: &str, script: &str) -> Fallible<Fixture> {
+    let dir = tempfile::tempdir().map_err(|e| e.to_string())?;
+    let dev = dir.path().join("dev/test");
+    fs::create_dir_all(&dev).map_err(|e| e.to_string())?;
+    fs::write(
+        dev.join("extension.toml"),
+        format!(
+            "id = \"test\"\nname = \"Test\"\nversion = \"0.1.0\"\nprotocol = 1\nmin_samo = \"0.1.0\"\n\
+             helper = \"bin/helper\"\nsummary = \"A test\"\n{extra}\n{tables}\n\n[[changes]]\nwhat = \"Nothing\"\n\
+             where = \"nowhere\"\nundo = \"nothing\"\n"
+        ),
+    )
+    .map_err(|e| e.to_string())?;
+    samo_testkit::fake_helper(&dev.join("bin"), "helper", script).map_err(|e| e.to_string())?;
+    Ok(Fixture {
+        root: ExtRoot::at(dir.path().join("Extensions")),
+        _dir: dir,
+        dev,
+    })
+}
+
+fn start(f: &Fixture, windows: fn(&[u32]) -> Option<usize>) -> Host {
+    let mut c = HostConfig::new("0.3.0");
+    c.dev_dir = Some(f.dev.to_string_lossy().into_owned());
+    c.hello_timeout = Duration::from_secs(2);
+    c.grace = Duration::from_millis(300);
+    c.backoff = BackoffConfig {
+        first_ms: 20,
+        max_ms: 100,
+        max_crashes: 3,
+        window_ms: 60_000,
+    };
+    c.wake_every = Duration::from_millis(10);
+    c.resource_every = Duration::from_millis(50);
+    c.window_every = Duration::from_millis(50);
+    c.windows = WindowCheck(Arc::new(Fake(windows)));
+    c.macos = Some("15.0".into());
+    Host::start(f.root.clone(), c, Arc::new(|| {}))
+}
+
+fn status(snap: &ExtSnapshot) -> Option<Status> {
+    snap.get(SLOT).map(|e| e.status.clone())
+}
+
+fn wait_for(
+    host: &Host,
+    what: &str,
+    test: impl Fn(&ExtSnapshot) -> bool,
+) -> Fallible<Arc<ExtSnapshot>> {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let snap = host.snapshot();
+        if test(&snap) {
+            return Ok(snap);
+        }
+        if Instant::now() > deadline {
+            return Err(format!(
+                "timed out waiting for {what}; status {:?}",
+                status(&snap)
+            ));
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+}
+
+fn stopped_because(snap: &ExtSnapshot) -> Option<String> {
+    match status(snap) {
+        Some(Status::Stopped(why)) => Some(why),
+        _ => None,
+    }
+}
+
+fn alive(pid: &str) -> bool {
+    Command::new("/bin/kill")
+        .args(["-0", pid.trim()])
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success())
+}
+
+#[test]
+fn undeclared_windows_stop_the_helper() -> Fallible<()> {
+    let f = fixture("", "", &format!("{HELLO}\n{WAIT_FOR_SHUTDOWN}"))?;
+    let host = start(&f, |_| Some(1));
+    let snap = wait_for(&host, "R15 to stop it", |s| stopped_because(s).is_some())?;
+    assert_eq!(
+        stopped_because(&snap).as_deref(),
+        Some("Opened windows it didn't declare")
+    );
+    host.shutdown_all();
+    Ok(())
+}
+
+#[test]
+fn declared_windows_are_allowed() -> Fallible<()> {
+    let f = fixture(
+        "windows = \"Opens its own windows: a test window\"",
+        "",
+        &format!("{HELLO}\n{WAIT_FOR_SHUTDOWN}"),
+    )?;
+    let host = start(&f, |_| Some(1));
+    wait_for(&host, "it to run", |s| status(s) == Some(Status::Running))?;
+    // Many window checks later, it is still running.
+    thread::sleep(Duration::from_millis(600));
+    assert_eq!(status(&host.snapshot()), Some(Status::Running));
+    let windows = host.snapshot().get(SLOT).and_then(|e| e.windows.clone());
+    assert_eq!(
+        windows.as_deref(),
+        Some("Opens its own windows: a test window")
+    );
+    host.shutdown_all();
+    Ok(())
+}
+
+#[test]
+fn descendants_windows_are_counted() -> Fallible<()> {
+    // The fake says windows exist only once the helper has started another process.
+    let has_child = |pids: &[u32]| Some(usize::from(pids.len() > 1));
+
+    let alone = fixture("", "", &format!("{HELLO}\n{WAIT_FOR_SHUTDOWN}"))?;
+    let host = start(&alone, has_child);
+    wait_for(&host, "it to run", |s| status(s) == Some(Status::Running))?;
+    thread::sleep(Duration::from_millis(400));
+    assert_eq!(
+        status(&host.snapshot()),
+        Some(Status::Running),
+        "no child, no windows"
+    );
+    host.shutdown_all();
+
+    let parent = fixture("", "", &format!("sleep 30 &\n{HELLO}\n{WAIT_FOR_SHUTDOWN}"))?;
+    let host = start(&parent, has_child);
+    let snap = wait_for(&host, "R15 to stop it", |s| stopped_because(s).is_some())?;
+    assert_eq!(
+        stopped_because(&snap).as_deref(),
+        Some("Opened windows it didn't declare")
+    );
+    host.shutdown_all();
+    Ok(())
+}
+
+#[test]
+fn stop_kills_descendants() -> Fallible<()> {
+    let script = format!(
+        r#"sleep 300 &
+echo $! > "$SAMO_EXT_DATA_DIR/child"
+{HELLO}
+{WAIT_FOR_SHUTDOWN}"#
+    );
+    let f = fixture("", "", &script)?;
+    let host = start(&f, |_| Some(0));
+    wait_for(&host, "it to run", |s| status(s) == Some(Status::Running))?;
+    let child_file = f.root.data_dir("test").join("child");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !child_file.exists() && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(20));
+    }
+    let child = fs::read_to_string(&child_file).map_err(|e| e.to_string())?;
+    // Let the supervisor see its tree at least once.
+    thread::sleep(Duration::from_millis(200));
+    assert!(alive(&child));
+
+    // The helper exits cleanly on `shutdown`, leaving `sleep` behind; Samo ends it too.
+    host.shutdown_all();
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while alive(&child) && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(20));
+    }
+    assert!(!alive(&child), "the helper's child outlived it");
+    Ok(())
+}
+
+#[test]
+fn declared_limits_enforced() -> Fallible<()> {
+    // A shell uses a few MB; declaring 1 MB proves the manifest's limit is the one enforced.
+    let f = fixture(
+        "",
+        "[limits]\nmemory_mb = 1",
+        &format!("{HELLO}\n{WAIT_FOR_SHUTDOWN}"),
+    )?;
+    let host = start(&f, |_| Some(0));
+    let snap = wait_for(&host, "the memory limit", |s| stopped_because(s).is_some())?;
+    let why = stopped_because(&snap).unwrap_or_default();
+    assert!(why.contains("the limit is 1 MB"), "{why}");
+    host.shutdown_all();
+    Ok(())
+}
+
+#[test]
+fn needs_newer_macos_is_blocked() -> Fallible<()> {
+    let f = fixture(
+        "min_macos = \"99.0\"",
+        "",
+        &format!("{HELLO}\n{WAIT_FOR_SHUTDOWN}"),
+    )?;
+    let host = start(&f, |_| Some(0));
+    let snap = wait_for(&host, "it to be blocked", |s| {
+        matches!(status(s), Some(Status::Blocked(_)))
+    })?;
+    assert_eq!(
+        status(&snap),
+        Some(Status::Blocked("Needs macOS 99.0 or newer".into()))
+    );
+    host.shutdown_all();
+
+    // And the store won't install it.
+    let host = start(&f, |_| Some(0));
+    let pkg = samo_domain::store::FileRef {
+        file: "x.tar.gz".into(),
+        size: None,
+        sha256: "0".repeat(64),
+        width: None,
+        height: None,
+    };
+    let mut l = samo_testkit::store::listing("future", "0.1.0", pkg);
+    l.min_macos = Some("99.0".into());
+    let refused = host
+        .install_from_store(&l, b"")
+        .map(|_| ())
+        .map_err(|e| e.to_string());
+    assert!(
+        refused
+            .as_ref()
+            .is_err_and(|e| e.contains("needs macOS 99.0")),
+        "{refused:?}"
+    );
+    host.shutdown_all();
+    Ok(())
+}

@@ -1,4 +1,5 @@
-//! The store's tooling (ADR-003 M4): `ext-keygen`, `ext-package` and `ext-publish`.
+//! The store's tooling (ADR-003 M4): `ext-keygen`, `ext-package` and `ext-publish`. `ext-package` signs a helper that
+//! asks macOS for a permission with Talvyn's identity (`codesign.rs`).
 //!
 //! The private key lives in KJ's login Keychain and never on a command line. `ext-publish` takes every field the
 //! package itself declares (id, name, version, protocol, min_samo, summary, changes) from the package's manifest,
@@ -63,20 +64,33 @@ pub fn package(root: &Path, dir: &Path) -> Result<PathBuf, String> {
     let manifest_text =
         fs::read_to_string(dir.join("extension.toml")).map_err(io("extension.toml"))?;
     let manifest = Manifest::parse(&manifest_text).map_err(|e| e.to_string())?;
-    let cargo = fs::read_to_string(dir.join("Cargo.toml")).map_err(io("Cargo.toml"))?;
-    let package = field(&cargo, "name").ok_or("Cargo.toml has no package name")?;
     let bin = Path::new(&manifest.helper)
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .ok_or("the manifest's helper has no file name")?;
-    let status = Command::new("cargo")
-        .args(["build", "--release", "-p", &package, "--bin", &bin])
-        .current_dir(root)
-        .status()
-        .map_err(io("cargo build"))?;
-    if !status.success() {
-        return Err(format!("building {package} failed"));
-    }
+    let built = if dir.join("Package.swift").is_file() {
+        // A Swift extension (ADR-004).
+        let status = Command::new("swift")
+            .args(crate::swift::build_args(dir, &bin, true))
+            .status()
+            .map_err(io("swift build"))?;
+        if !status.success() {
+            return Err(format!("building {bin} failed"));
+        }
+        crate::swift::bin_path(dir, true)?.join(&bin)
+    } else {
+        let cargo = fs::read_to_string(dir.join("Cargo.toml")).map_err(io("Cargo.toml"))?;
+        let package = field(&cargo, "name").ok_or("Cargo.toml has no package name")?;
+        let status = Command::new("cargo")
+            .args(["build", "--release", "-p", &package, "--bin", &bin])
+            .current_dir(root)
+            .status()
+            .map_err(io("cargo build"))?;
+        if !status.success() {
+            return Err(format!("building {package} failed"));
+        }
+        root.join("target/release").join(&bin)
+    };
     let stage = root.join("target/ext-dist/stage");
     let _ = fs::remove_dir_all(stage.join(&manifest.id));
     let helper_dest = stage.join(&manifest.id).join(&manifest.helper);
@@ -89,11 +103,11 @@ pub fn package(root: &Path, dir: &Path) -> Result<PathBuf, String> {
     )
     .map_err(io("staging"))?;
     // A fresh copy, not cargo's hard link: Samo refuses hard links in a package (R5).
-    fs::write(
-        &helper_dest,
-        fs::read(root.join("target/release").join(&bin)).map_err(io("the helper"))?,
-    )
-    .map_err(io("staging"))?;
+    fs::write(&helper_dest, fs::read(&built).map_err(io("the helper"))?).map_err(io("staging"))?;
+    // Files the helper reads beside itself (a Swift extension's fonts), copied as plain files.
+    if dir.join("share").is_dir() {
+        copy_plain_tree(&dir.join("share"), &stage.join(&manifest.id).join("share"))?;
+    }
     let status = Command::new("chmod")
         .arg("755")
         .arg(&helper_dest)
@@ -102,6 +116,8 @@ pub fn package(root: &Path, dir: &Path) -> Result<PathBuf, String> {
     if !status.success() {
         return Err("couldn't make the helper executable".into());
     }
+    // A helper that asks macOS for a permission keeps one identity across updates (ADR-004).
+    crate::codesign::sign_if_needed(&manifest, &helper_dest)?;
     let out = root.join("target/ext-dist").join(format!(
         "{}-{}-macos-arm64.tar.gz",
         manifest.id, manifest.version
@@ -126,6 +142,28 @@ pub fn package(root: &Path, dir: &Path) -> Result<PathBuf, String> {
         bytes.len()
     );
     Ok(out)
+}
+
+/// Copies files and folders only: a link would make the package refused (R5).
+fn copy_plain_tree(from: &Path, to: &Path) -> Result<(), String> {
+    fs::create_dir_all(to).map_err(io("staging"))?;
+    for entry in fs::read_dir(from).map_err(io("share"))? {
+        let entry = entry.map_err(io("share"))?;
+        let kind = entry.file_type().map_err(io("share"))?;
+        let target = to.join(entry.file_name());
+        if kind.is_symlink() {
+            return Err(format!(
+                "{} is a link; packages hold only files",
+                entry.path().display()
+            ));
+        } else if kind.is_dir() {
+            copy_plain_tree(&entry.path(), &target)?;
+        } else {
+            fs::write(&target, fs::read(entry.path()).map_err(io("share"))?)
+                .map_err(io("staging"))?;
+        }
+    }
+    Ok(())
 }
 
 /// `listing.toml`: only the store's own fields. A field the manifest owns must not be here with another value.
@@ -192,6 +230,10 @@ pub fn merge(
         icon: None,
         screenshots: Vec::new(),
         changes: manifest.changes.clone(),
+        windows: manifest.windows.clone(),
+        permissions: manifest.permissions.clone(),
+        min_macos: manifest.min_macos.clone(),
+        limits: manifest.limits,
     })
 }
 
@@ -547,6 +589,10 @@ mod tests {
                 undo: "nothing".into(),
             }],
             settings: Vec::new(),
+            windows: None,
+            permissions: Vec::new(),
+            min_macos: None,
+            limits: None,
         }
     }
 
@@ -587,6 +633,31 @@ mod tests {
         let agreeing: ListingFile =
             toml::from_str("name = \"Hello\"\n").map_err(|e| e.to_string())?;
         assert!(merge(&manifest(), &agreeing, pkg()).is_ok());
+        Ok(())
+    }
+
+    #[test]
+    fn publish_copies_capabilities() -> Result<(), String> {
+        let mut m = manifest();
+        m.windows = Some("Opens its own windows: the capture overlay".into());
+        m.permissions = vec!["screen-recording".into()];
+        m.min_macos = Some("14.0".into());
+        m.limits = Some(samo_ext_protocol::Limits {
+            memory_mb: Some(800),
+            cpu_pct: Some(60),
+        });
+        let listing: ListingFile =
+            toml::from_str("author = \"KJ\"\n").map_err(|e| e.to_string())?;
+        let l = merge(&m, &listing, pkg())?;
+        assert_eq!(
+            (l.windows, l.permissions, l.min_macos, l.limits),
+            (
+                m.windows.clone(),
+                m.permissions.clone(),
+                m.min_macos.clone(),
+                m.limits
+            )
+        );
         Ok(())
     }
 

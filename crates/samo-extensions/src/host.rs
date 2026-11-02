@@ -3,8 +3,10 @@
 use crate::limits::Waker;
 use crate::state::{ExtSlot, ExtSnapshot, ExtView, PendingPopup, Status};
 use crate::supervisor::{self, Event, one_shot};
+use crate::windows::WindowCheck;
 use crate::{ExtRoot, History, Installed, Registry, find_dev_packages, install_dev};
 use samo_domain::extensions::{BackoffConfig, Source, may_run, samo_satisfies};
+use samo_domain::store::macos_satisfies;
 use samo_ext_protocol::{BadgeMeter, HostMsg, Manifest, Widget};
 use std::collections::VecDeque;
 use std::env;
@@ -41,6 +43,11 @@ pub struct HostConfig {
     /// The home folder helpers are given; `None` passes on Samo's own. Tests point it at a temporary folder so
     /// a helper never touches the real `~`.
     pub home: Option<PathBuf>,
+    /// R15: who owns windows, asked every `window_every` for each helper's process tree.
+    pub windows: WindowCheck,
+    pub window_every: Duration,
+    /// This Mac's macOS version, for `min_macos`; `None` if it can't be told.
+    pub macos: Option<String>,
 }
 
 impl HostConfig {
@@ -59,6 +66,9 @@ impl HostConfig {
             rss_limit_bytes: 150 * 1024 * 1024,
             wake_every: Duration::from_millis(250),
             home: None,
+            windows: WindowCheck::default(),
+            window_every: Duration::from_secs(2),
+            macos: this_macos(),
         }
     }
 }
@@ -92,6 +102,8 @@ pub(crate) struct Runtime {
     pub badge_meter: Option<BadgeMeter>,
     pub control: Option<Sender<Event>>,
     pub thread: Option<JoinHandle<()>>,
+    /// Between its `capturing` and `captured`: Samo hides its own windows.
+    pub capturing: bool,
 }
 
 impl Inner {
@@ -126,6 +138,23 @@ impl Inner {
     fn helper(&self, manifest: &Manifest) -> PathBuf {
         self.root.helper(&manifest.id, &manifest.helper)
     }
+}
+
+/// This Mac's macOS version (`"15.1"`), or `None` if it can't be told.
+pub fn this_macos() -> Option<String> {
+    sysinfo::System::os_version()
+}
+
+/// The memory (bytes) and CPU (% of a core) a helper may use: its manifest's `[limits]`, else R8's.
+pub(crate) fn limits_for(manifest: &Manifest, config: &HostConfig) -> (u64, f32) {
+    let limits = manifest.limits.unwrap_or_default();
+    let rss = limits
+        .memory_mb
+        .map_or(config.rss_limit_bytes, |mb| u64::from(mb) * 1024 * 1024);
+    let cpu = limits
+        .cpu_pct
+        .map_or(config.cpu_limit_pct, |pct| pct as f32);
+    (rss, cpu)
 }
 
 /// The installed name, if the dev package in `src` has the id of an extension installed from the store: a dev
@@ -239,6 +268,7 @@ impl Host {
                 badge_meter: None,
                 control: None,
                 thread: None,
+                capturing: false,
             });
         }
 
@@ -287,6 +317,15 @@ impl Host {
             self.inner.waker.poke();
             return;
         }
+        if let Some(min) = rt.manifest.min_macos.clone()
+            && !macos_satisfies(Some(&min), config.macos.as_deref().unwrap_or_default())
+        {
+            rt.status = Status::Blocked(format!("Needs macOS {min} or newer"));
+            drop(state);
+            self.inner.waker.poke();
+            return;
+        }
+        let (rss_limit, cpu_limit) = limits_for(&rt.manifest, config);
         let (tx, rx) = mpsc::channel();
         let job = supervisor::Job {
             inner: Arc::clone(&self.inner),
@@ -295,6 +334,9 @@ impl Host {
             helper: self.inner.helper(&rt.manifest),
             data_dir: self.inner.data_dir(&rt.manifest.id),
             events: tx.clone(),
+            declares_windows: rt.manifest.windows.is_some(),
+            rss_limit,
+            cpu_limit,
         };
         rt.status = Status::Starting;
         rt.note = None;
@@ -364,6 +406,10 @@ impl Host {
                     } else {
                         None
                     },
+                    capturing: rt.capturing,
+                    windows: rt.manifest.windows.clone(),
+                    permissions: rt.manifest.permissions.clone(),
+                    limits: rt.manifest.limits,
                 })
                 .collect(),
             problems: state.problems.clone(),
@@ -403,7 +449,35 @@ impl Host {
 
     /// The user pressed one of the extension's buttons.
     pub fn action(&self, slot: ExtSlot, id: &str) {
-        self.send(slot, HostMsg::Action { id: id.to_string() });
+        self.send(
+            slot,
+            HostMsg::Action {
+                id: id.to_string(),
+                row: None,
+            },
+        );
+    }
+
+    /// The user pressed one of a row's buttons.
+    pub fn row_action(&self, slot: ExtSlot, row: &str, id: &str) {
+        self.send(
+            slot,
+            HostMsg::Action {
+                id: id.to_string(),
+                row: Some(row.to_string()),
+            },
+        );
+    }
+
+    /// The user picked an option of one of the extension's choices.
+    pub fn choice(&self, slot: ExtSlot, key: &str, value: &str) {
+        self.send(
+            slot,
+            HostMsg::Choice {
+                key: key.to_string(),
+                value: value.to_string(),
+            },
+        );
     }
 
     /// Whether the extension's page is on screen.
@@ -511,5 +585,29 @@ impl Host {
 
     pub fn root(&self) -> &ExtRoot {
         &self.inner.root
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn limits_come_from_the_manifest_or_r8() -> Result<(), String> {
+        let config = HostConfig::new("0.3.0");
+        let base = "id = \"t\"\nname = \"T\"\nversion = \"0.1.0\"\nprotocol = 1\nmin_samo = \"0.1.0\"\n\
+                    helper = \"bin/t\"\nsummary = \"t\"\n";
+        let changes = "\n[[changes]]\nwhat = \"w\"\nwhere = \"p\"\nundo = \"u\"\n";
+        let plain = Manifest::parse(&format!("{base}{changes}")).map_err(|e| e.to_string())?;
+        assert_eq!(limits_for(&plain, &config), (150 * 1024 * 1024, 10.0));
+        let shots = Manifest::parse(&format!(
+            "{base}\n[limits]\nmemory_mb = 800\ncpu_pct = 60\n{changes}"
+        ))
+        .map_err(|e| e.to_string())?;
+        assert_eq!(limits_for(&shots, &config), (800 * 1024 * 1024, 60.0));
+        let memory_only = Manifest::parse(&format!("{base}\n[limits]\nmemory_mb = 300\n{changes}"))
+            .map_err(|e| e.to_string())?;
+        assert_eq!(limits_for(&memory_only, &config), (300 * 1024 * 1024, 10.0));
+        Ok(())
     }
 }

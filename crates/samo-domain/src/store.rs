@@ -4,7 +4,7 @@
 use crate::extensions::numeric;
 use ring::digest::{SHA256, digest};
 use ring::signature::{ED25519, UnparsedPublicKey};
-use samo_ext_protocol::{Change, Manifest, valid_id, valid_version};
+use samo_ext_protocol::{Change, Limits, Manifest, valid_id, valid_version};
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fmt;
@@ -71,6 +71,16 @@ pub struct Listing {
     pub screenshots: Vec<Screenshot>,
     #[serde(default)]
     pub changes: Vec<Change>,
+    /// What its manifest declares (ADR-004), copied here so the store shows it before install. Left out of the JSON
+    /// when absent, so a catalog without them reads as it always did.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub windows: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub permissions: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_macos: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limits: Option<Limits>,
 }
 
 /// A file in the store's release, pinned by its hash. `file` is resolved against the catalog's URL.
@@ -386,7 +396,31 @@ pub fn manifest_matches(m: &Manifest, l: &Listing) -> Result<(), StoreError> {
     if m.changes != l.changes {
         return Err(StoreError::ManifestMismatch("changes"));
     }
+    if m.windows != l.windows {
+        return Err(StoreError::ManifestMismatch("windows"));
+    }
+    if m.permissions != l.permissions {
+        return Err(StoreError::ManifestMismatch("permissions"));
+    }
+    if m.min_macos != l.min_macos {
+        return Err(StoreError::ManifestMismatch("min_macos"));
+    }
+    if m.limits != l.limits {
+        return Err(StoreError::ManifestMismatch("limits"));
+    }
     Ok(())
+}
+
+/// Whether this Mac (`current`, e.g. `"15.1"`) is at least `min`. No minimum is always satisfied; an unreadable
+/// version is not.
+pub fn macos_satisfies(min: Option<&str>, current: &str) -> bool {
+    match min {
+        None => true,
+        Some(min) => matches!(
+            (numeric(min), numeric(current)),
+            (Some(min), Some(have)) if have >= min
+        ),
+    }
 }
 
 /// How two versions compare; an unreadable version compares as unknown.
@@ -520,6 +554,10 @@ mod tests {
             icon: None,
             screenshots: Vec::new(),
             changes: vec![change()],
+            windows: None,
+            permissions: Vec::new(),
+            min_macos: None,
+            limits: None,
         }
     }
 
@@ -650,6 +688,62 @@ mod tests {
     }
 
     #[test]
+    fn manifest_capabilities_must_match_listing() -> Result<(), String> {
+        let mut manifest = Manifest::parse(
+            "id = \"hello\"\nname = \"Hello\"\nversion = \"0.2.0\"\nprotocol = 1\nmin_samo = \"0.2.0\"\n\
+             helper = \"bin/samo-ext-hello\"\nsummary = \"Every widget\"\nwindows = \"An overlay\"\n\
+             permissions = [\"screen-recording\"]\nmin_macos = \"14.0\"\n\n[limits]\nmemory_mb = 800\n\n\
+             [[changes]]\nwhat = \"w\"\nwhere = \"p\"\nundo = \"u\"\n",
+        )
+        .map_err(|e| e.to_string())?;
+        manifest.changes = vec![change()];
+        let mut l = listing();
+        l.windows = manifest.windows.clone();
+        l.permissions = manifest.permissions.clone();
+        l.min_macos = manifest.min_macos.clone();
+        l.limits = manifest.limits;
+        manifest_matches(&manifest, &l).map_err(|e| e.to_string())?;
+
+        // A listing that hides what the package declares, or claims what it doesn't, is refused.
+        for (field, mut other) in [
+            ("windows", l.clone()),
+            ("permissions", l.clone()),
+            ("min_macos", l.clone()),
+            ("limits", l.clone()),
+        ] {
+            match field {
+                "windows" => other.windows = None,
+                "permissions" => other.permissions.clear(),
+                "min_macos" => other.min_macos = Some("13.0".into()),
+                _ => other.limits = None,
+            }
+            assert_eq!(
+                manifest_matches(&manifest, &other),
+                Err(StoreError::ManifestMismatch(field))
+            );
+        }
+
+        // A listing without them is written as it always was, so 0.2.0's catalogs and readers are unaffected.
+        let plain = serde_json::to_string(&listing()).map_err(|e| e.to_string())?;
+        for key in ["windows", "permissions", "min_macos", "limits"] {
+            assert!(!plain.contains(key), "{key} in {plain}");
+        }
+        let back: Listing = serde_json::from_str(&plain).map_err(|e| e.to_string())?;
+        assert_eq!(back, listing());
+        Ok(())
+    }
+
+    #[test]
+    fn macos_versions() {
+        assert!(macos_satisfies(None, "11.0"));
+        assert!(macos_satisfies(Some("14.0"), "14.0"));
+        assert!(macos_satisfies(Some("14.0"), "27.0.1"));
+        assert!(macos_satisfies(Some("14"), "14.2"));
+        assert!(!macos_satisfies(Some("14.0"), "13.6.1"));
+        assert!(!macos_satisfies(Some("14.0"), "unknown"));
+    }
+
+    #[test]
     fn manifest_must_equal_listing_fields() -> Result<(), String> {
         let manifest = Manifest {
             id: "hello".into(),
@@ -661,6 +755,10 @@ mod tests {
             summary: "Every widget".into(),
             changes: vec![change()],
             settings: Vec::new(),
+            windows: None,
+            permissions: Vec::new(),
+            min_macos: None,
+            limits: None,
         };
         let l = listing();
         manifest_matches(&manifest, &l).map_err(|e| e.to_string())?;

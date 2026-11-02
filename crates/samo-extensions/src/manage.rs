@@ -7,7 +7,7 @@ use crate::state::{ExtSlot, Status};
 use crate::supervisor::one_shot;
 use crate::{History, InstallError, Installed, MAX_EXTENSIONS, Registry};
 use samo_domain::extensions::{Source, may_run, samo_satisfies};
-use samo_domain::store::Listing;
+use samo_domain::store::{Listing, macos_satisfies};
 use samo_ext_protocol::{Manifest, PROTOCOL_VERSION};
 use std::fmt;
 use std::fs;
@@ -138,6 +138,14 @@ impl Host {
             return Err(InstallError::Refused(format!(
                 "{} needs Samo {} or newer",
                 listing.name, listing.min_samo
+            )));
+        }
+        if let Some(min) = &listing.min_macos
+            && !macos_satisfies(Some(min), inner.config.macos.as_deref().unwrap_or_default())
+        {
+            return Err(InstallError::Refused(format!(
+                "{} needs macOS {min} or newer",
+                listing.name
             )));
         }
         let before = self.find(id);
@@ -272,6 +280,7 @@ impl Host {
                 badge_meter: None,
                 control: None,
                 thread: None,
+                capturing: false,
             });
         }
         self.inner.waker.poke();

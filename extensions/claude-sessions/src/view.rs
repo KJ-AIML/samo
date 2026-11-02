@@ -181,6 +181,7 @@ pub fn build(input: &Input) -> Vec<Widget> {
             items: sorted(input.rows)
                 .into_iter()
                 .map(|(row, tokens)| RowItem {
+                    id: None,
                     lamp: match (row.state, row.error) {
                         (_, true) => Lamp::Error,
                         (State::Working, _) => Lamp::Working,
@@ -191,6 +192,7 @@ pub fn build(input: &Input) -> Vec<Widget> {
                     detail: row.detail.clone(),
                     trailing: tokens.map(|t| compact(t.total())).unwrap_or_default(),
                     tag: None,
+                    actions: Vec::new(),
                 })
                 .collect(),
         });

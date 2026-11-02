@@ -22,6 +22,34 @@ pub struct Manifest {
     /// The switches its page may show.
     #[serde(default)]
     pub settings: Vec<SettingDecl>,
+    /// It opens its own windows, and says which (ADR-004, R15). Without this it may not open any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub windows: Option<String>,
+    /// macOS permissions it asks for, from [`KNOWN_PERMISSIONS`]; shown before install.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub permissions: Vec<String>,
+    /// The oldest macOS it runs on, e.g. `"14.0"`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_macos: Option<String>,
+    /// More than R8's defaults, declared and shown before install (R17).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limits: Option<Limits>,
+}
+
+/// The permissions an extension may declare.
+pub const KNOWN_PERMISSIONS: &[&str] = &["screen-recording"];
+/// The most memory an extension may declare.
+pub const MAX_MEMORY_MB: u32 = 1024;
+/// The most CPU an extension may declare: one whole core, averaged over a minute.
+pub const MAX_CPU_PCT: u32 = 100;
+
+/// An extension's own limits, in place of R8's 150 MB and 10 % of a core.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Limits {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory_mb: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cpu_pct: Option<u32>,
 }
 
 /// One thing an extension changes on the Mac, in words a person reads before installing.
@@ -72,6 +100,15 @@ fn valid_key(key: &str) -> bool {
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
 }
 
+/// A macOS version: 1 to 3 dot-separated numbers.
+pub fn valid_macos(version: &str) -> bool {
+    let parts: Vec<&str> = version.split('.').collect();
+    (1..=3).contains(&parts.len())
+        && parts
+            .iter()
+            .all(|p| !p.is_empty() && p.len() <= 3 && p.bytes().all(|b| b.is_ascii_digit()))
+}
+
 /// A relative path that stays inside the package: no leading `/`, no empty, `.` or `..` part.
 fn stays_inside(path: &str) -> bool {
     !path.is_empty()
@@ -118,6 +155,30 @@ impl Manifest {
         }
         if let Some(s) = self.settings.iter().find(|s| !valid_key(&s.key)) {
             return bad(format!("setting key `{}` must be a-z, 0-9 and _", s.key));
+        }
+        if self.windows.as_ref().is_some_and(|w| w.trim().is_empty()) {
+            return bad("windows must say which windows it opens".into());
+        }
+        if let Some(p) = self
+            .permissions
+            .iter()
+            .find(|p| !KNOWN_PERMISSIONS.contains(&p.as_str()))
+        {
+            return bad(format!("permission `{p}` isn't one Samo knows"));
+        }
+        if let Some(v) = self.min_macos.as_ref().filter(|v| !valid_macos(v)) {
+            return bad(format!("min_macos `{v}` is not a macOS version"));
+        }
+        if let Some(limits) = &self.limits {
+            if limits
+                .memory_mb
+                .is_some_and(|m| m == 0 || m > MAX_MEMORY_MB)
+            {
+                return bad(format!("memory_mb must be 1 to {MAX_MEMORY_MB}"));
+            }
+            if limits.cpu_pct.is_some_and(|c| c == 0 || c > MAX_CPU_PCT) {
+                return bad(format!("cpu_pct must be 1 to {MAX_CPU_PCT}"));
+            }
         }
         Ok(())
     }
@@ -175,6 +236,69 @@ label = "Connect to Claude Code"
             .map(str::to_string)
             .unwrap_or_default();
         assert!(Manifest::parse(&no_changes).is_err());
+    }
+
+    const SHOTS: &str = r#"
+id = "shots"
+name = "Shots"
+version = "0.1.0"
+protocol = 1
+min_samo = "0.3.0"
+helper = "bin/samo-shots"
+summary = "Screenshots"
+windows = "Opens its own windows: the capture overlay"
+permissions = ["screen-recording"]
+min_macos = "14.0"
+
+[limits]
+memory_mb = 800
+cpu_pct = 60
+
+[[changes]]
+what = "Saves screenshots"
+where = "~/Pictures/Shots"
+undo = "Nothing to undo"
+"#;
+
+    #[test]
+    fn manifest_capabilities_parse_and_validate() -> Result<(), String> {
+        let m = Manifest::parse(SHOTS).map_err(|e| e.to_string())?;
+        assert_eq!(
+            m.windows.as_deref(),
+            Some("Opens its own windows: the capture overlay")
+        );
+        assert_eq!(m.permissions, ["screen-recording"]);
+        assert_eq!(m.min_macos.as_deref(), Some("14.0"));
+        assert_eq!(
+            m.limits,
+            Some(Limits {
+                memory_mb: Some(800),
+                cpu_pct: Some(60)
+            })
+        );
+
+        // Without them, nothing is declared.
+        let plain = Manifest::parse(GOOD).map_err(|e| e.to_string())?;
+        assert_eq!(
+            (
+                plain.windows,
+                plain.permissions.len(),
+                plain.min_macos,
+                plain.limits
+            ),
+            (None, 0, None, None)
+        );
+
+        let swap = |from: &str, to: &str| Manifest::parse(&SHOTS.replace(from, to));
+        assert!(swap("\"screen-recording\"", "\"camera\"").is_err());
+        assert!(swap("memory_mb = 800", "memory_mb = 2048").is_err());
+        assert!(swap("memory_mb = 800", "memory_mb = 0").is_err());
+        assert!(swap("cpu_pct = 60", "cpu_pct = 150").is_err());
+        assert!(swap("min_macos = \"14.0\"", "min_macos = \"fourteen\"").is_err());
+        assert!(swap("\"Opens its own windows: the capture overlay\"", "\" \"").is_err());
+        assert!(valid_macos("14") && valid_macos("14.0") && valid_macos("15.1.2"));
+        assert!(!valid_macos("14.") && !valid_macos("1.2.3.4") && !valid_macos(""));
+        Ok(())
     }
 
     #[test]

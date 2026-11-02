@@ -61,6 +61,96 @@ struct AppState {
     popup_gen: u64,
     /// A new Samo has been started to finish an update; this one is quitting.
     updating: bool,
+    /// Whether Samo is hidden while an extension captures the screen (ADR-004).
+    capture_hide: CaptureHide,
+}
+
+/// Samo out of the way while an extension captures the screen, so its windows aren't in the shot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CaptureHide {
+    Idle,
+    /// Hidden since then; `by_us` is false if Samo was already hidden (then it isn't unhidden either).
+    Hidden {
+        since: Instant,
+        by_us: bool,
+    },
+    /// The capture ran past the limit, so Samo came back; it stays until the capture ends.
+    GaveUp,
+}
+
+/// How long Samo stays hidden for one capture at most.
+const CAPTURE_HIDE_LIMIT: std::time::Duration = std::time::Duration::from_secs(60);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HideStep {
+    Hide,
+    Show,
+    Nothing,
+}
+
+/// The next state, and what to do, given whether any extension is capturing.
+fn capture_step(state: CaptureHide, capturing: bool, now: Instant) -> (CaptureHide, HideStep) {
+    match (state, capturing) {
+        (CaptureHide::Idle, true) => (
+            CaptureHide::Hidden {
+                since: now,
+                by_us: true,
+            },
+            HideStep::Hide,
+        ),
+        (CaptureHide::Hidden { since, .. }, true)
+            if now.duration_since(since) > CAPTURE_HIDE_LIMIT =>
+        {
+            (CaptureHide::GaveUp, HideStep::Show)
+        }
+        (CaptureHide::Hidden { .. }, false) => (CaptureHide::Idle, HideStep::Show),
+        (CaptureHide::GaveUp, false) => (CaptureHide::Idle, HideStep::Nothing),
+        (other, _) => (other, HideStep::Nothing),
+    }
+}
+
+/// Hides Samo (main window and quick panel) while an extension captures, and shows it again after, without
+/// taking focus. A timer brings it back if a capture never ends.
+fn follow_captures(cx: &mut App) {
+    let state = cx.global::<AppState>();
+    let capturing = state
+        .hub
+        .ext
+        .get()
+        .is_some_and(|h| h.snapshot().extensions.iter().any(|e| e.capturing));
+    let (next, step) = capture_step(state.capture_hide, capturing, Instant::now());
+    let mut next = next;
+    let Some(mtm) = objc2::MainThreadMarker::new() else {
+        return;
+    };
+    let app = objc2_app_kit::NSApplication::sharedApplication(mtm);
+    match step {
+        HideStep::Hide => {
+            menubar::close_panel(cx);
+            if app.isHidden() {
+                next = CaptureHide::Hidden {
+                    since: Instant::now(),
+                    by_us: false,
+                };
+            } else {
+                app.hide(None);
+            }
+            cx.spawn(async move |cx| {
+                cx.background_executor()
+                    .timer(CAPTURE_HIDE_LIMIT + std::time::Duration::from_secs(1))
+                    .await;
+                let _ = cx.update(follow_captures);
+            })
+            .detach();
+        }
+        HideStep::Show => {
+            if matches!(state.capture_hide, CaptureHide::Hidden { by_us: true, .. }) {
+                app.unhideWithoutActivation();
+            }
+        }
+        HideStep::Nothing => {}
+    }
+    cx.global_mut::<AppState>().capture_hide = next;
 }
 
 impl Global for AppState {}
@@ -990,6 +1080,7 @@ fn main() {
             popup: None,
             popup_gen: 0,
             updating: false,
+            capture_hide: CaptureHide::Idle,
         });
         let menubar = menubar::MenuBar::install(cx);
         cx.global_mut::<AppState>().menubar = menubar;
@@ -1002,6 +1093,7 @@ fn main() {
                     cx.refresh_windows();
                     menubar::refresh(cx);
                     show_extension_popups(cx);
+                    follow_captures(cx);
                     finish_samo_update(cx);
                 });
                 if drawn.is_err() {
@@ -1018,6 +1110,39 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn samo_hides_for_a_capture_and_comes_back() {
+        let t0 = Instant::now();
+        let later = |s: u64| t0 + std::time::Duration::from_secs(s);
+        // A capture starts: hide. It ends: show.
+        let (hidden, step) = capture_step(CaptureHide::Idle, true, t0);
+        assert_eq!(step, HideStep::Hide);
+        assert_eq!(
+            capture_step(hidden, true, later(1)),
+            (hidden, HideStep::Nothing)
+        );
+        assert_eq!(
+            capture_step(hidden, false, later(2)),
+            (CaptureHide::Idle, HideStep::Show)
+        );
+        // A capture that never ends: Samo comes back after the limit, and stays until it does end.
+        let (gave_up, step) = capture_step(hidden, true, later(61));
+        assert_eq!((gave_up, step), (CaptureHide::GaveUp, HideStep::Show));
+        assert_eq!(
+            capture_step(gave_up, true, later(90)),
+            (CaptureHide::GaveUp, HideStep::Nothing)
+        );
+        assert_eq!(
+            capture_step(gave_up, false, later(91)),
+            (CaptureHide::Idle, HideStep::Nothing)
+        );
+        // No capture: nothing happens.
+        assert_eq!(
+            capture_step(CaptureHide::Idle, false, t0),
+            (CaptureHide::Idle, HideStep::Nothing)
+        );
+    }
 
     /// R12, RF2: Samo starting, even on the store's page, shows the cache and makes no request.
     #[test]

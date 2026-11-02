@@ -5,6 +5,7 @@ use crate::History;
 use crate::host::{HostConfig, Inner};
 use crate::limits::{HelperLog, Line, MAX_LINE, read_line_capped};
 use crate::state::{ExtSlot, PendingPopup, Status};
+use crate::tree::{self, Member};
 use samo_domain::extensions::{Backoff, RateGate, Restart};
 use samo_ext_protocol::{
     BadgeMeter, HelperMsg, HostMsg, NoteKind, PROTOCOL_VERSION, Widget, decode_helper_line, encode,
@@ -12,6 +13,7 @@ use samo_ext_protocol::{
 };
 use std::env;
 use std::io::{BufReader, Read, Write};
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
@@ -43,6 +45,11 @@ pub(crate) struct Job {
     pub helper: PathBuf,
     pub data_dir: PathBuf,
     pub events: Sender<Event>,
+    /// Its manifest declares windows (R15).
+    pub declares_windows: bool,
+    /// Its memory (bytes) and CPU (% of a core) limits: its manifest's, else R8's.
+    pub rss_limit: u64,
+    pub cpu_limit: f32,
 }
 
 enum Outcome {
@@ -147,7 +154,13 @@ pub(crate) fn run(job: Job, rx: Receiver<Event>) {
     let mut generation = 0u64;
     loop {
         generation += 1;
-        match run_once(&job, &rx, &log, generation) {
+        let mut family = Vec::new();
+        let outcome = run_once(&job, &rx, &log, generation, &mut family);
+        // Whatever it started and left running goes with it (R15, R17).
+        tree::kill(&mut System::new(), &family);
+        // A helper that has gone isn't capturing: Samo shows its windows again.
+        job.inner.update(job.slot, |rt| rt.capturing = false);
+        match outcome {
             Outcome::Stopped => return,
             Outcome::Halt(reason) => {
                 log.note(&format!("stopped: {reason}"));
@@ -205,11 +218,16 @@ struct Held {
     view: Option<Vec<Widget>>,
     badge: Option<(u32, String, Option<BadgeMeter>)>,
     health: Option<(bool, String)>,
+    /// The latest of `capturing` and `captured`: held like a view, never dropped, or Samo could stay hidden.
+    capturing: Option<bool>,
 }
 
 impl Held {
     fn is_empty(&self) -> bool {
-        self.view.is_none() && self.badge.is_none() && self.health.is_none()
+        self.view.is_none()
+            && self.badge.is_none()
+            && self.health.is_none()
+            && self.capturing.is_none()
     }
 }
 
@@ -221,10 +239,18 @@ struct Run<'a> {
     unhealthy: Option<String>,
 }
 
-fn run_once(job: &Job, rx: &Receiver<Event>, log: &HelperLog, generation: u64) -> Outcome {
+fn run_once(
+    job: &Job,
+    rx: &Receiver<Event>,
+    log: &HelperLog,
+    generation: u64,
+    family: &mut Vec<Member>,
+) -> Outcome {
     let config = &job.inner.config;
     let mut child = match Command::new(&job.helper)
         .arg("serve")
+        // Its own process group, apart from Samo's.
+        .process_group(0)
         .env_clear()
         .envs(helper_env(&job.data_dir, config))
         .current_dir(&job.data_dir)
@@ -311,6 +337,8 @@ fn run_once(job: &Job, rx: &Receiver<Event>, log: &HelperLog, generation: u64) -
     let mut sys = System::new();
     let mut cpu: Vec<f32> = Vec::new();
     let mut next_check = Instant::now() + config.resource_every;
+    *family = tree::tree(&mut sys, pid);
+    let mut next_family = Instant::now() + config.window_every;
 
     loop {
         let event = rx.recv_timeout(TICK);
@@ -340,6 +368,7 @@ fn run_once(job: &Job, rx: &Receiver<Event>, log: &HelperLog, generation: u64) -
                             job.inner.update(job.slot, |rt| rt.status = Status::Running);
                         }
                         HelperMsg::Hello { protocol } => {
+                            tree::refresh(&mut sys, pid, family);
                             stop_child(&mut child, to_helper, config.grace);
                             return Outcome::Halt(format!(
                                 "It speaks protocol {protocol}; this Samo speaks {PROTOCOL_VERSION}"
@@ -360,6 +389,8 @@ fn run_once(job: &Job, rx: &Receiver<Event>, log: &HelperLog, generation: u64) -
                             meter,
                         } => held.badge = Some((count, summary, meter)),
                         HelperMsg::Health { ok, message } => held.health = Some((ok, message)),
+                        HelperMsg::Capturing => held.capturing = Some(true),
+                        HelperMsg::Captured => held.capturing = Some(false),
                         HelperMsg::Popup { .. }
                         | HelperMsg::Log { .. }
                         | HelperMsg::Hello { .. } => {
@@ -371,6 +402,7 @@ fn run_once(job: &Job, rx: &Receiver<Event>, log: &HelperLog, generation: u64) -
             // From an earlier run of the helper.
             Ok(Event::Line(..)) => {}
             Ok(Event::Eof(g)) if g == generation => {
+                tree::refresh(&mut sys, pid, family);
                 return ended(&mut child, run.unhealthy, said_hello, config.grace);
             }
             Ok(Event::Eof(_)) => {}
@@ -378,6 +410,7 @@ fn run_once(job: &Job, rx: &Receiver<Event>, log: &HelperLog, generation: u64) -
                 let _ = to_helper.send(msg);
             }
             Ok(Event::Stop) | Err(RecvTimeoutError::Disconnected) => {
+                tree::refresh(&mut sys, pid, family);
                 stop_child(&mut child, to_helper, config.grace);
                 return Outcome::Stopped;
             }
@@ -386,6 +419,7 @@ fn run_once(job: &Job, rx: &Receiver<Event>, log: &HelperLog, generation: u64) -
 
         // Every pass, however it was woken.
         if !said_hello && started.elapsed() > config.hello_timeout {
+            tree::refresh(&mut sys, pid, family);
             stop_child(&mut child, to_helper, Duration::ZERO);
             return Outcome::Halt(format!(
                 "It didn't say hello within {}s",
@@ -407,10 +441,28 @@ fn run_once(job: &Job, rx: &Receiver<Event>, log: &HelperLog, generation: u64) -
             if let Some((ok, message)) = taken.health {
                 run.apply(HelperMsg::Health { ok, message });
             }
+            match taken.capturing {
+                Some(true) => run.apply(HelperMsg::Capturing),
+                Some(false) => run.apply(HelperMsg::Captured),
+                None => {}
+            }
         }
         if let Ok(Some(_)) = child.try_wait() {
             // It exited, but something else still holds its stdout open.
+            tree::refresh(&mut sys, pid, family);
             return ended(&mut child, run.unhealthy, said_hello, config.grace);
+        }
+        if Instant::now() >= next_family {
+            next_family = Instant::now() + config.window_every;
+            *family = tree::tree(&mut sys, pid);
+            if !job.declares_windows {
+                let pids: Vec<u32> = family.iter().map(|m| m.pid).collect();
+                if config.windows.0.count(&pids).is_some_and(|n| n > 0) {
+                    tree::refresh(&mut sys, pid, family);
+                    stop_child(&mut child, to_helper, Duration::ZERO);
+                    return Outcome::Halt("Opened windows it didn't declare".into());
+                }
+            }
         }
         if Instant::now() >= next_check {
             next_check = Instant::now() + config.resource_every;
@@ -422,12 +474,13 @@ fn run_once(job: &Job, rx: &Receiver<Event>, log: &HelperLog, generation: u64) -
             );
             if let Some(process) = sys.process(target) {
                 let rss = process.memory();
-                if rss > config.rss_limit_bytes {
+                if rss > job.rss_limit {
+                    tree::refresh(&mut sys, pid, family);
                     stop_child(&mut child, to_helper, Duration::ZERO);
                     return Outcome::Halt(format!(
                         "It used {} MB of memory (the limit is {} MB)",
                         rss / (1024 * 1024),
-                        config.rss_limit_bytes / (1024 * 1024)
+                        job.rss_limit / (1024 * 1024)
                     ));
                 }
                 cpu.push(process.cpu_usage());
@@ -436,11 +489,12 @@ fn run_once(job: &Job, rx: &Receiver<Event>, log: &HelperLog, generation: u64) -
                 }
                 let samples = cpu.len().max(1) as f32;
                 let average = cpu.iter().sum::<f32>() / samples;
-                if cpu.len() >= config.cpu_samples && average > config.cpu_limit_pct {
+                if cpu.len() >= config.cpu_samples && average > job.cpu_limit {
+                    tree::refresh(&mut sys, pid, family);
                     stop_child(&mut child, to_helper, Duration::ZERO);
                     return Outcome::Halt(format!(
                         "It used {average:.0}% of a CPU core for a minute (the limit is {:.0}%)",
-                        config.cpu_limit_pct
+                        job.cpu_limit
                     ));
                 }
             }
@@ -567,6 +621,20 @@ impl Run<'_> {
                 let event: String = event.chars().take(40).collect();
                 let detail: String = detail.chars().take(1_000).collect();
                 History::append(&job.inner.root, &event, &job.id, &detail);
+            }
+            HelperMsg::Capturing | HelperMsg::Captured => {
+                let capturing = matches!(msg, HelperMsg::Capturing);
+                let mut declared = true;
+                job.inner.update(job.slot, |rt| {
+                    declared = rt.manifest.windows.is_some();
+                    if declared {
+                        rt.capturing = capturing;
+                    }
+                });
+                if !declared {
+                    self.log
+                        .note("ignored `capturing`: only an extension that declares windows may hide Samo");
+                }
             }
             HelperMsg::Health { ok, message } => {
                 self.unhealthy = (!ok).then(|| message.clone());

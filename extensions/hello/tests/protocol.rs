@@ -50,10 +50,11 @@ fn hello_speaks_valid_protocol_v1() -> Result<(), String> {
             Widget::Switch { .. } => "switch",
             Widget::Button { .. } => "button",
             Widget::Note { .. } => "note",
+            Widget::Choice { .. } => "choice",
         })
         .collect();
     for kind in [
-        "section", "figure", "meter", "rows", "switch", "button", "note",
+        "section", "figure", "meter", "rows", "switch", "button", "note", "choice",
     ] {
         assert!(kinds.contains(&kind), "no {kind} in {kinds:?}");
     }

@@ -418,7 +418,7 @@ pub fn run() -> ExitCode {
                 force = true;
             }
             Ok(Some(HostMsg::Visible { page })) => serve.visible = page,
-            Ok(Some(HostMsg::Hello { .. } | HostMsg::Action { .. }))
+            Ok(Some(HostMsg::Hello { .. } | HostMsg::Action { .. } | HostMsg::Choice { .. }))
             | Err(RecvTimeoutError::Timeout) => {}
         }
         for msg in serve.tick(force) {

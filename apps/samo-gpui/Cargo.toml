@@ -19,7 +19,7 @@ chrono.workspace = true
 futures.workspace = true
 tray-icon.workspace = true
 objc2.workspace = true
-objc2-app-kit.workspace = true
+objc2-app-kit = { workspace = true, features = ["NSApplication", "NSResponder"] }
 objc2-foundation.workspace = true
 
 [dev-dependencies]

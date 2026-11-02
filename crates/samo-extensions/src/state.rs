@@ -1,4 +1,4 @@
-use samo_ext_protocol::{BadgeMeter, Change, PopupKind, Widget};
+use samo_ext_protocol::{BadgeMeter, Change, Limits, PopupKind, Widget};
 use std::sync::Arc;
 
 /// Which installed extension, by its place in the list; stable while Samo runs.
@@ -40,6 +40,12 @@ pub struct ExtView {
     pub badge_summary: String,
     /// A small load bar for the quick panel's line, if the extension sends one.
     pub badge_meter: Option<BadgeMeter>,
+    /// It is capturing the screen: Samo hides its own windows until it says `captured`.
+    pub capturing: bool,
+    /// What its manifest declares (ADR-004), shown on its card.
+    pub windows: Option<String>,
+    pub permissions: Vec<String>,
+    pub limits: Option<Limits>,
 }
 
 /// Every installed extension, copied out for one render.
