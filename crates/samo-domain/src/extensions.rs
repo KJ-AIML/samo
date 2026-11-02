@@ -170,6 +170,19 @@ impl Default for BackoffConfig {
     }
 }
 
+impl BackoffConfig {
+    /// R8, for a helper stopped for going over its CPU or memory limit: it rests 1 minute, then 2, and the third
+    /// time within an hour it stays stopped until Restart.
+    pub fn limits() -> Self {
+        Self {
+            first_ms: 60_000,
+            max_ms: 5 * 60_000,
+            max_crashes: 3,
+            window_ms: 60 * 60 * 1_000,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Restart {
     After(u64),
@@ -405,6 +418,22 @@ mod tests {
         });
         let last = (0..20).map(|i| capped.on_crash(i)).last();
         assert_eq!(last, Some(Restart::After(60_000)));
+    }
+
+    #[test]
+    fn over_limit_rests_then_stops() {
+        const MINUTE: i64 = 60_000;
+        let mut b = Backoff::new(BackoffConfig::limits());
+        assert_eq!(b.on_crash(0), Restart::After(60_000));
+        assert_eq!(b.on_crash(3 * MINUTE), Restart::After(120_000));
+        assert_eq!(b.on_crash(7 * MINUTE), Restart::Stop);
+
+        // Once in a while, it always starts again.
+        let mut rare = Backoff::new(BackoffConfig::limits());
+        for i in 0..5 {
+            let wait = if i == 0 { 60_000 } else { 120_000 };
+            assert_eq!(rare.on_crash(i * 40 * MINUTE), Restart::After(wait));
+        }
     }
 
     #[test]

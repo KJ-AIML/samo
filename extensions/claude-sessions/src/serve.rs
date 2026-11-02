@@ -72,12 +72,30 @@ fn local_midnight_ms() -> i64 {
         .map_or(0, |m| m.timestamp_millis())
 }
 
+/// A time on the page: `22:00` today, `Thu 22:00` within a week, else `9 Nov 22:00`. A weekly limit resets on
+/// another day, and its bare time read as if it had already passed (KJ, 2026-11-02).
+fn time_on_page<Tz: chrono::TimeZone>(
+    at: chrono::DateTime<Tz>,
+    now: &chrono::DateTime<Tz>,
+) -> String
+where
+    Tz::Offset: std::fmt::Display,
+{
+    let days = (at.date_naive() - now.date_naive()).num_days();
+    let format = match days {
+        0 => "%H:%M",
+        -6..=6 => "%a %H:%M",
+        _ => "%-d %b %H:%M",
+    };
+    at.format(format).to_string()
+}
+
 fn time_of_day(ms: i64) -> String {
     use chrono::TimeZone;
     chrono::Local
         .timestamp_millis_opt(ms)
         .single()
-        .map(|t| t.format("%H:%M").to_string())
+        .map(|t| time_on_page(t, &chrono::Local::now()))
         .unwrap_or_else(|| "--:--".into())
 }
 
@@ -430,4 +448,27 @@ pub fn run() -> ExitCode {
     }
     drop(lock);
     ExitCode::SUCCESS
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::{FixedOffset, TimeZone};
+
+    #[test]
+    fn times_say_the_day_unless_it_is_today() -> Result<(), String> {
+        let bangkok = FixedOffset::east_opt(7 * 3_600).ok_or("offset")?;
+        let at = |d: u32, h: u32, m: u32| {
+            bangkok
+                .with_ymd_and_hms(2026, 11, d, h, m, 0)
+                .single()
+                .ok_or("time")
+        };
+        let now = at(2, 22, 13)?;
+        assert_eq!(time_on_page(at(2, 17, 30)?, &now), "17:30");
+        assert_eq!(time_on_page(at(5, 22, 0)?, &now), "Thu 22:00");
+        assert_eq!(time_on_page(at(1, 23, 18)?, &now), "Sun 23:18");
+        assert_eq!(time_on_page(at(9, 22, 0)?, &now), "9 Nov 22:00");
+        Ok(())
+    }
 }
