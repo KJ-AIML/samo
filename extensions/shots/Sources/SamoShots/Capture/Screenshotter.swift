@@ -3,6 +3,7 @@
 
 import AppKit
 import ScreenCaptureKit
+import SamoKit
 import ShotsCore
 
 /// One display's frozen image.

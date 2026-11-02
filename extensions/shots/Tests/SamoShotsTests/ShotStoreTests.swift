@@ -1,5 +1,6 @@
 import CoreGraphics
 import XCTest
+import SamoKit
 @testable import ShotsCore
 
 private final class MemoryDisk: Disk {

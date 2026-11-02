@@ -3,6 +3,7 @@
 // the shot and never over it.
 
 import CoreGraphics
+import SamoKit
 import Foundation
 
 public final class ShotStore {

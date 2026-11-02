@@ -2,6 +2,7 @@
 // asked, a still-missing grant may just need Shots to restart.
 
 import CoreGraphics
+import SamoKit
 
 public enum ScreenAccess: Equatable {
     case allowed
@@ -36,6 +37,3 @@ public final class Permission {
         return ask()
     }
 }
-
-/// The worker's exit code that asks the first process to start it again (after a grant), instead of ending.
-public let restartExitCode: Int32 = 75

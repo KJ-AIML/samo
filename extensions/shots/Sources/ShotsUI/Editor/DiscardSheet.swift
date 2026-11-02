@@ -3,6 +3,7 @@
 // discards.
 
 import AppKit
+import SamoKit
 import ShotsCore
 
 final class DiscardSheet {

@@ -5,6 +5,7 @@
 // (R17).
 
 import CoreGraphics
+import SamoKit
 import Foundation
 
 /// One frame of the area: its picture and a fingerprint per row.

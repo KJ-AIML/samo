@@ -4,6 +4,7 @@
 // never exported.
 
 import AppKit
+import SamoKit
 import ShotsCore
 
 final class MarksView: NSView {

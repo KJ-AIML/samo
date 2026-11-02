@@ -2,6 +2,7 @@
 // A captured display image is in pixels, origin top-left.
 
 import CoreGraphics
+import SamoKit
 
 public enum Arrow {
     case up, down, left, right

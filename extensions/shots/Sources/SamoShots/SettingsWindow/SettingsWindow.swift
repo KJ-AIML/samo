@@ -3,6 +3,7 @@
 // as it was.
 
 import AppKit
+import SamoKit
 import ShotsCore
 
 final class SettingsWindow: NSObject, NSWindowDelegate {

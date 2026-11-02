@@ -4,6 +4,7 @@
 
 import AppKit
 import ScreenCaptureKit
+import SamoKit
 import ShotsCore
 import ShotsUI
 

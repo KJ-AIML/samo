@@ -3,6 +3,7 @@
 // text mark being typed in the editor. It has no Quit: Shots ends when Samo says so.
 
 import AppKit
+import SamoKit
 import ShotsCore
 
 final class WorkerApp: NSObject, NSApplicationDelegate {

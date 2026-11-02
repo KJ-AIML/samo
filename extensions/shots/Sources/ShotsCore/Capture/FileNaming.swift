@@ -1,6 +1,7 @@
 // What a saved shot is called: `Shot 2026-11-01 at 21.35.12.png`, with ` (2)` if that name is taken.
 
 import Foundation
+import SamoKit
 
 public enum FileNaming {
     public static func name(at date: Date, format: Settings.Format, timeZone: TimeZone = .current) -> String {

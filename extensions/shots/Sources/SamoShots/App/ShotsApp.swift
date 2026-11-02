@@ -2,6 +2,7 @@
 // and its page in Samo. Everything here runs on the main thread.
 
 import AppKit
+import SamoKit
 import ShotsCore
 import ShotsUI
 
@@ -36,7 +37,8 @@ final class ShotsApp {
     func start(out: Output) {
         // Files a drag needed last time are never left behind.
         Export.clearDrags(editors.dragFolder)
-        let session = Session(out: out, shared: shared, handlers: Session.Handlers(
+        let session = Session(out: out, shared: shared, sharedNote: "Shots couldn't start as its own app, so Screen "
+                              + "Recording is shared with Samo", handlers: Session.Handlers(
             page: { [unowned self] in self.page() },
             setting: { [unowned self] key, value in self.setting(key, value) },
             action: { [unowned self] id, row in self.action(id, row: row) },

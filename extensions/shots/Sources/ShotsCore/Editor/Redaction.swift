@@ -3,6 +3,7 @@
 // at a time, and belong to one editor window, so they go when it closes (R17).
 
 import CoreGraphics
+import SamoKit
 import CoreImage
 import Foundation
 

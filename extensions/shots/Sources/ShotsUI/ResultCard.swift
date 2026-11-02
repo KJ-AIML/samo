@@ -3,6 +3,7 @@
 // its buttons, and leaves on Esc, a click anywhere else, or after 8 s (held while the pointer is on it).
 
 import AppKit
+import SamoKit
 import ShotsCore
 
 public final class ResultCard {

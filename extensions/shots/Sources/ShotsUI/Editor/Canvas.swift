@@ -3,6 +3,7 @@
 // While cropping, it shows the whole shot with the box to keep.
 
 import AppKit
+import SamoKit
 import ShotsCore
 
 /// Centres the canvas when it is smaller than the window.

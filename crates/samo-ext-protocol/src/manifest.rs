@@ -25,6 +25,9 @@ pub struct Manifest {
     /// It opens its own windows, and says which (ADR-004, R15). Without this it may not open any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub windows: Option<String>,
+    /// It watches something while idle, and says what (ADR-005, R21): the clipboard, for Clips.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub watches: Option<String>,
     /// macOS permissions it asks for, from [`KNOWN_PERMISSIONS`]; shown before install.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub permissions: Vec<String>,
@@ -37,7 +40,8 @@ pub struct Manifest {
 }
 
 /// The permissions an extension may declare.
-pub const KNOWN_PERMISSIONS: &[&str] = &["screen-recording"];
+pub const KNOWN_PERMISSIONS: &[&str] =
+    &["screen-recording", "paste-from-other-apps", "accessibility"];
 /// The most memory an extension may declare.
 pub const MAX_MEMORY_MB: u32 = 1024;
 /// The most CPU an extension may declare: one whole core, averaged over a minute.
@@ -158,6 +162,9 @@ impl Manifest {
         }
         if self.windows.as_ref().is_some_and(|w| w.trim().is_empty()) {
             return bad("windows must say which windows it opens".into());
+        }
+        if self.watches.as_ref().is_some_and(|w| w.trim().is_empty()) {
+            return bad("watches must say what it watches".into());
         }
         if let Some(p) = self
             .permissions
@@ -296,6 +303,25 @@ undo = "Nothing to undo"
         assert!(swap("cpu_pct = 60", "cpu_pct = 150").is_err());
         assert!(swap("min_macos = \"14.0\"", "min_macos = \"fourteen\"").is_err());
         assert!(swap("\"Opens its own windows: the capture overlay\"", "\" \"").is_err());
+        // ADR-005: Clips' two permissions and what it watches.
+        let clips = swap(
+            "permissions = [\"screen-recording\"]",
+            "permissions = [\"paste-from-other-apps\", \"accessibility\"]\nwatches = \"Watches the clipboard\"",
+        )
+        .map_err(|e| e.to_string())?;
+        assert_eq!(
+            clips.permissions,
+            ["paste-from-other-apps", "accessibility"]
+        );
+        assert_eq!(clips.watches.as_deref(), Some("Watches the clipboard"));
+        assert!(
+            swap(
+                "permissions = [\"screen-recording\"]",
+                "permissions = []\nwatches = \" \""
+            )
+            .is_err(),
+            "watches must say what"
+        );
         assert!(valid_macos("14") && valid_macos("14.0") && valid_macos("15.1.2"));
         assert!(!valid_macos("14.") && !valid_macos("1.2.3.4") && !valid_macos(""));
         Ok(())

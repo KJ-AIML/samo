@@ -113,10 +113,10 @@ const SWIFT_NETWORK: &[&str] = &[
     "socket(",
     "NSTask",
 ];
-/// The one file that may spawn (Shots' worker), and the one that may build a URL from a string (a QR code's link,
-/// handed to the browser).
+/// The one file that may spawn (an extension's worker, in the kit), and the files that may build a URL from a string
+/// (`Links.swift`: a QR code's web link handed to the browser, System Settings' panes; ADR-005).
 const SPAWN_FILE: &str = "/App/Spawn.swift";
-const LINK_FILE: &str = "/Recognize/Links.swift";
+const LINK_FILE: &str = "/Links.swift";
 
 /// `word` in `text`, not as part of a longer name (`Process`, but not `ProcessInfo`).
 fn has_word(text: &str, word: &str) -> bool {
@@ -149,7 +149,9 @@ pub fn check_swift_source(rel_path: &str, content: &str) -> Result<(), String> {
         return fail("posix_spawn (only App/Spawn.swift starts the worker)");
     }
     if code.contains("URL(string:") && !rel_path.ends_with(LINK_FILE) {
-        return fail("URL(string:) (only Recognize/Links.swift opens a link, in the browser)");
+        return fail(
+            "URL(string:) (only a Links.swift opens a link, in the browser or System Settings)",
+        );
     }
     Ok(())
 }
@@ -317,6 +319,13 @@ ureq = { version = "3", default-features = false }
         );
         assert!(
             check_swift_source("extensions/shots/Sources/SamoShots/Pin/Pin.swift", link).is_err()
+        );
+        // ADR-005: the kit's Links.swift opens System Settings; a file merely ending in "Links" doesn't count.
+        assert!(
+            check_swift_source("extensions/kit/Sources/SamoKit/Links/Links.swift", link).is_ok()
+        );
+        assert!(
+            check_swift_source("extensions/clips/Sources/SamoClips/DeepLinks.swift", link).is_err()
         );
     }
 

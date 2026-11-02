@@ -2,6 +2,7 @@
 
 import AppKit
 import XCTest
+import SamoKit
 @testable import ShotsCore
 @testable import ShotsUI
 

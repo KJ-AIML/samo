@@ -44,6 +44,7 @@ pub struct ExtView {
     pub capturing: bool,
     /// What its manifest declares (ADR-004), shown on its card.
     pub windows: Option<String>,
+    pub watches: Option<String>,
     pub permissions: Vec<String>,
     pub limits: Option<Limits>,
 }

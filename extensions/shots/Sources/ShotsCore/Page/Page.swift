@@ -3,6 +3,7 @@
 // capture.
 
 import Foundation
+import SamoKit
 
 public struct PageState {
     public var access: ScreenAccess
@@ -178,14 +179,5 @@ extension Settings {
             return false
         }
         return true
-    }
-}
-
-extension Shortcut {
-    /// A shortcut from a key press (Cocoa's modifier flags), or `nil` if it would take a key you type: it needs ⌘, ⌃
-    /// or ⌥.
-    public static func recorded(keyCode: UInt16, cocoaModifiers: UInt) -> Shortcut? {
-        let shortcut = Shortcut(keyCode: UInt32(keyCode), modifiers: Conflicts.carbonModifiers(cocoa: Int(cocoaModifiers)))
-        return shortcut.canBeGlobal ? shortcut : nil
     }
 }

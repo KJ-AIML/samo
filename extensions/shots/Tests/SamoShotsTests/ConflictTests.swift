@@ -1,4 +1,5 @@
 import XCTest
+import SamoKit
 @testable import ShotsCore
 
 final class ConflictTests: XCTestCase {

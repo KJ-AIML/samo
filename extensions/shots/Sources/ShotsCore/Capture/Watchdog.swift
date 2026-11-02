@@ -3,6 +3,7 @@
 // arrives later is ignored.
 
 import Foundation
+import SamoKit
 
 public final class Watchdog {
     public static let limit: TimeInterval = 8

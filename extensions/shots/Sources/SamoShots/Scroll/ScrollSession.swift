@@ -6,6 +6,7 @@
 import AppKit
 import CoreMedia
 import ScreenCaptureKit
+import SamoKit
 import ShotsCore
 import ShotsUI
 

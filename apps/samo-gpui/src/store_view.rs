@@ -165,6 +165,7 @@ pub fn rows(catalog: Option<&Catalog>, ext: &ExtSnapshot, here: Here) -> Vec<Row
                 screenshots: Vec::new(),
                 changes: e.changes.clone(),
                 windows: e.windows.clone(),
+                watches: e.watches.clone(),
                 permissions: e.permissions.clone(),
                 min_macos: None,
                 limits: e.limits,
@@ -221,10 +222,11 @@ pub fn update_count(catalog: Option<&Catalog>, ext: &ExtSnapshot, here: Here) ->
         .count()
 }
 
-/// What an extension may do beyond its page, in words, shown before install (ADR-004): its windows, its
-/// permissions and its limits.
+/// What an extension may do beyond its page, in words, shown before install (ADR-004, ADR-005): its windows,
+/// what it watches, its permissions and its limits.
 pub fn capability_words(
     windows: Option<&str>,
+    watches: Option<&str>,
     permissions: &[String],
     limits: Option<Limits>,
 ) -> Vec<String> {
@@ -232,10 +234,19 @@ pub fn capability_words(
     if let Some(w) = windows {
         words.push(w.to_string());
     }
+    if let Some(w) = watches {
+        words.push(w.to_string());
+    }
     for p in permissions {
         words.push(match p.as_str() {
             "screen-recording" => {
                 "Asks for Screen Recording, to capture what's on screen".to_string()
+            }
+            "paste-from-other-apps" => {
+                "Asks to read what other apps copy (Paste from Other Apps)".to_string()
+            }
+            "accessibility" => {
+                "Asks for Accessibility, to press ⌘V in the app you're in".to_string()
             }
             other => format!("Asks for {other}"),
         });
@@ -343,6 +354,7 @@ mod tests {
             screenshots: Vec::new(),
             changes: Vec::new(),
             windows: None,
+            watches: None,
             permissions: Vec::new(),
             min_macos: None,
             limits: None,
@@ -367,6 +379,7 @@ mod tests {
             badge_meter: None,
             capturing: false,
             windows: None,
+            watches: None,
             permissions: Vec::new(),
             limits: None,
         }
@@ -455,6 +468,7 @@ mod tests {
     fn capability_words() {
         let words = super::capability_words(
             Some("Opens its own windows: the capture overlay"),
+            None,
             &["screen-recording".to_string()],
             Some(Limits {
                 memory_mb: Some(800),
@@ -470,7 +484,26 @@ mod tests {
                 "Uses up to 60% of a CPU core, averaged over a minute",
             ]
         );
-        assert!(super::capability_words(None, &[], None).is_empty());
+        assert!(super::capability_words(None, None, &[], None).is_empty());
+        // Clips (ADR-005): what it watches, then both of its permissions.
+        let clips = super::capability_words(
+            Some("Opens its own window: the list at ⇧⌘C"),
+            Some("Watches the clipboard: checks for a new copy twice a second"),
+            &[
+                "paste-from-other-apps".to_string(),
+                "accessibility".to_string(),
+            ],
+            None,
+        );
+        assert_eq!(
+            clips,
+            [
+                "Opens its own window: the list at ⇧⌘C",
+                "Watches the clipboard: checks for a new copy twice a second",
+                "Asks to read what other apps copy (Paste from Other Apps)",
+                "Asks for Accessibility, to press ⌘V in the app you're in",
+            ]
+        );
     }
 
     #[test]

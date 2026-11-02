@@ -4,22 +4,22 @@
 //!
 //! Shots' settings are written first with no shortcuts, so the test never takes ⇧⌘1 or ⇧⌘2 from the Mac it runs on.
 
-mod shots_common;
+mod swift_common;
 
 use samo_ext_protocol::Widget;
 use samo_extensions::windows::{SystemWindows, WindowOwners};
 use samo_extensions::{ExtRoot, Host, HostConfig, Status};
 use samo_testkit::store::{FakeStore, listing_for};
-use shots_common::{
-    Fallible, SLOT, build_shots, chosen, has_section, io, page, shots_processes, stage,
-    version_at_least, wait,
-};
 use std::fs;
 use std::io::Write;
 use std::process::Command;
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
+use swift_common::{
+    Fallible, SLOT, build_shots, chosen, has_section, io, page, shots_processes, stage,
+    version_at_least, wait,
+};
 
 /// The pids of the processes running the installed helper.
 fn shots_pids(root: &ExtRoot) -> Vec<u32> {

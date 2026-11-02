@@ -75,6 +75,9 @@ pub struct Listing {
     /// when absent, so a catalog without them reads as it always did.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub windows: Option<String>,
+    /// What it watches while idle (ADR-005).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub watches: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub permissions: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -399,6 +402,9 @@ pub fn manifest_matches(m: &Manifest, l: &Listing) -> Result<(), StoreError> {
     if m.windows != l.windows {
         return Err(StoreError::ManifestMismatch("windows"));
     }
+    if m.watches != l.watches {
+        return Err(StoreError::ManifestMismatch("watches"));
+    }
     if m.permissions != l.permissions {
         return Err(StoreError::ManifestMismatch("permissions"));
     }
@@ -555,6 +561,7 @@ mod tests {
             screenshots: Vec::new(),
             changes: vec![change()],
             windows: None,
+            watches: None,
             permissions: Vec::new(),
             min_macos: None,
             limits: None,
@@ -692,13 +699,14 @@ mod tests {
         let mut manifest = Manifest::parse(
             "id = \"hello\"\nname = \"Hello\"\nversion = \"0.2.0\"\nprotocol = 1\nmin_samo = \"0.2.0\"\n\
              helper = \"bin/samo-ext-hello\"\nsummary = \"Every widget\"\nwindows = \"An overlay\"\n\
-             permissions = [\"screen-recording\"]\nmin_macos = \"14.0\"\n\n[limits]\nmemory_mb = 800\n\n\
+             watches = \"Watches the clipboard\"\npermissions = [\"screen-recording\"]\nmin_macos = \"14.0\"\n\n[limits]\nmemory_mb = 800\n\n\
              [[changes]]\nwhat = \"w\"\nwhere = \"p\"\nundo = \"u\"\n",
         )
         .map_err(|e| e.to_string())?;
         manifest.changes = vec![change()];
         let mut l = listing();
         l.windows = manifest.windows.clone();
+        l.watches = manifest.watches.clone();
         l.permissions = manifest.permissions.clone();
         l.min_macos = manifest.min_macos.clone();
         l.limits = manifest.limits;
@@ -707,12 +715,14 @@ mod tests {
         // A listing that hides what the package declares, or claims what it doesn't, is refused.
         for (field, mut other) in [
             ("windows", l.clone()),
+            ("watches", l.clone()),
             ("permissions", l.clone()),
             ("min_macos", l.clone()),
             ("limits", l.clone()),
         ] {
             match field {
                 "windows" => other.windows = None,
+                "watches" => other.watches = None,
                 "permissions" => other.permissions.clear(),
                 "min_macos" => other.min_macos = Some("13.0".into()),
                 _ => other.limits = None,
@@ -725,7 +735,7 @@ mod tests {
 
         // A listing without them is written as it always was, so 0.2.0's catalogs and readers are unaffected.
         let plain = serde_json::to_string(&listing()).map_err(|e| e.to_string())?;
-        for key in ["windows", "permissions", "min_macos", "limits"] {
+        for key in ["windows", "watches", "permissions", "min_macos", "limits"] {
             assert!(!plain.contains(key), "{key} in {plain}");
         }
         let back: Listing = serde_json::from_str(&plain).map_err(|e| e.to_string())?;
@@ -756,6 +766,7 @@ mod tests {
             changes: vec![change()],
             settings: Vec::new(),
             windows: None,
+            watches: None,
             permissions: Vec::new(),
             min_macos: None,
             limits: None,

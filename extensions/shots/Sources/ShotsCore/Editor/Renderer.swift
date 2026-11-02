@@ -3,6 +3,7 @@
 // what was on screen.
 
 import AppKit
+import SamoKit
 import CoreGraphics
 
 /// Where things land in the export, in its pixels.

@@ -591,7 +591,12 @@ impl SamoWorkspaceApp {
         }
 
         // What it may do beyond its page (ADR-004), before what it changes.
-        let may = capability_words(l.windows.as_deref(), &l.permissions, l.limits);
+        let may = capability_words(
+            l.windows.as_deref(),
+            l.watches.as_deref(),
+            &l.permissions,
+            l.limits,
+        );
         if !may.is_empty() {
             content = content.child(
                 div()

@@ -3,6 +3,7 @@
 // in gets the keyboard back.
 
 import AppKit
+import SamoKit
 import ShotsCore
 import ShotsUI
 

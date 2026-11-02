@@ -3,6 +3,7 @@
 // then Copy text, the drag handle, Pin, Save and Copy, the window's one Ink action.
 
 import AppKit
+import SamoKit
 import ShotsCore
 
 final class ToolbarView: NSView {

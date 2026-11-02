@@ -2,6 +2,7 @@
 // Core Graphics draws, so undo is exact and the export is sharp.
 
 import CoreGraphics
+import SamoKit
 import Foundation
 
 public enum Tool: String, CaseIterable {

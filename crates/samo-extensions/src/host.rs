@@ -408,6 +408,7 @@ impl Host {
                     },
                     capturing: rt.capturing,
                     windows: rt.manifest.windows.clone(),
+                    watches: rt.manifest.watches.clone(),
                     permissions: rt.manifest.permissions.clone(),
                     limits: rt.manifest.limits,
                 })

@@ -2,6 +2,7 @@
 // fails. Only then does it open in the editor, or as a pin.
 
 import AppKit
+import SamoKit
 import CoreGraphics
 import Foundation
 

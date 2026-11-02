@@ -2,6 +2,7 @@
 // "Shots" app; `on`, `off` and `uninstall` have nothing outside Shots' folder to undo.
 
 import AppKit
+import SamoKit
 import ShotsCore
 
 signal(SIGPIPE, SIG_IGN)

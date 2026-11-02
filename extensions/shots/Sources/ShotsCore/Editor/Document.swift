@@ -2,6 +2,7 @@
 // never pixels (R17), and a change is dirty until it is copied or saved (R19).
 
 import CoreGraphics
+import SamoKit
 import Foundation
 
 /// What undo steps through: everything a person changed.

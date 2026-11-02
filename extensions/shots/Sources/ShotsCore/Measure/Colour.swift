@@ -2,6 +2,7 @@
 // sRGB (what CSS and design tools use) from the display's colour space, with rows from the top as the eye reads.
 
 import CoreGraphics
+import SamoKit
 import Foundation
 
 /// One pixel's colour, in sRGB.

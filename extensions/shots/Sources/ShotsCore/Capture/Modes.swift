@@ -3,6 +3,7 @@
 // selection is for. Esc always leaves.
 
 import CoreGraphics
+import SamoKit
 import Foundation
 
 public enum OverlayMode: String, CaseIterable {
