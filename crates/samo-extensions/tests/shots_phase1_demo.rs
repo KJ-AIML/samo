@@ -4,18 +4,18 @@
 //!
 //! Shots' settings are written first with no shortcuts, so the test never takes ⇧⌘1 or ⇧⌘2 from the Mac it runs on.
 
-mod shots_common;
+mod swift_common;
 
 use samo_extensions::{ExtRoot, Host, HostConfig, Status};
 use samo_testkit::store::{FakeStore, listing_for};
-use shots_common::{
-    Fallible, SLOT, build_shots, chosen, has_section, io, shots_processes, stage, version_at_least,
-    wait,
-};
 use std::fs;
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
+use swift_common::{
+    Fallible, SLOT, build_shots, chosen, has_section, io, shots_processes, stage, version_at_least,
+    wait,
+};
 
 #[test]
 fn shots_phase1_demo() -> Fallible<()> {

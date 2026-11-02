@@ -57,4 +57,15 @@
 4. **Pasting presses the V key's code on an ANSI keyboard.** Other layouts may need it looked up; to check by hand.
 
 ## Verification
-- See the Phase 1 demo commit, and KJ's checks (M1–M6, ADR-005 §6).
+- **Local CI:** `scripts/ci-local.sh` passes: 248 Rust tests, 23 Clips, 4 kit and 95 Shots Swift tests, all seven
+  gates.
+- **The Clips demo** (`clips_phase1_demo`): the real `samo-clips` from a test-key store, under Samo 0.4.0's host.
+  - The listing carries both permissions and what it watches.
+  - The page shows both permissions, the pinned item and the kept one (Copy, Pin, Delete), "No shortcut", and
+    "Clips · 2 items".
+  - Delete from Samo removes the item from the page and from `history.json`.
+  - R15 leaves it alone, with two processes; off leaves nothing running, and uninstall deletes `data/`.
+  - Its settings: no shortcut and "Keep what I copy" off, so the run takes nothing from this Mac.
+- **The demos' shared module is now `swift_common`,** for Shots and Clips.
+- **Store:** Clips 0.1.0 packages signed with Talvyn's identity (260 KB), and a test-key catalog verifies.
+- **KJ's checks (M1–M6)** need a Samo 0.4.0 test build, and KJ's hands to allow the two permissions.

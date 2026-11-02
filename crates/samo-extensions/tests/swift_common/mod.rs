@@ -1,5 +1,5 @@
-//! What the Shots demos share: building the real `samo-shots`, staging it as `ext-package` would, and reading
-//! its page as Samo draws it.
+//! What the Swift extensions' demos share: building a real helper (`samo-shots`, `samo-clips`), staging it as
+//! `ext-package` would, and reading its page as Samo draws it.
 
 // Each demo is its own test crate and uses only some of these, so the others count as unused there.
 #![allow(dead_code)]
@@ -22,19 +22,26 @@ pub fn io<E: std::fmt::Display>(e: E) -> String {
 
 pub const SLOT: ExtSlot = ExtSlot(0);
 
-pub fn shots_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../extensions/shots")
+/// An extension's folder in the repo, e.g. `extensions/shots`.
+pub fn ext_dir(id: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../extensions")
+        .join(id)
 }
 
-/// Builds `samo-shots` (debug) and returns where it is.
-pub fn build_shots() -> Fallible<PathBuf> {
-    let dir = shots_dir();
+pub fn shots_dir() -> PathBuf {
+    ext_dir("shots")
+}
+
+/// Builds a Swift extension's helper (debug) and returns where it is.
+pub fn build_helper(id: &str, product: &str) -> Fallible<PathBuf> {
+    let dir = ext_dir(id);
     let ok = Command::new("swift")
         .args(["build", "--package-path"])
         .arg(&dir)
-        .args(["--product", "samo-shots"])
+        .args(["--product", product])
         .status()
-        .map_err(|e| format!("Shots needs Swift ({e})"))?;
+        .map_err(|e| format!("{id} needs Swift ({e})"))?;
     if !ok.success() {
         return Err("swift build failed".into());
     }
@@ -44,21 +51,32 @@ pub fn build_shots() -> Fallible<PathBuf> {
         .arg("--show-bin-path")
         .output()
         .map_err(io)?;
-    Ok(PathBuf::from(String::from_utf8_lossy(&out.stdout).trim()).join("samo-shots"))
+    Ok(PathBuf::from(String::from_utf8_lossy(&out.stdout).trim()).join(product))
 }
 
-/// `<stage>/shots/`: the manifest (changed by `edit`), the helper and the fonts, as `ext-package` lays them out.
-pub fn stage(stage: &Path, binary: &Path, edit: impl Fn(String) -> String) -> Fallible<Manifest> {
-    let ext = stage.join("shots");
+/// Builds `samo-shots` (debug) and returns where it is.
+pub fn build_shots() -> Fallible<PathBuf> {
+    build_helper("shots", "samo-shots")
+}
+
+/// `<stage>/<id>/`: the manifest (changed by `edit`), the helper and the fonts, as `ext-package` lays them out.
+pub fn stage_ext(
+    stage: &Path,
+    id: &str,
+    product: &str,
+    binary: &Path,
+    edit: impl Fn(String) -> String,
+) -> Fallible<Manifest> {
+    let ext = stage.join(id);
     let _ = fs::remove_dir_all(&ext);
     fs::create_dir_all(ext.join("bin")).map_err(io)?;
     fs::create_dir_all(ext.join("share/fonts")).map_err(io)?;
-    let text = edit(fs::read_to_string(shots_dir().join("extension.toml")).map_err(io)?);
+    let text = edit(fs::read_to_string(ext_dir(id).join("extension.toml")).map_err(io)?);
     fs::write(ext.join("extension.toml"), &text).map_err(io)?;
-    let helper = ext.join("bin/samo-shots");
+    let helper = ext.join("bin").join(product);
     fs::write(&helper, fs::read(binary).map_err(io)?).map_err(io)?;
     fs::set_permissions(&helper, fs::Permissions::from_mode(0o755)).map_err(io)?;
-    for font in fs::read_dir(shots_dir().join("share/fonts")).map_err(io)? {
+    for font in fs::read_dir(ext_dir(id).join("share/fonts")).map_err(io)? {
         let font = font.map_err(io)?;
         fs::write(
             ext.join("share/fonts").join(font.file_name()),
@@ -67,6 +85,11 @@ pub fn stage(stage: &Path, binary: &Path, edit: impl Fn(String) -> String) -> Fa
         .map_err(io)?;
     }
     Manifest::parse(&text).map_err(io)
+}
+
+/// Shots, staged.
+pub fn stage(stage: &Path, binary: &Path, edit: impl Fn(String) -> String) -> Fallible<Manifest> {
+    stage_ext(stage, "shots", "samo-shots", binary, edit)
 }
 
 pub fn wait(
@@ -114,7 +137,12 @@ pub fn chosen(snap: &ExtSnapshot, key: &str) -> Option<String> {
 
 /// Processes running the installed helper (the first process and its worker).
 pub fn shots_processes(root: &ExtRoot) -> usize {
-    let path = root.ext_dir("shots").to_string_lossy().into_owned();
+    processes(root, "shots")
+}
+
+/// Processes running an installed extension's helper (its first process and its worker).
+pub fn processes(root: &ExtRoot, id: &str) -> usize {
+    let path = root.ext_dir(id).to_string_lossy().into_owned();
     Command::new("pgrep")
         .args(["-f", &path])
         .output()
