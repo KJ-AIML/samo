@@ -1,0 +1,30 @@
+id = "clips"
+name = "Clips"
+version = "0.1.0"
+protocol = 1
+min_samo = "0.4.0"
+helper = "bin/samo-clips"
+summary = "Clipboard history: ⇧⌘C finds anything you copied and pastes it where you are"
+windows = "Opens its own window: the list at ⇧⌘C"
+watches = "Watches the clipboard: checks for a new copy twice a second, and keeps it on this Mac"
+permissions = ["paste-from-other-apps", "accessibility"]
+min_macos = "14.0"
+
+[limits]
+memory_mb = 300
+cpu_pct = 20
+
+[[changes]]
+what = "Keeps a history of what you copy, leaving out what password managers mark as secret"
+where = "Clips' own folder in Samo"
+undo = "Uninstall deletes the history"
+
+[[changes]]
+what = "Listens for ⇧⌘C while it is on"
+where = "Your keyboard shortcuts"
+undo = "Off or Uninstall lets it go"
+
+[[changes]]
+what = "Asks macOS to let it read what other apps copy, and to press ⌘V for you"
+where = "System Settings → Privacy & Security → Paste from Other Apps and Accessibility (as Clips)"
+undo = "Turn Clips off there; Uninstall doesn't change it"
