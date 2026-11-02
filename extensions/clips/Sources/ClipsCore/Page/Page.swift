@@ -21,6 +21,10 @@ public struct PageState {
     public var refused: Bool
     /// A clipboard app running that may also take ⇧⌘C.
     public var clash: String?
+    /// The shortcut that opens the list, if there is one.
+    public var shortcut: Shortcut?
+    /// The "Keep what I copy" switch.
+    public var watching: Bool
     public var pausedUntil: Date?
     public var ignoreNext: Bool
     /// Clear was asked for once: the page asks to be sure.
@@ -32,8 +36,11 @@ public struct PageState {
     public init(
         paste: PasteAccess, accessibility: Bool, shared: Bool, history: History, refused: Bool = false,
         clash: String? = nil, pausedUntil: Date? = nil, ignoreNext: Bool = false, confirmClear: Bool = false,
-        appName: @escaping (String) -> String? = { _ in nil }, now: Date = Date()
+        appName: @escaping (String) -> String? = { _ in nil }, shortcut: Shortcut? = ClipsShortcut.standard,
+        watching: Bool = true, now: Date = Date()
     ) {
+        self.shortcut = shortcut
+        self.watching = watching
         self.paste = paste
         self.accessibility = accessibility
         self.shared = shared
@@ -118,9 +125,11 @@ public enum ClipsPage {
         }
 
         page.append(.section(title: "SHORTCUT", about: nil))
-        let keys = ClipsShortcut.standard.display
+        let keys = s.shortcut?.display ?? "none"
         let shortcut: RowItem
-        if s.refused {
+        if s.shortcut == nil {
+            shortcut = RowItem(lamp: .off, title: "Open the list", detail: "No shortcut", trailing: keys)
+        } else if s.refused {
             shortcut = RowItem(lamp: .error, title: "Open the list", detail: "macOS refused \(keys)", trailing: keys)
         } else if let clash = s.clash {
             shortcut = RowItem(lamp: .needsYou, title: "Open the list",
@@ -133,11 +142,15 @@ public enum ClipsPage {
                           kind: .plain))
 
         page.append(.section(title: "WHAT CLIPS KEEPS", about: nil))
+        page.append(.toggle(key: "watching", label: "Keep what I copy", on: s.watching,
+                            note: s.watching ? nil : "Off: Clips doesn't look at the clipboard at all"))
         page.append(.choice(key: "limit", label: "Keep", options: [
             ChoiceOption(id: "50", label: "50"), ChoiceOption(id: "200", label: "200"),
             ChoiceOption(id: "500", label: "500"),
         ], selected: "\(s.history.limit)"))
-        if let until = s.pausedUntil, s.now < until {
+        if !s.watching {
+            // Nothing to pause.
+        } else if let until = s.pausedUntil, s.now < until {
             page.append(.note(text: "Paused until \(time(until)): nothing copied is kept.", kind: .plain))
             page.append(.button(action: "resume", label: "Resume now", kind: .plain))
         } else {

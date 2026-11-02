@@ -50,6 +50,11 @@ public final class Watcher {
         lastCount = pasteboard.changeCount
     }
 
+    /// Whatever is on the clipboard now isn't new (watching starts or starts again).
+    public func skipCurrent() {
+        lastCount = pasteboard.changeCount
+    }
+
     /// Clips put this on the clipboard itself (to paste it).
     public func own(_ count: Int) {
         ownCounts.insert(count)

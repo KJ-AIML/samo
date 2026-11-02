@@ -15,6 +15,7 @@ final class ClipsApp {
     private(set) var session: Session?
     private let store: Store
     private(set) var history: History
+    private var settings: ClipsSettings
     private let board = SystemPasteboard()
     private var watcher: Watcher?
     private var timer: Timer?
@@ -38,35 +39,56 @@ final class ClipsApp {
         self.shared = shared
         store = Store(dir: dataDir)
         history = store.load()
+        settings = ClipsSettings.load(dataDir: dataDir)
     }
 
     func start(out: Output) {
         let session = Session(out: out, shared: shared, sharedNote: ClipsPage.sharedNote, handlers: Session.Handlers(
             page: { [unowned self] in self.page() },
+            setting: { [unowned self] key, on in self.setting(key, on) },
             action: { [unowned self] id, row in self.action(id, row: row) },
             choice: { [unowned self] key, value in self.choice(key, value) },
             shutdown: { [unowned self] in self.shutdown() }
         ))
         self.session = session
-        let watcher = Watcher(pasteboard: board, frontmost: { NSWorkspace.shared.frontmostApplication?.bundleIdentifier })
-        self.watcher = watcher
-        // Twice a second, one counter read (R21); a little tolerance lets macOS group the wake-ups.
-        let timer = Timer(timeInterval: Watcher.interval, repeats: true) { [weak self] _ in self?.tick() }
-        timer.tolerance = 0.1
-        RunLoop.main.add(timer, forMode: .common)
-        self.timer = timer
+        watcher = Watcher(pasteboard: board, frontmost: { NSWorkspace.shared.frontmostApplication?.bundleIdentifier })
+        if settings.watching { startWatching() }
         registerShortcut()
         session.start()
         session.out.send(ClipsPage.badge(history))
     }
 
     private func registerShortcut() {
-        refused = !HotKeys.shared.register(id: ClipsApp.shortcutId, ClipsShortcut.standard) { [weak self] in
+        guard let shortcut = settings.shortcut else { return }
+        refused = !HotKeys.shared.register(id: ClipsApp.shortcutId, shortcut) { [weak self] in
             self?.toggleList()
         }
     }
 
     // MARK: Watching
+
+    /// Twice a second, one counter read (R21); a little tolerance lets macOS group the wake-ups. A copy made while
+    /// Clips wasn't watching isn't picked up when it starts.
+    private func startWatching() {
+        guard timer == nil else { return }
+        watcher?.skipCurrent()
+        let timer = Timer(timeInterval: Watcher.interval, repeats: true) { [weak self] _ in self?.tick() }
+        timer.tolerance = 0.1
+        RunLoop.main.add(timer, forMode: .common)
+        self.timer = timer
+    }
+
+    private func stopWatching() {
+        timer?.invalidate()
+        timer = nil
+    }
+
+    private func setting(_ key: String, _ on: Bool) {
+        guard key == "watching" else { return }
+        settings.watching = on
+        try? settings.save(dataDir: dataDir)
+        if on { startWatching() } else { stopWatching() }
+    }
 
     private func tick() {
         guard let capture = watcher?.tick() else { return }
@@ -94,7 +116,7 @@ final class ClipsApp {
             paste: ClipsApp.pasteAccess(), accessibility: AXIsProcessTrusted(), shared: shared, history: history,
             refused: refused, clash: ClipsPage.runningClipboardApp(bundleIds: running),
             pausedUntil: watcher?.pausedUntil, ignoreNext: watcher?.ignoreNext ?? false, confirmClear: confirmClear,
-            appName: ClipsApp.appName
+            appName: ClipsApp.appName, shortcut: settings.shortcut, watching: settings.watching
         ))
     }
 

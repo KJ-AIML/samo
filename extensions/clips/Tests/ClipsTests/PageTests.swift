@@ -115,3 +115,30 @@ final class ClipsPageTests: XCTestCase {
         XCTAssertEqual(rows(refused, after: "SHORTCUT").first?.lamp, .error)
     }
 }
+
+final class ClipsSettingsTests: XCTestCase {
+    func testShortcutDefaultsAndCanBeNone() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("clips-\(UUID().uuidString)")
+        addTeardownBlock { try? FileManager.default.removeItem(at: dir) }
+        XCTAssertEqual(ClipsSettings.load(dataDir: dir).shortcut, ClipsShortcut.standard)
+        XCTAssertEqual(ClipsShortcut.standard.display, "⇧⌘C")
+        var none = ClipsSettings()
+        none.shortcut = nil
+        try none.save(dataDir: dir)
+        XCTAssertNil(ClipsSettings.load(dataDir: dir).shortcut, "empty stays empty")
+        XCTAssertTrue(ClipsSettings.load(dataDir: dir).watching)
+        // "Keep what I copy" off is kept, and the page says what it means.
+        none.watching = false
+        try none.save(dataDir: dir)
+        XCTAssertFalse(ClipsSettings.load(dataDir: dir).watching)
+        let off = ClipsPage.build(PageState(paste: .allowed, accessibility: true, shared: false, history: History(),
+                                            watching: false))
+        XCTAssertTrue(off.contains(.toggle(key: "watching", label: "Keep what I copy", on: false,
+                                           note: "Off: Clips doesn't look at the clipboard at all")))
+        XCTAssertFalse(off.contains(.button(action: "pause", label: "Pause for 15 minutes", kind: .plain)))
+        let page = ClipsPage.build(PageState(paste: .allowed, accessibility: true, shared: false, history: History(),
+                                             shortcut: nil))
+        XCTAssertTrue(page.contains(.rows([RowItem(lamp: .off, title: "Open the list", detail: "No shortcut",
+                                                   trailing: "none")])))
+    }
+}
