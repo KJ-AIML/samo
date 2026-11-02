@@ -257,8 +257,18 @@ esac
         }
         thread::sleep(Duration::from_millis(20));
     }
-    let history = fs::read_to_string(f.root.history_file()).map_err(|e| e.to_string())?;
-    assert!(history.contains("\"event\":\"off\""), "{history}");
+    // The history line can land a moment after the registry: wait for it too.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let history = fs::read_to_string(f.root.history_file()).unwrap_or_default();
+        if history.contains("\"event\":\"off\"") {
+            break;
+        }
+        if Instant::now() > deadline {
+            return Err(format!("no off in the history: {history}"));
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
 
     host.set_on(SLOT, true);
     wait_for(&host, 10, |s| {
