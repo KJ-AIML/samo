@@ -55,9 +55,19 @@
 - **Phase 1:** `~` in the folder came from the account, not `$HOME`, so test runs saved into the real
   `~/Pictures/Shots`. Fixed: `Settings.home`, `expand`, `abbreviate`.
 - **Phase 1:** the clipboard and the file each encoded the PNG; now once.
-- **Not fixed, for KJ:** Shots is signed ad hoc, so macOS knows it by its binary hash (`designated => cdhash …`). Every
-  new build, and so every store update, is a new app to Screen Recording and asks again. A stable signing identity in
-  `ext-package` (a gate file) would fix it.
+- **Signing, fixed after KJ's sign-off:**
+  - The problem: Shots was signed ad hoc, so macOS knew it by its binary hash (`designated => cdhash …`). Every new
+    build, and so every store update, was a new app to Screen Recording and asked again.
+  - KJ approved the fix in `xtask`, a gate file: `ext-package` now signs a helper that asks for a permission with
+    the self-signed "Talvyn Samo Extensions" identity, and refuses the package otherwise. The helper's requirement
+    becomes `identifier "dev.talvyn.samo.shots" and certificate leaf = H"…"`.
+  - KJ makes the identity once with `ext-codesign-setup`.
+  - Checked in a throwaway keychain:
+    - two different builds share one requirement;
+    - the later build satisfies the earlier one's, which is macOS's check against a stored grant;
+    - a packaged Shots verifies and runs.
+  - `two_builds_share_one_requirement` repeats this in the tests gate. The first signed Shots needs Screen
+    Recording allowed once more; updates after it keep it.
 
 ## Verification
 - **Local CI:** `scripts/ci-local.sh` passes: fmt, clippy, all seven gates, 241 Rust tests and 66 Swift tests.

@@ -1,3 +1,4 @@
+mod codesign;
 mod commands_complete;
 mod layers;
 mod network;
@@ -49,6 +50,7 @@ fn run() -> Result<(), String> {
     match subcmd {
         "verify" => verify(&root),
         "ext-keygen" => store::keygen(),
+        "ext-codesign-setup" => codesign::setup(),
         "ext-package" => {
             let dir = args
                 .get(1)
@@ -57,7 +59,7 @@ fn run() -> Result<(), String> {
         }
         "ext-publish" => store::publish(&publish_args(&root, &args[1..])?),
         other => Err(format!(
-            "unknown xtask command `{other}`; expected `verify`, `ext-keygen`, `ext-package` or `ext-publish`"
+            "unknown xtask command `{other}`; expected `verify`, `ext-keygen`, `ext-codesign-setup`, `ext-package` or `ext-publish`"
         )),
     }
 }

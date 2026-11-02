@@ -1,4 +1,5 @@
-//! The store's tooling (ADR-003 M4): `ext-keygen`, `ext-package` and `ext-publish`.
+//! The store's tooling (ADR-003 M4): `ext-keygen`, `ext-package` and `ext-publish`. `ext-package` signs a helper that
+//! asks macOS for a permission with Talvyn's identity (`codesign.rs`).
 //!
 //! The private key lives in KJ's login Keychain and never on a command line. `ext-publish` takes every field the
 //! package itself declares (id, name, version, protocol, min_samo, summary, changes) from the package's manifest,
@@ -115,6 +116,8 @@ pub fn package(root: &Path, dir: &Path) -> Result<PathBuf, String> {
     if !status.success() {
         return Err("couldn't make the helper executable".into());
     }
+    // A helper that asks macOS for a permission keeps one identity across updates (ADR-004).
+    crate::codesign::sign_if_needed(&manifest, &helper_dest)?;
     let out = root.join("target/ext-dist").join(format!(
         "{}-{}-macos-arm64.tar.gz",
         manifest.id, manifest.version
