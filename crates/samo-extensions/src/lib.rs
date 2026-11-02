@@ -10,6 +10,7 @@ mod host;
 mod install;
 mod limits;
 mod manage;
+mod meter;
 pub mod net;
 mod paths;
 mod registry;

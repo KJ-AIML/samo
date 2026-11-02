@@ -4,6 +4,7 @@
 use crate::History;
 use crate::host::{HostConfig, Inner};
 use crate::limits::{HelperLog, Line, MAX_LINE, read_line_capped};
+use crate::meter::Meter;
 use crate::state::{ExtSlot, PendingPopup, Status};
 use crate::tree::{self, Member};
 use samo_domain::extensions::{Backoff, RateGate, Restart};
@@ -20,7 +21,7 @@ use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
+use sysinfo::System;
 
 /// R8: a page holds at most this many rows.
 pub const MAX_ROWS: usize = 200;
@@ -335,6 +336,7 @@ fn run_once(
         unhealthy: None,
     };
     let mut sys = System::new();
+    let mut meter = Meter::start(pid);
     let mut cpu: Vec<f32> = Vec::new();
     let mut next_check = Instant::now() + config.resource_every;
     *family = tree::tree(&mut sys, pid);
@@ -466,14 +468,7 @@ fn run_once(
         }
         if Instant::now() >= next_check {
             next_check = Instant::now() + config.resource_every;
-            let target = Pid::from_u32(pid);
-            sys.refresh_processes_specifics(
-                ProcessesToUpdate::Some(&[target]),
-                true,
-                ProcessRefreshKind::nothing().with_cpu().with_memory(),
-            );
-            if let Some(process) = sys.process(target) {
-                let rss = process.memory();
+            if let Some((rss, used)) = meter.check() {
                 if rss > job.rss_limit {
                     tree::refresh(&mut sys, pid, family);
                     stop_child(&mut child, to_helper, Duration::ZERO);
@@ -483,7 +478,7 @@ fn run_once(
                         job.rss_limit / (1024 * 1024)
                     ));
                 }
-                cpu.push(process.cpu_usage());
+                cpu.push(used);
                 if cpu.len() > config.cpu_samples {
                     cpu.remove(0);
                 }

@@ -56,6 +56,10 @@ fn fixture(extra: &str, tables: &str, script: &str) -> Fallible<Fixture> {
 }
 
 fn start(f: &Fixture, windows: fn(&[u32]) -> Option<usize>) -> Host {
+    Host::start(f.root.clone(), config(f, windows), Arc::new(|| {}))
+}
+
+fn config(f: &Fixture, windows: fn(&[u32]) -> Option<usize>) -> HostConfig {
     let mut c = HostConfig::new("0.3.0");
     c.dev_dir = Some(f.dev.to_string_lossy().into_owned());
     c.hello_timeout = Duration::from_secs(2);
@@ -71,7 +75,7 @@ fn start(f: &Fixture, windows: fn(&[u32]) -> Option<usize>) -> Host {
     c.window_every = Duration::from_millis(50);
     c.windows = WindowCheck(Arc::new(Fake(windows)));
     c.macos = Some("15.0".into());
-    Host::start(f.root.clone(), c, Arc::new(|| {}))
+    c
 }
 
 fn status(snap: &ExtSnapshot) -> Option<Status> {
@@ -218,6 +222,27 @@ fn declared_limits_enforced() -> Fallible<()> {
     let snap = wait_for(&host, "the memory limit", |s| stopped_because(s).is_some())?;
     let why = stopped_because(&snap).unwrap_or_default();
     assert!(why.contains("the limit is 1 MB"), "{why}");
+    host.shutdown_all();
+    Ok(())
+}
+
+/// About 20% of one core: busy for 20 ms, then asleep for 80 ms.
+const LIGHT: &str = r#"exec /usr/bin/perl -e 'use Time::HiRes qw(time sleep); while (1) { my $t = time; 1 while time - $t < 0.02; sleep 0.08 }'"#;
+
+#[test]
+fn cpu_is_measured_truly_beside_tree_checks() -> Fallible<()> {
+    // R8/R17: the tree check (here every pass) once shared sysinfo's `System` with the CPU check, which then saw
+    // several times the real use and stopped helpers well under their limit (devlog 0012).
+    let f = fixture("", "[limits]\ncpu_pct = 50", &format!("{HELLO}\n{LIGHT}"))?;
+    let mut c = config(&f, |_| Some(0));
+    c.resource_every = Duration::from_secs(1);
+    c.cpu_samples = 3;
+    c.window_every = Duration::from_millis(20);
+    let host = Host::start(f.root.clone(), c, Arc::new(|| {}));
+    wait_for(&host, "it to run", |s| status(s) == Some(Status::Running))?;
+    // Five checks: a full average of three, twice over.
+    thread::sleep(Duration::from_millis(5_500));
+    assert_eq!(status(&host.snapshot()), Some(Status::Running));
     host.shutdown_all();
     Ok(())
 }
