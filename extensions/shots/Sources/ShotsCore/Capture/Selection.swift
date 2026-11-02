@@ -50,6 +50,15 @@ public enum Selection {
         }
     }
 
+    /// The image pixel under point `p` (a display's points, origin bottom-left) in an image of `size` pixels, rows
+    /// from the top. Clamped to the image.
+    public static func pixel(at p: CGPoint, viewHeight: CGFloat, scale: CGFloat, size: (width: Int, height: Int))
+        -> (x: Int, y: Int) {
+        let x = Int((p.x * scale).rounded(.down))
+        let y = Int(((viewHeight - p.y) * scale).rounded(.down))
+        return (min(max(x, 0), size.width - 1), min(max(y, 0), size.height - 1))
+    }
+
     /// `r` moved by `delta`, kept whole inside `bounds` (Space held while dragging moves the selection).
     public static func moved(_ r: CGRect, by delta: CGVector, within bounds: CGRect) -> CGRect {
         var x = r.minX + delta.dx
