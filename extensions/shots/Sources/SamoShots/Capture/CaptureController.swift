@@ -1,6 +1,7 @@
 // One capture, start to finish (ADR-004 S1, S4, R19): check Screen Recording, freeze every display, let the person
 // choose, then copy and save before any window opens, open the editor or a pin, and say what happened. Reading
-// text, picking a colour and measuring use the same frozen screen and save nothing.
+// text, picking a colour and measuring use the same frozen screen and save nothing. Scrolling capture chooses its
+// area on the frozen screen, then watches it live while you scroll.
 
 import AppKit
 import ScreenCaptureKit
@@ -15,6 +16,7 @@ final class CaptureController {
         case text
         case colour
         case ruler
+        case scroll
     }
 
     private let permission: Permission
@@ -27,6 +29,7 @@ final class CaptureController {
     private let disk = FileDisk()
 
     private var overlay: OverlaySession?
+    private var scrolling: ScrollSession?
     private var busy = false
     private let watchdog = Watchdog()
     private var fromPage = false
@@ -86,14 +89,16 @@ final class CaptureController {
                 }
                 self.done(Shot(image: f.image, scale: f.scale, takenAt: started, origin: f.screen.frame.origin),
                           since: Date())
-            case .area, .window, .text, .colour, .ruler:
-                let start: OverlayMode = [Mode.window: .window, .text: .text, .colour: .colour, .ruler: .ruler][mode]
-                    ?? .area
+            case .area, .window, .text, .colour, .ruler, .scroll:
+                let start: OverlayMode = [Mode.window: .window, .text: .text, .colour: .colour, .ruler: .ruler,
+                                          .scroll: .scroll][mode] ?? .area
                 let session = OverlaySession(
                     startIn: start,
                     onArea: { [weak self] frozen, rect, view, overlayMode in
                         if overlayMode == .text {
                             self?.read(frozen, rect, view: view)
+                        } else if overlayMode == .scroll {
+                            self?.scroll(frozen, rect, takenAt: started)
                         } else {
                             self?.area(frozen, rect, view: view, takenAt: started)
                         }
@@ -163,6 +168,42 @@ final class CaptureController {
             }
             self.end(note: outcome.note, problem: outcome.problem)
         }
+    }
+
+    /// S: the area chosen, watch it live while the person scrolls; the stitched picture is then a shot like any
+    /// other (copied, saved, opened).
+    private func scroll(_ frozen: Frozen, _ rect: CGRect, takenAt: Date) {
+        overlay?.close()
+        let area = rect.offsetBy(dx: frozen.screen.frame.minX, dy: frozen.screen.frame.minY)
+        let session = ScrollSession(screen: frozen.screen, area: area, scale: frozen.scale) { [weak self] image, reason in
+            guard let self else { return }
+            self.scrolling = nil
+            guard let image else {
+                self.end(note: "Nothing was captured", problem: true)
+                return
+            }
+            self.done(Shot(image: image, scale: frozen.scale, takenAt: takenAt, origin: area.origin), since: Date())
+            if let note = reason.note { Note.show(note, problem: false) }
+        }
+        scrolling = session
+        let token = waitForScreen()
+        Task { @MainActor [weak self] in
+            let started = await session.start()
+            guard let self, self.watchdog.answered(token) else {
+                session.cancel()
+                return
+            }
+            if !started {
+                self.scrolling = nil
+                self.end(note: "Shots couldn't watch that area. Is Screen Recording allowed for Shots?", problem: true)
+            }
+        }
+    }
+
+    /// Off or quitting while scrolling: it stops, and nothing half-made is kept (it isn't a shot until it ends).
+    func stop() {
+        scrolling?.cancel()
+        scrolling = nil
     }
 
     /// C: the colour under the click, as hex (or `rgb()` with ⇧).

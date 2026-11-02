@@ -2,8 +2,8 @@
 //
 // Keys, as macOS's own ⇧⌘4 has them: drag to select (⇧ keeps a square; Space held while dragging moves it; arrows
 // nudge its corner by a point, ⇧ by ten); release, or Return, captures. Before dragging: Space switches to windows,
-// T to copying text, C to picking a colour, R to the ruler (pressed again, back to capturing). Esc cancels. S is
-// for a later version.
+// T to copying text, C to picking a colour, R to the ruler, S to choosing an area to scroll (pressed again, back to
+// capturing). Esc cancels.
 //
 // Picking a colour and measuring show the screen undimmed, since they need its true colours.
 
@@ -274,7 +274,7 @@ final class OverlayView: NSView {
     override func mouseDown(with event: NSEvent) {
         let p = local(event)
         switch mode {
-        case .area, .text, .ruler:
+        case .area, .text, .ruler, .scroll:
             anchor = p
             current = p
             lastDrag = p

@@ -77,8 +77,6 @@ final class OverlaySession {
             if modes.mode == .window {
                 loadWindows()
             }
-        case .later:
-            note("Scrolling capture comes in a later version of Shots")
         case .nothing:
             break
         }

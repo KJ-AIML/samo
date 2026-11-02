@@ -173,6 +173,7 @@ final class ShotsApp {
     func shutdown() {
         guard !stopped else { return }
         stopped = true
+        capture?.stop()
         let saved = store.saveUnsaved(settings: settings, disk: FileDisk())
         if !saved.isEmpty {
             for url in saved {

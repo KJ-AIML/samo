@@ -37,10 +37,25 @@ final class ModesTests: XCTestCase {
         XCTAssertEqual(modes.mode, .window)
         XCTAssertEqual(modes.key(" ", dragging: false), .switched)
         XCTAssertEqual(modes.mode, .area)
-        // S is for a later version; other keys do nothing.
-        XCTAssertEqual(modes.key("s", dragging: false), .later)
+        // S scrolls; pressed again, back to capturing. Other keys do nothing.
+        XCTAssertEqual(modes.key("s", dragging: false), .switched)
+        XCTAssertEqual(modes.mode, .scroll)
+        XCTAssertEqual(modes.key("s", dragging: true), .nothing, "not mid-drag")
+        XCTAssertEqual(modes.key("s", dragging: false), .switched)
+        XCTAssertEqual(modes.mode, .area)
         XCTAssertEqual(modes.key("q", dragging: false), .nothing)
         XCTAssertEqual(modes.mode, .area)
+    }
+
+    func testScrollModeKey() {
+        XCTAssertTrue(OverlayMode.area.hint.contains("S scroll"))
+        XCTAssertTrue(OverlayMode.scroll.hint.contains("scroll it yourself"))
+        XCTAssertTrue(OverlayMode.scroll.drags)
+        XCTAssertTrue(OverlayMode.scroll.dims)
+        // How a scroll ended says what happened only when it wasn't the person ending it.
+        XCTAssertNil(ScrollEnd.done.note)
+        XCTAssertTrue(ScrollEnd.lost.note?.contains("jumped") == true)
+        XCTAssertTrue(ScrollEnd.full.note?.contains("30,000") == true)
     }
 
     func testHintNamesTheMode() {
