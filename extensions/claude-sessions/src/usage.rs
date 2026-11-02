@@ -49,13 +49,13 @@ pub enum Line {
 }
 
 pub fn parse_line(text: &str) -> Line {
-    let mentions_usage = text.contains("\"usage\"");
+    // Most of a transcript is prompts and tool output, without usage: such a line has no `"usage"` key, so it
+    // isn't parsed at all. The answer is the same as parsing it.
+    if !text.contains("\"usage\"") {
+        return Line::Other;
+    }
     let Ok(v) = serde_json::from_str::<Value>(text) else {
-        return if mentions_usage {
-            Line::Bad
-        } else {
-            Line::Other
-        };
+        return Line::Bad;
     };
     let Some(usage) = v.pointer("/message/usage") else {
         return Line::Other;
