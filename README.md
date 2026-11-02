@@ -168,7 +168,9 @@ Closing with changes not copied or saved asks first. Pin a shot to keep it above
 edit it. In the overlay, before dragging, T copies the text in an area (Thai, English and every language macOS reads,
 on your Mac), C copies the colour under the pointer as hex (⇧-click for `rgb()`), and R measures the gaps around the
 pointer, or a box you drag, in pixels and points. A QR code shows on a small card with Copy, and Open for web links. In
-the editor, M measures, Tab copies the colour under the pointer, and ⇧⌘C copies the shot's text. Shots asks macOS for Screen Recording as its own app, so no other extension gains it, and nothing it captures
+the editor, M measures, Tab copies the colour under the pointer, and ⇧⌘C copies the shot's text. S in the overlay
+captures something longer than the screen: choose the area, then scroll it yourself; Shots stitches it into one tall
+shot as you go, with a preview at the side, up to 30,000 px. Esc or a click outside the area finishes it. Shots asks macOS for Screen Recording as its own app, so no other extension gains it, and nothing it captures
 leaves your Mac. It opens its own windows, which the store says before you install it; an extension that opens windows
 without saying so is stopped.
 

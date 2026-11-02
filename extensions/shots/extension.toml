@@ -1,11 +1,11 @@
 id = "shots"
 name = "Shots"
-version = "0.3.0"
+version = "0.4.0"
 protocol = 1
 min_samo = "0.3.0"
 helper = "bin/samo-shots"
-summary = "Screenshots: capture, mark up, copy text (Thai too), pick colours and measure"
-windows = "Opens its own windows: the capture overlay, the editor, pinned shots, a card for what it reads, and its settings"
+summary = "Screenshots: capture (scrolling too), mark up, copy text (Thai too), pick colours and measure"
+windows = "Opens its own windows: the capture overlay, the editor, pinned shots, a card for what it reads, a frame and preview while you scroll, and its settings"
 permissions = ["screen-recording"]
 min_macos = "14.0"
 
