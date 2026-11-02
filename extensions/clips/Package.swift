@@ -17,9 +17,10 @@ let package = Package(
     ],
     targets: [
         .target(name: "ClipsCore", dependencies: [kit], path: "Sources/ClipsCore"),
+        .target(name: "ClipsUI", dependencies: ["ClipsCore", kit], path: "Sources/ClipsUI"),
         .executableTarget(
             name: "SamoClips",
-            dependencies: ["ClipsCore", kit],
+            dependencies: ["ClipsCore", "ClipsUI", kit],
             path: "Sources/SamoClips",
             exclude: ["Info.plist"],
             // Its own Info.plist, so macOS treats the worker as its own app, "Clips", for its permissions.
@@ -30,7 +31,7 @@ let package = Package(
                 ]),
             ]
         ),
-        .testTarget(name: "ClipsTests", dependencies: ["ClipsCore", kit], path: "Tests/ClipsTests"),
+        .testTarget(name: "ClipsTests", dependencies: ["ClipsCore", "ClipsUI", kit], path: "Tests/ClipsTests"),
     ],
     swiftLanguageVersions: [.v5]
 )
