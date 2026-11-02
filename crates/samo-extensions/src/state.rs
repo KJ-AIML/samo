@@ -13,7 +13,8 @@ pub enum Status {
     Running,
     /// Turned off by the user.
     Off,
-    /// It stopped and won't restart by itself; the reason says why, and Restart tries again.
+    /// It stopped. The reason says why, and when Samo starts it again if it will (after going over a limit);
+    /// Restart starts it now.
     Stopped(String),
     /// It can't run here (a dev build without `SAMO_EXT_DEV_DIR`, or it needs a newer Samo).
     Blocked(String),

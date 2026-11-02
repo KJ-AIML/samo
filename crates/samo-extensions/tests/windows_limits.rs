@@ -248,6 +248,58 @@ fn cpu_is_measured_truly_beside_tree_checks() -> Fallible<()> {
 }
 
 #[test]
+fn over_its_limit_it_rests_and_starts_again_then_stays_stopped() -> Fallible<()> {
+    // R8: going over a limit stops the helper, which starts again after a rest; the third time it stays stopped.
+    let script =
+        format!("echo $$ > \"$SAMO_EXT_DATA_DIR/pid\"\n{HELLO}\nexec /usr/bin/perl -e '1 while 1'");
+    let f = fixture("", "", &script)?;
+    let mut c = config(&f, |_| Some(0));
+    c.resource_every = Duration::from_millis(300);
+    c.cpu_samples = 2;
+    c.limit_backoff = BackoffConfig {
+        first_ms: 600,
+        max_ms: 600,
+        max_crashes: 3,
+        window_ms: 60_000,
+    };
+    let host = Host::start(f.root.clone(), c, Arc::new(|| {}));
+    let pid_file = f.root.data_dir("test").join("pid");
+
+    for _ in 0..2 {
+        let snap = wait_for(&host, "the CPU limit", |s| stopped_because(s).is_some())?;
+        let why = stopped_because(&snap).unwrap_or_default();
+        assert!(
+            why.starts_with("It used ")
+                && why.contains("(the limit is 10%). Samo starts it again at "),
+            "{why}"
+        );
+        let pid = fs::read_to_string(&pid_file).map_err(|e| e.to_string())?;
+        assert!(!alive(&pid), "it rests stopped");
+        fs::remove_file(&pid_file).map_err(|e| e.to_string())?;
+        wait_for(&host, "it to start again", |s| {
+            status(s) == Some(Status::Running)
+        })?;
+    }
+
+    let snap = wait_for(&host, "it to stay stopped", |s| {
+        stopped_because(s).is_some_and(|why| why.starts_with("It went over"))
+    })?;
+    let why = stopped_because(&snap).unwrap_or_default();
+    assert!(
+        why.starts_with("It went over its limits 3 times in 1 minutes. Last time it used "),
+        "{why}"
+    );
+    thread::sleep(Duration::from_millis(1_000));
+    assert_eq!(
+        stopped_because(&host.snapshot()),
+        Some(why),
+        "no more restarts"
+    );
+    host.shutdown_all();
+    Ok(())
+}
+
+#[test]
 fn needs_newer_macos_is_blocked() -> Fallible<()> {
     let f = fixture(
         "min_macos = \"99.0\"",

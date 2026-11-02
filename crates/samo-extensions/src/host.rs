@@ -27,6 +27,9 @@ pub struct HostConfig {
     /// `SAMO_EXT_DEV_DIR`: install unsigned extensions from this folder, and let them run.
     pub dev_dir: Option<String>,
     pub backoff: BackoffConfig,
+    /// After going over its CPU or memory limit, a helper rests this long and starts again; this many times
+    /// within the window and it stays stopped (R8).
+    pub limit_backoff: BackoffConfig,
     /// A helper must say `hello` within this.
     pub hello_timeout: Duration,
     /// After `shutdown`, how long a helper has before it is killed.
@@ -57,6 +60,7 @@ impl HostConfig {
             samo_version: samo_version.into(),
             dev_dir: env::var("SAMO_EXT_DEV_DIR").ok().filter(|d| !d.is_empty()),
             backoff: BackoffConfig::default(),
+            limit_backoff: BackoffConfig::limits(),
             hello_timeout: Duration::from_secs(5),
             grace: Duration::from_secs(2),
             one_shot_timeout: Duration::from_secs(10),

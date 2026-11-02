@@ -58,6 +58,8 @@ enum Outcome {
     Stopped,
     /// It can't go on; restarting won't help.
     Halt(String),
+    /// It went over its CPU or memory limit: what it "used", to follow "It". It may start again after a rest.
+    OverLimit(String),
     /// It ended by itself; it may be restarted.
     Crashed(String),
 }
@@ -151,7 +153,9 @@ pub(crate) fn one_shot(
 pub(crate) fn run(job: Job, rx: Receiver<Event>) {
     let _ = std::fs::create_dir_all(&job.data_dir);
     let log = HelperLog::new(&job.data_dir);
-    let mut backoff = Backoff::new(job.inner.config.backoff);
+    let config = &job.inner.config;
+    let mut backoff = Backoff::new(config.backoff);
+    let mut rests = Backoff::new(config.limit_backoff);
     let mut generation = 0u64;
     loop {
         generation += 1;
@@ -172,14 +176,48 @@ pub(crate) fn run(job: Job, rx: Receiver<Event>) {
                 });
                 return;
             }
+            Outcome::OverLimit(used) => {
+                log.note(&format!("stopped: it {used}"));
+                match rests.on_crash(now_ms()) {
+                    Restart::Stop => {
+                        let reason = format!(
+                            "It went over its limits {} times in {} minutes. Last time it {used}",
+                            config.limit_backoff.max_crashes,
+                            config.limit_backoff.window_ms / 60_000
+                        );
+                        job.inner.update(job.slot, |rt| {
+                            rt.status = Status::Stopped(reason);
+                            rt.badge = 0;
+                            rt.control = None;
+                        });
+                        return;
+                    }
+                    // R8: a spike shouldn't need a click. It rests, stopped, and starts again by itself.
+                    Restart::After(ms) => {
+                        let again = chrono::Local::now()
+                            + chrono::Duration::milliseconds(i64::try_from(ms).unwrap_or(i64::MAX));
+                        let reason = format!(
+                            "It {used}. Samo starts it again at {}",
+                            again.format("%H:%M")
+                        );
+                        job.inner.update(job.slot, |rt| {
+                            rt.status = Status::Stopped(reason);
+                            rt.badge = 0;
+                        });
+                        if !rest(&rx, ms) {
+                            return;
+                        }
+                    }
+                }
+            }
             Outcome::Crashed(why) => {
                 log.note(&format!("crashed: {why}"));
                 match backoff.on_crash(now_ms()) {
                     Restart::Stop => {
                         let reason = format!(
                             "It crashed {} times in {} minutes. Last time: {why}",
-                            job.inner.config.backoff.max_crashes,
-                            job.inner.config.backoff.window_ms / 60_000
+                            config.backoff.max_crashes,
+                            config.backoff.window_ms / 60_000
                         );
                         job.inner.update(job.slot, |rt| {
                             rt.status = Status::Stopped(reason);
@@ -193,22 +231,29 @@ pub(crate) fn run(job: Job, rx: Receiver<Event>) {
                             rt.status = Status::Starting;
                             rt.badge = 0;
                         });
-                        let deadline = Instant::now() + Duration::from_millis(ms);
-                        loop {
-                            let left = deadline.saturating_duration_since(Instant::now());
-                            if left.is_zero() {
-                                break;
-                            }
-                            match rx.recv_timeout(left) {
-                                Ok(Event::Stop) | Err(RecvTimeoutError::Disconnected) => return,
-                                // Lines from the run that crashed, or messages while it is down.
-                                Ok(_) => {}
-                                Err(RecvTimeoutError::Timeout) => break,
-                            }
+                        if !rest(&rx, ms) {
+                            return;
                         }
                     }
                 }
             }
+        }
+    }
+}
+
+/// Waits `ms` before the helper starts again; `false` if it was told to stop meanwhile.
+fn rest(rx: &Receiver<Event>, ms: u64) -> bool {
+    let deadline = Instant::now() + Duration::from_millis(ms);
+    loop {
+        let left = deadline.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            return true;
+        }
+        match rx.recv_timeout(left) {
+            Ok(Event::Stop) | Err(RecvTimeoutError::Disconnected) => return false,
+            // Lines from the run that ended, or messages while it is down.
+            Ok(_) => {}
+            Err(RecvTimeoutError::Timeout) => return true,
         }
     }
 }
@@ -472,8 +517,8 @@ fn run_once(
                 if rss > job.rss_limit {
                     tree::refresh(&mut sys, pid, family);
                     stop_child(&mut child, to_helper, Duration::ZERO);
-                    return Outcome::Halt(format!(
-                        "It used {} MB of memory (the limit is {} MB)",
+                    return Outcome::OverLimit(format!(
+                        "used {} MB of memory (the limit is {} MB)",
                         rss / (1024 * 1024),
                         job.rss_limit / (1024 * 1024)
                     ));
@@ -487,8 +532,8 @@ fn run_once(
                 if cpu.len() >= config.cpu_samples && average > job.cpu_limit {
                     tree::refresh(&mut sys, pid, family);
                     stop_child(&mut child, to_helper, Duration::ZERO);
-                    return Outcome::Halt(format!(
-                        "It used {average:.0}% of a CPU core for a minute (the limit is {:.0}%)",
+                    return Outcome::OverLimit(format!(
+                        "used {average:.0}% of a CPU core for a minute (the limit is {:.0}%)",
                         job.cpu_limit
                     ));
                 }
