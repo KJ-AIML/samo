@@ -1,6 +1,7 @@
-// The list at ⇧⌘C (ADR-005 C2): the history at the pointer, on the readout's glass (DESIGN.md rule 10), with the
-// search field taking the keyboard. Type to search; ↑↓ move; Return or ⌘1–⌘9 paste; ⌥Return pastes without
-// formatting; ⌥P pins; ⌥⌫ deletes; Esc, or a click anywhere else, closes it. Pins come first.
+// The list at Clips' shortcut, ⇧⌘C unless you change it (ADR-005 C2): the history at the pointer, on the readout's
+// glass (DESIGN.md rule 10), with the search field taking the keyboard. Type to search; ↑↓ move; Return or ⌘1–⌘9
+// paste; ⌥Return pastes without formatting; ⌥P pins; ⌥⌫ deletes; Esc, or a click anywhere else, closes it. Pins
+// come first.
 
 import AppKit
 import ClipsCore

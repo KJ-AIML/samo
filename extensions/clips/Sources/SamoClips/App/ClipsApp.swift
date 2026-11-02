@@ -1,5 +1,5 @@
-// Clips, put together: its session with Samo, the watcher (twice a second), the history on disk, ⇧⌘C and the list,
-// and pasting. Everything here runs on the main thread.
+// Clips, put together: its session with Samo, the watcher (twice a second), the history on disk, the shortcut (⇧⌘C
+// unless you change it) and the list, and pasting. Everything here runs on the main thread.
 
 import AppKit
 import ClipsCore
@@ -24,6 +24,8 @@ final class ClipsApp {
     private(set) var refused = false
     private var confirmClear = false
     private var stopped = false
+    /// The shortcut is let go while a new one is being recorded.
+    private var shortcutPaused = false
 
     private lazy var list = ListWindow(hooks: ListHooks(
         items: { [unowned self] in self.history.items },
@@ -33,6 +35,12 @@ final class ClipsApp {
         delete: { [unowned self] item in self.delete(item) },
         closed: { [unowned self] picked in if !picked { self.paste.cancelled() } }
     ))
+
+    private lazy var shortcutWindow = ShortcutWindow(
+        get: { [unowned self] in self.settings.shortcut },
+        set: { [unowned self] shortcut in self.setShortcut(shortcut) },
+        pause: { [unowned self] paused in self.pauseShortcut(paused) }
+    )
 
     init(dataDir: URL, shared: Bool) {
         self.dataDir = dataDir
@@ -59,10 +67,26 @@ final class ClipsApp {
     }
 
     private func registerShortcut() {
-        guard let shortcut = settings.shortcut else { return }
+        HotKeys.shared.unregister(ClipsApp.shortcutId)
+        refused = false
+        guard !stopped, !shortcutPaused, let shortcut = settings.shortcut else { return }
         refused = !HotKeys.shared.register(id: ClipsApp.shortcutId, shortcut) { [weak self] in
             self?.toggleList()
         }
+    }
+
+    /// A new shortcut, or none, from Clips' shortcut window: kept in its settings, and used at once.
+    private func setShortcut(_ shortcut: Shortcut?) {
+        settings.shortcut = shortcut
+        try? settings.save(dataDir: dataDir)
+        registerShortcut()
+        session?.refresh()
+    }
+
+    private func pauseShortcut(_ paused: Bool) {
+        shortcutPaused = paused
+        registerShortcut()
+        session?.refresh()
     }
 
     // MARK: Watching
@@ -160,6 +184,7 @@ final class ClipsApp {
         }
         switch id {
         case "open-paste-settings": SystemSettings.open(.pasteFromOtherApps)
+        case "change-shortcut": shortcutWindow.show()
         case "allow-accessibility":
             MacPaste.askForAccessibility()
             SystemSettings.open(.accessibility)

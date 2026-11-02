@@ -1,11 +1,11 @@
 id = "clips"
 name = "Clips"
-version = "0.1.0"
+version = "0.1.1"
 protocol = 1
 min_samo = "0.4.0"
 helper = "bin/samo-clips"
 summary = "Clipboard history: ⇧⌘C finds anything you copied and pastes it where you are"
-windows = "Opens its own window: the list at ⇧⌘C"
+windows = "Opens its own windows: the list at its shortcut (⇧⌘C unless you change it), and one to change that shortcut"
 watches = "Watches the clipboard: checks for a new copy twice a second, and keeps it on this Mac"
 permissions = ["paste-from-other-apps", "accessibility"]
 min_macos = "14.0"
@@ -20,7 +20,7 @@ where = "Clips' own folder in Samo"
 undo = "Uninstall deletes the history"
 
 [[changes]]
-what = "Listens for ⇧⌘C while it is on"
+what = "Listens for its shortcut (⇧⌘C unless you change it) while it is on"
 where = "Your keyboard shortcuts"
 undo = "Off or Uninstall lets it go"
 

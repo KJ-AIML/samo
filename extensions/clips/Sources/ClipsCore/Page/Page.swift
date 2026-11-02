@@ -1,5 +1,6 @@
 // Clips' page in Samo (ADR-005 C5), drawn by Samo with its own widgets: whether macOS lets Clips read and paste, the
-// pinned and latest items with their buttons, the shortcut and whether it works, and what Clips keeps.
+// pinned and latest items with their buttons, the shortcut (and a way to change it) and whether it works, and what
+// Clips keeps.
 
 import Foundation
 import SamoKit
@@ -17,9 +18,9 @@ public struct PageState {
     public var accessibility: Bool
     public var shared: Bool
     public var history: History
-    /// macOS refused ⇧⌘C.
+    /// macOS refused the shortcut.
     public var refused: Bool
-    /// A clipboard app running that may also take ⇧⌘C.
+    /// A clipboard app running that may also take the shortcut.
     public var clash: String?
     /// The shortcut that opens the list, if there is one.
     public var shortcut: Shortcut?
@@ -63,7 +64,7 @@ public enum ClipsPage {
     /// How many of the latest items the page lists.
     public static let latest = 20
 
-    /// Clipboard apps that may also take ⇧⌘C, by bundle id prefix.
+    /// Clipboard apps that may also take Clips' shortcut, by bundle id prefix.
     public static let clipboardApps: [(bundlePrefix: String, name: String)] = [
         ("org.p0deje.Maccy", "Maccy"),
         ("com.wiheads.paste", "Paste"),
@@ -119,7 +120,8 @@ public enum ClipsPage {
         let recent = s.history.recent
         page.append(.section(title: "RECENT", about: recent.isEmpty ? nil : "\(recent.count) kept"))
         if recent.isEmpty {
-            page.append(.note(text: "Nothing copied yet. Copy something, then press ⇧⌘C.", kind: .plain))
+            let find = s.shortcut.map { "then press \($0.display)" } ?? "then set a shortcut below to find it"
+            page.append(.note(text: "Nothing copied yet. Copy something, \(find).", kind: .plain))
         } else {
             page.append(.rows(recent.prefix(latest).map { row($0, s) }))
         }
@@ -128,7 +130,8 @@ public enum ClipsPage {
         let keys = s.shortcut?.display ?? "none"
         let shortcut: RowItem
         if s.shortcut == nil {
-            shortcut = RowItem(lamp: .off, title: "Open the list", detail: "No shortcut", trailing: keys)
+            shortcut = RowItem(lamp: .off, title: "Open the list", detail: "No shortcut: the list can't open",
+                               trailing: keys)
         } else if s.refused {
             shortcut = RowItem(lamp: .error, title: "Open the list", detail: "macOS refused \(keys)", trailing: keys)
         } else if let clash = s.clash {
@@ -138,6 +141,7 @@ public enum ClipsPage {
             shortcut = RowItem(lamp: .done, title: "Open the list", detail: "Ready", trailing: keys)
         }
         page.append(.rows([shortcut]))
+        page.append(.button(action: "change-shortcut", label: "Change shortcut…", kind: .link))
         page.append(.note(text: "In the list: type to search, Return or ⌘1–⌘9 to paste, ⌥P to pin, ⌥⌫ to delete.",
                           kind: .plain))
 

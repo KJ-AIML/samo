@@ -114,6 +114,28 @@ final class ClipsPageTests: XCTestCase {
                                                 refused: true))
         XCTAssertEqual(rows(refused, after: "SHORTCUT").first?.lamp, .error)
     }
+
+    func testThePageShowsTheShortcutYouChose() {
+        let pasteKeys = Shortcut(keyCode: 9, modifiers: Shortcut.command | Shortcut.shift)
+        let page = ClipsPage.build(PageState(paste: .allowed, accessibility: true, shared: false, history: History(),
+                                             shortcut: pasteKeys))
+        XCTAssertEqual(rows(page, after: "SHORTCUT").first?.trailing, "⇧⌘V")
+        XCTAssertTrue(buttons(page).contains("change-shortcut"))
+        XCTAssertTrue(notes(page).contains("Nothing copied yet. Copy something, then press ⇧⌘V."))
+        // With none, the page says the list can't open, and how to fix it.
+        let none = ClipsPage.build(PageState(paste: .allowed, accessibility: true, shared: false, history: History(),
+                                             shortcut: nil))
+        XCTAssertEqual(rows(none, after: "SHORTCUT").first?.detail, "No shortcut: the list can't open")
+        XCTAssertTrue(buttons(none).contains("change-shortcut"))
+        XCTAssertTrue(notes(none).contains("Nothing copied yet. Copy something, then set a shortcut below to find it."))
+    }
+
+    private func notes(_ page: [Widget]) -> [String] {
+        page.compactMap { widget in
+            if case let .note(text, _) = widget { return text }
+            return nil
+        }
+    }
 }
 
 final class ClipsSettingsTests: XCTestCase {
@@ -126,6 +148,11 @@ final class ClipsSettingsTests: XCTestCase {
         none.shortcut = nil
         try none.save(dataDir: dir)
         XCTAssertNil(ClipsSettings.load(dataDir: dir).shortcut, "empty stays empty")
+        var pasteKeys = ClipsSettings()
+        pasteKeys.shortcut = Shortcut(keyCode: 9, modifiers: Shortcut.command | Shortcut.shift)
+        try pasteKeys.save(dataDir: dir)
+        XCTAssertEqual(ClipsSettings.load(dataDir: dir).shortcut?.display, "⇧⌘V", "a chosen shortcut is kept")
+        try none.save(dataDir: dir)
         XCTAssertTrue(ClipsSettings.load(dataDir: dir).watching)
         // "Keep what I copy" off is kept, and the page says what it means.
         none.watching = false
@@ -138,7 +165,7 @@ final class ClipsSettingsTests: XCTestCase {
         XCTAssertFalse(off.contains(.button(action: "pause", label: "Pause for 15 minutes", kind: .plain)))
         let page = ClipsPage.build(PageState(paste: .allowed, accessibility: true, shared: false, history: History(),
                                              shortcut: nil))
-        XCTAssertTrue(page.contains(.rows([RowItem(lamp: .off, title: "Open the list", detail: "No shortcut",
-                                                   trailing: "none")])))
+        XCTAssertTrue(page.contains(.rows([RowItem(lamp: .off, title: "Open the list",
+                                                   detail: "No shortcut: the list can't open", trailing: "none")])))
     }
 }
