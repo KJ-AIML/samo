@@ -356,14 +356,42 @@ mod tests {
         assert!(stable_requirement("nothing", "x").is_err());
     }
 
+    /// The user's keychain search list, as `security list-keychains` prints it.
+    fn search_list() -> Result<Vec<String>, String> {
+        let out = Command::new("security")
+            .args(["list-keychains", "-d", "user"])
+            .output()
+            .map_err(io("security list-keychains"))?;
+        Ok(String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .map(|l| l.trim().trim_matches('"').to_string())
+            .filter(|l| !l.is_empty())
+            .collect())
+    }
+
+    fn set_search_list(paths: &[String]) -> Result<(), String> {
+        let mut args: Vec<OsString> = vec![
+            "list-keychains".into(),
+            "-d".into(),
+            "user".into(),
+            "-s".into(),
+        ];
+        args.extend(paths.iter().map(OsString::from));
+        run("security", &args)
+    }
+
     /// The whole thing, in a throwaway keychain: two different builds signed with one identity share one
     /// requirement, which is what macOS checks a stored permission against.
+    ///
+    /// Older macOS (GitHub's runners) finds a signing identity for `codesign --keychain` only in a keychain on the
+    /// search list, so the throwaway keychain joins the list while the test runs, and the list is put back after.
     #[test]
     fn two_builds_share_one_requirement() -> Result<(), String> {
         let dir = std::env::temp_dir().join(format!("samo-codesign-test-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).map_err(io("scratch"))?;
         let keychain = dir.join("test.keychain");
+        let before = search_list()?;
         let result = (|| {
             run(
                 "security",
@@ -383,6 +411,9 @@ mod tests {
                     keychain.clone().into(),
                 ],
             )?;
+            let mut with_test = vec![keychain.to_string_lossy().into_owned()];
+            with_test.extend(before.iter().cloned());
+            set_search_list(&with_test)?;
             let name = "Samo Codesign Test";
             let sha1 = make_identity(name, Some(&keychain))?;
             // Made once: a second is refused.
@@ -442,11 +473,13 @@ mod tests {
             assert!(ok.success(), "a later build keeps the grant");
             Ok(())
         })();
+        // The search list as it was, whatever happened.
+        let restored = set_search_list(&before);
         let _ = Command::new("security")
             .arg("delete-keychain")
             .arg(&keychain)
             .status();
         let _ = fs::remove_dir_all(&dir);
-        result
+        result.and(restored)
     }
 }
