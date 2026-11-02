@@ -15,8 +15,13 @@ private final class MemoryDisk: Disk {
 
 private final class MemoryClipboard: Clipboard {
     var png: Data?
+    var text: String?
     func put(png: Data) -> Bool {
         self.png = png
+        return true
+    }
+    func put(text: String) -> Bool {
+        self.text = text
         return true
     }
 }

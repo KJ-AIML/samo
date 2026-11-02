@@ -1,12 +1,15 @@
 // What happens to a shot once taken (R19): copy and save first, before any window opens, and say so if either
 // fails. Only then does it open in the editor, or as a pin.
 
+import AppKit
 import CoreGraphics
 import Foundation
 
 /// The clipboard, for this Mac only (not Universal Clipboard, R16).
 public protocol Clipboard {
     func put(png: Data) -> Bool
+    /// Text read from a shot, or a colour, or a size.
+    func put(text: String) -> Bool
 }
 
 /// The disk.
@@ -99,6 +102,23 @@ public enum AfterCapture {
             open(shot, settings.then)
         }
         return outcome
+    }
+}
+
+/// The real clipboard, this Mac only.
+public struct SystemClipboard: Clipboard {
+    public init() {}
+
+    public func put(png: Data) -> Bool {
+        let board = NSPasteboard.general
+        board.prepareForNewContents(with: .currentHostOnly)
+        return board.setData(png, forType: .png)
+    }
+
+    public func put(text: String) -> Bool {
+        let board = NSPasteboard.general
+        board.prepareForNewContents(with: .currentHostOnly)
+        return board.setString(text, forType: .string)
     }
 }
 

@@ -65,10 +65,3 @@ enum Screenshotter {
 }
 
 /// The clipboard, for this Mac only: Universal Clipboard doesn't send it to your other devices (R16).
-struct SystemClipboard: Clipboard {
-    func put(png: Data) -> Bool {
-        let board = NSPasteboard.general
-        board.prepareForNewContents(with: .currentHostOnly)
-        return board.setData(png, forType: .png)
-    }
-}

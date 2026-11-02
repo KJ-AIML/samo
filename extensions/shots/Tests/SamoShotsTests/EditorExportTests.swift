@@ -29,6 +29,7 @@ private final class Clipboard: ShotsCore.Clipboard {
         self.png = png
         return true
     }
+    func put(text: String) -> Bool { false }
 }
 
 final class EditorExportTests: XCTestCase {

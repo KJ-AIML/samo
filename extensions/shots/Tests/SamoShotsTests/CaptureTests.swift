@@ -27,6 +27,10 @@ private struct FakeClipboard: Clipboard {
         log.copied = png
         return works
     }
+    func put(text: String) -> Bool {
+        log.events.append("copy text")
+        return works
+    }
 }
 
 private final class FakeDisk: Disk {
