@@ -1,5 +1,6 @@
 // One capture's overlays: a panel on every display, above everything (the shielding level), on every Space. The
-// session switches them between area and window picking together, and hands back what was chosen.
+// session switches them between modes together (area, window, text, colour, ruler), and hands back what was
+// chosen.
 
 import AppKit
 import ScreenCaptureKit
@@ -9,20 +10,28 @@ import ShotsUI
 final class OverlaySession {
     private var panels: [OverlayPanel] = []
     private var views: [OverlayView] = []
-    private var mode: OverlayView.Mode
-    private let onArea: (Frozen, CGRect, OverlayView) -> Void
+    private var modes: OverlayModes
+    private let onArea: (Frozen, CGRect, OverlayView, OverlayMode) -> Void
     private let onWindow: (SCWindow, CGFloat) -> Void
+    private let onColour: (Pixel, Bool) -> Void
+    private let onMeasure: (String) -> Void
     private let onCancel: () -> Void
 
+    var mode: OverlayMode { modes.mode }
+
     init(
-        startIn mode: OverlayView.Mode,
-        onArea: @escaping (Frozen, CGRect, OverlayView) -> Void,
+        startIn mode: OverlayMode,
+        onArea: @escaping (Frozen, CGRect, OverlayView, OverlayMode) -> Void,
         onWindow: @escaping (SCWindow, CGFloat) -> Void,
+        onColour: @escaping (Pixel, Bool) -> Void,
+        onMeasure: @escaping (String) -> Void,
         onCancel: @escaping () -> Void
     ) {
-        self.mode = mode
+        modes = OverlayModes(mode)
         self.onArea = onArea
         self.onWindow = onWindow
+        self.onColour = onColour
+        self.onMeasure = onMeasure
         self.onCancel = onCancel
     }
 
@@ -60,11 +69,18 @@ final class OverlaySession {
         }
     }
 
-    func toggleMode() {
-        mode = mode == .area ? .window : .area
-        views.forEach { $0.mode = mode }
-        if mode == .window {
-            loadWindows()
+    /// A key before or during a drag: Space, T, C, R switch every display's overlay together (before a drag only).
+    func key(_ key: Character, dragging: Bool) {
+        switch modes.key(key, dragging: dragging) {
+        case .switched:
+            views.forEach { $0.mode = modes.mode }
+            if modes.mode == .window {
+                loadWindows()
+            }
+        case .later:
+            note("Scrolling capture comes in a later version of Shots")
+        case .nothing:
+            break
         }
     }
 
@@ -88,7 +104,16 @@ final class OverlaySession {
     }
 
     func finish(_ rect: CGRect, on view: OverlayView) {
-        onArea(view.frozen, rect, view)
+        onArea(view.frozen, rect, view, modes.mode)
+    }
+
+    func pickColour(_ colour: Pixel, css: Bool) {
+        onColour(colour, css)
+    }
+
+    /// A ruler measurement to copy; the overlay stays.
+    func measured(_ size: String) {
+        onMeasure(size)
     }
 
     func pick(_ pickable: Pickable, on view: OverlayView) {

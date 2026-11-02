@@ -1,5 +1,6 @@
-// One capture, start to finish (ADR-004 S1, R19): check Screen Recording, freeze every display, let the person
-// choose, then copy and save before any window opens, open the editor or a pin, and say what happened.
+// One capture, start to finish (ADR-004 S1, S4, R19): check Screen Recording, freeze every display, let the person
+// choose, then copy and save before any window opens, open the editor or a pin, and say what happened. Reading
+// text, picking a colour and measuring use the same frozen screen and save nothing.
 
 import AppKit
 import ScreenCaptureKit
@@ -11,6 +12,9 @@ final class CaptureController {
         case area
         case screen
         case window
+        case text
+        case colour
+        case ruler
     }
 
     private let permission: Permission
@@ -82,15 +86,23 @@ final class CaptureController {
                 }
                 self.done(Shot(image: f.image, scale: f.scale, takenAt: started, origin: f.screen.frame.origin),
                           since: Date())
-            case .area, .window:
+            case .area, .window, .text, .colour, .ruler:
+                let start: OverlayMode = [Mode.window: .window, .text: .text, .colour: .colour, .ruler: .ruler][mode]
+                    ?? .area
                 let session = OverlaySession(
-                    startIn: mode == .window ? .window : .area,
-                    onArea: { [weak self] frozen, rect, view in
-                        self?.area(frozen, rect, view: view, takenAt: started)
+                    startIn: start,
+                    onArea: { [weak self] frozen, rect, view, overlayMode in
+                        if overlayMode == .text {
+                            self?.read(frozen, rect, view: view)
+                        } else {
+                            self?.area(frozen, rect, view: view, takenAt: started)
+                        }
                     },
                     onWindow: { [weak self] window, scale in
                         self?.window(window, scale: scale, takenAt: started)
                     },
+                    onColour: { [weak self] colour, css in self?.colour(colour, css: css) },
+                    onMeasure: { [weak self] size in self?.measured(size) },
                     onCancel: { [weak self] in self?.end(note: nil, problem: false) }
                 )
                 self.overlay = session
@@ -124,6 +136,53 @@ final class CaptureController {
         }
         let origin = CGPoint(x: frozen.screen.frame.minX + rect.minX, y: frozen.screen.frame.minY + rect.minY)
         done(Shot(image: crop, scale: frozen.scale, takenAt: takenAt, origin: origin), since: released)
+    }
+
+    /// T: the selection's text is copied, and a QR code in it shows on the card. Nothing is saved or listed.
+    private func read(_ frozen: Frozen, _ rect: CGRect, view: OverlayView) {
+        let pixels = Selection.imageRect(rect, viewHeight: view.bounds.height, scale: frozen.scale)
+            .intersection(CGRect(x: 0, y: 0, width: frozen.image.width, height: frozen.image.height))
+        overlay?.close()
+        guard let crop = frozen.image.cropping(to: pixels) else {
+            end(note: "Shots couldn't cut out that area", problem: true)
+            return
+        }
+        let pointer = NSEvent.mouseLocation
+        let reading = Flag()
+        // The first reading on a Mac can take a while (macOS loads its models once): say so.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+            if !reading.done { Note.show("Reading text…", problem: false) }
+        }
+        let clipboard = clipboard
+        Task { @MainActor [weak self] in
+            let outcome = await Reading.run(crop, clipboard: clipboard)
+            reading.done = true
+            guard let self else { return }
+            if let code = outcome.codes.first {
+                ResultCard(.code(code), clipboard: clipboard).show(near: pointer)
+            }
+            self.end(note: outcome.note, problem: outcome.problem)
+        }
+    }
+
+    /// C: the colour under the click, as hex (or `rgb()` with ⇧).
+    private func colour(_ colour: Pixel, css: Bool) {
+        overlay?.close()
+        let text = css ? colour.css : colour.hex
+        if clipboard.put(text: text) {
+            end(note: "Copied \(text)", problem: false)
+        } else {
+            end(note: "Couldn't copy the colour", problem: true)
+        }
+    }
+
+    /// R: a measurement is copied; the ruler stays until Esc.
+    private func measured(_ size: String) {
+        if clipboard.put(text: size) {
+            Note.show("Copied \(size)", problem: false)
+        } else {
+            Note.show("Couldn't copy the size", problem: true)
+        }
     }
 
     private func window(_ window: SCWindow, scale: CGFloat, takenAt: Date) {
@@ -170,4 +229,9 @@ final class CaptureController {
             Note.show(note, problem: problem)
         }
     }
+}
+
+/// Whether something finished, shared between a timer and the work it watches.
+private final class Flag {
+    var done = false
 }
