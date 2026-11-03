@@ -210,8 +210,7 @@ mod tests {
     /// ...and CRLF never hides a click in shipped code.
     #[test]
     fn crlf_does_not_hide_a_shipped_click() {
-        let content =
-            "fn sneak() { UserAction::clicked(); }\r\n#[cfg(test)]\r\nmod tests {}\r\n";
+        let content = "fn sneak() { UserAction::clicked(); }\r\n#[cfg(test)]\r\nmod tests {}\r\n";
         assert!(check_user_action("crates/x/src/lib.rs", content).is_err());
     }
 
