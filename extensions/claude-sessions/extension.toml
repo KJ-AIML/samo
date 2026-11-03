@@ -1,6 +1,6 @@
 id = "claude-sessions"
 name = "Claude Sessions"
-version = "0.2.1"
+version = "0.2.2"
 protocol = 1
 min_samo = "0.2.0"
 helper = "bin/samo-claude"
