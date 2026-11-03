@@ -22,7 +22,7 @@ const NO_IDENTITY: FileNodeIdentity = FileNodeIdentity {
 /// length, and a OneDrive file that isn't downloaded takes none.
 pub(crate) fn allocated_file_bytes(path: &Path, meta: &fs::Metadata) -> u64 {
     use filesize::PathExt;
-    path.size_on_disk_fast(meta).unwrap_or_else(|_| meta.len())
+    path.size_on_disk_fast(meta).unwrap_or(meta.len())
 }
 
 /// Windows' own bookkeeping at a drive's root, never measured: the Recycle Bin and restore points.
