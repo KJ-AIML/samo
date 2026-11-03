@@ -11,6 +11,12 @@ workspace = true
 samo-primitives.workspace = true
 samo-blueprint.workspace = true
 samo-domain.workspace = true
-samo-macos.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+
+# ADR-006: one platform crate per OS.
+[target.'cfg(target_os = "macos")'.dependencies]
+samo-macos.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+samo-windows.workspace = true

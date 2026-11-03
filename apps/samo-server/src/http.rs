@@ -1,3 +1,7 @@
+use crate::platform::{
+    SystemCollector, default_user_trash_dir, inspect_node_identity, inspect_process_identity,
+    move_to_trash, scan_directory, terminate_verified_process,
+};
 use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
@@ -5,10 +9,6 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use samo_blueprint::{DEFAULT_SAMPLE_INTERVAL_MS, ScanConfig, Surface};
 use samo_engine::{DEFAULT_LOCAL_WEB_TOKEN, Engine};
-use samo_macos::{
-    SystemCollector, default_user_trash_dir, inspect_node_identity, inspect_process_identity,
-    move_to_trash, scan_directory, terminate_verified_process,
-};
 use samo_primitives::{
     ErrorCode, FileNodeIdentity, PhosphorTheme, ProcessIdentity, SamoError, SamoResult, TenantId,
 };
@@ -41,7 +41,11 @@ pub async fn initialize_server_state(
         ensure_tenant(
             &mut sys_tx,
             &TenantId::local_default(),
-            "Personal Mac",
+            if cfg!(windows) {
+                "Personal PC"
+            } else {
+                "Personal Mac"
+            },
             now_ms,
         )
         .await?;
@@ -219,6 +223,13 @@ async fn disk_scan_workflow_handler(
         .and_then(Value::as_str)
         .unwrap_or("scn_unknown")
         .to_string();
+    // The root as the engine kept it (ADR-006 R26: `C:/…` on Windows; unchanged on the Mac), so the stored scan and
+    // its snapshot name the same folder.
+    let root_path = begin_val
+        .get("root_path")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .unwrap_or(root_path);
 
     let scan_cfg = ScanConfig {
         max_threads: req.max_threads.unwrap_or(4),
@@ -384,6 +395,7 @@ pub struct RevealRequest {
     pub path: String,
 }
 
+#[cfg(not(windows))]
 async fn disk_reveal_handler(Json(req): Json<RevealRequest>) -> impl IntoResponse {
     let status = std::process::Command::new("/usr/bin/open")
         .arg("-R")
@@ -398,6 +410,33 @@ async fn disk_reveal_handler(Json(req): Json<RevealRequest>) -> impl IntoRespons
             ErrorCode::NotFound,
             format!("could not reveal `{}` in Finder", req.path),
         )),
+    }
+}
+
+/// Show in Explorer (ADR-006 §3): the folder opens with the item selected. Explorer exits 1 even when it worked,
+/// so only a path that isn't there, or Explorer not starting, is an error.
+#[cfg(windows)]
+async fn disk_reveal_handler(Json(req): Json<RevealRequest>) -> impl IntoResponse {
+    let windows_path = req.path.replace('/', "\\");
+    let explorer = std::env::var_os("SystemRoot")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(r"C:\Windows"))
+        .join("explorer.exe");
+    let shown = Path::new(&windows_path).exists()
+        && std::process::Command::new(explorer)
+            .arg(format!("/select,{windows_path}"))
+            .spawn()
+            .is_ok();
+    if shown {
+        (
+            StatusCode::OK,
+            Json(serde_json::json!({ "revealed": req.path })),
+        )
+    } else {
+        error_response(SamoError::new(
+            ErrorCode::NotFound,
+            format!("could not show `{}` in Explorer", req.path),
+        ))
     }
 }
 

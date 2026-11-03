@@ -1,5 +1,11 @@
+// ADR-006: the platform crate of the OS this is built for, with the same functions on each.
+#[cfg(target_os = "macos")]
+use samo_macos as platform;
+#[cfg(windows)]
+use samo_windows as platform;
+
+use platform::{SystemCollector, scan_directory};
 use samo_blueprint::ScanConfig;
-use samo_macos::{SystemCollector, scan_directory};
 use std::env;
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -29,7 +35,14 @@ fn run() -> Result<(), String> {
             let target = args
                 .get(1)
                 .cloned()
-                .or_else(|| env::var("HOME").ok())
+                .or_else(|| {
+                    // Windows has no `HOME`: its profile folder (ADR-006).
+                    if cfg!(windows) {
+                        env::home_dir().map(|h| h.to_string_lossy().into_owned())
+                    } else {
+                        env::var("HOME").ok()
+                    }
+                })
                 .unwrap_or_else(|| ".".to_string());
             let path = PathBuf::from(&target);
             println!("Scanning {} ...", path.display());

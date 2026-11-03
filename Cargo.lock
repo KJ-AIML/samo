@@ -4428,6 +4428,7 @@ dependencies = [
  "samo-domain",
  "samo-macos",
  "samo-primitives",
+ "samo-windows",
  "serde",
  "serde_json",
 ]
@@ -4563,6 +4564,7 @@ dependencies = [
  "samo-primitives",
  "samo-store",
  "samo-testkit",
+ "samo-windows",
  "serde",
  "serde_json",
  "tempfile",

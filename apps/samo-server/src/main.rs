@@ -5,11 +5,20 @@ use std::env;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
+/// The user's home: `HOME` on the Mac; on Windows, which has no `HOME`, the profile folder (ADR-006).
+fn home() -> Option<String> {
+    if cfg!(windows) {
+        env::home_dir().map(|h| h.to_string_lossy().into_owned())
+    } else {
+        env::var("HOME").ok()
+    }
+}
+
 fn resolve_db_path() -> PathBuf {
     if let Ok(p) = env::var("SAMO_DB_PATH") {
         return PathBuf::from(p);
     }
-    if let Ok(home) = env::var("HOME") {
+    if let Some(home) = home() {
         return PathBuf::from(home).join(".samo").join("samo.db");
     }
     PathBuf::from(".samo/samo.db")
@@ -19,14 +28,14 @@ fn resolve_default_scan_root() -> String {
     if let Ok(root) = env::var("SAMO_DEFAULT_SCAN_ROOT") {
         return root;
     }
-    if let Ok(home) = env::var("HOME") {
+    if let Some(home) = home() {
         let dev = PathBuf::from(&home).join("Developer");
         if dev.is_dir() {
             return dev.to_string_lossy().into_owned();
         }
         return home;
     }
-    "/".to_string()
+    if cfg!(windows) { "C:/" } else { "/" }.to_string()
 }
 
 fn resolve_ui_dist() -> Option<PathBuf> {

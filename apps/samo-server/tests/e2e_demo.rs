@@ -174,13 +174,29 @@ async fn phase2_end_to_end_demo_flow() {
         })),
     )
     .await;
+    let gone_after_trash = !rust_target.exists();
+    // On Windows it went to the real Recycle Bin (ADR-006): Undo brings it back at once, before any assertion, so
+    // the test never leaves anything there.
+    #[cfg(windows)]
+    let restored = trash_val
+        .get("trashed_path")
+        .and_then(Value::as_str)
+        .map(|trashed| {
+            samo_windows::restore_from_trash(std::path::Path::new(trashed), &rust_target)
+        });
     assert_eq!(status_trash, 200);
     assert_eq!(
         trash_val.get("status").and_then(Value::as_str),
         Some("completed")
     );
-    assert!(!rust_target.exists());
+    assert!(gone_after_trash);
+    #[cfg(not(windows))]
     assert!(trash_dir.path().join("target").exists());
+    #[cfg(windows)]
+    {
+        assert!(matches!(restored, Some(Ok(()))), "{restored:?}");
+        assert!(rust_target.join("libalpha.rlib").exists());
+    }
 
     // 5. Verify R4 rejects terminating a process with a mismatched start_time_secs (recycled PID)
     let (status_proc, proc_val) = http_json_request(
