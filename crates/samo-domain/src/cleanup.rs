@@ -28,7 +28,44 @@ const PROTECTED_PREFIXES: &[&str] = &[
     "/dev/",
 ];
 
+/// Windows folders whose whole tree is protected (ADR-006 R27), lower-cased.
+const WINDOWS_PROTECTED_TREES: &[&str] = &[
+    "windows",
+    "program files",
+    "program files (x86)",
+    "programdata",
+];
+
+/// Windows names protected at a drive's root (ADR-006 R27), lower-cased.
+const WINDOWS_PROTECTED_AT_ROOT: &[&str] = &[
+    "system volume information",
+    "recovery",
+    "pagefile.sys",
+    "hiberfil.sys",
+    "swapfile.sys",
+];
+
+/// R2 on Windows, for the part of a `C:/…` path after the drive. NTFS ignores case, so this does too.
+fn is_protected_windows_path(after_drive: &str) -> bool {
+    let lower = after_drive.to_ascii_lowercase();
+    let segments: Vec<&str> = lower.split('/').filter(|s| !s.is_empty()).collect();
+    let Some(first) = segments.first().copied() else {
+        return true; // the drive root
+    };
+    WINDOWS_PROTECTED_TREES.contains(&first)
+        || (first == "users" && segments.len() <= 2)
+        || segments.contains(&"$recycle.bin")
+        || (segments.len() == 1 && WINDOWS_PROTECTED_AT_ROOT.contains(&first))
+}
+
 pub fn is_protected_system_path(raw_path: &str) -> bool {
+    if let Some(after_drive) = crate::paths::drive_rest(raw_path) {
+        return is_protected_windows_path(after_drive);
+    }
+    // A UNC path (`//server/share`) is in neither shape Samo keeps (ADR-006 R26): fail closed.
+    if raw_path.starts_with("//") {
+        return true;
+    }
     let trimmed = if raw_path.len() > 1 {
         raw_path.trim_end_matches('/')
     } else {
@@ -114,5 +151,59 @@ mod tests {
         );
 
         assert!(validate_trash_target("/Users/kj/repo/target", id, Some(id)).is_ok());
+    }
+
+    /// ADR-006 R27: R2 on Windows, in any case, and failing closed on any path not in the one shape.
+    #[test]
+    fn windows_system_paths_are_protected_in_any_case() {
+        for p in [
+            "C:/",
+            "c:/",
+            "C:/Windows",
+            "C:/windows/System32",
+            "C:/Program Files",
+            "c:/program files/git",
+            "C:/Program Files (x86)/Steam",
+            "C:/ProgramData",
+            "C:/ProgramData/x",
+            "C:/Users",
+            "C:/Users/kj",
+            "C:/users/KJ/",
+            "C:/$Recycle.Bin",
+            "D:/$RECYCLE.BIN/S-1-5-21",
+            "C:/System Volume Information",
+            "C:/Recovery",
+            "C:/pagefile.sys",
+            "C:/hiberfil.sys",
+            "C:/swapfile.sys",
+            r"C:\Users\kj\repo\target",
+            r"C:/Users\kj",
+            "//server/share/x",
+            r"\\server\share\x",
+        ] {
+            assert!(is_protected_system_path(p), "{p} should be protected");
+        }
+        for p in [
+            "C:/Users/kj/Developer/app/target",
+            "D:/Work/node_modules",
+            "C:/Users/kj/AppData/Local/npm-cache",
+        ] {
+            assert!(!is_protected_system_path(p), "{p} should be allowed");
+        }
+
+        let id = FileNodeIdentity {
+            device_id: 7,
+            inode: 42,
+        };
+        let other = FileNodeIdentity {
+            device_id: 7,
+            inode: 43,
+        };
+        assert!(validate_trash_target("C:/Users/kj/dev/app/target", id, Some(id)).is_ok());
+        assert_eq!(
+            validate_trash_target("C:/Users/kj/dev/app/target", id, Some(other))
+                .map_err(|e| e.code),
+            Err(ErrorCode::InodeIdentityMismatch)
+        );
     }
 }
