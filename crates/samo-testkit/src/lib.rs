@@ -3,8 +3,11 @@ pub mod store;
 
 use samo_primitives::{ErrorCode, SamoError, SamoResult};
 use samo_store::StorePool;
+#[cfg(unix)]
 use std::fs;
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
+#[cfg(unix)]
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 
@@ -24,7 +27,9 @@ impl TestDb {
 }
 
 /// Writes `script` as an executable `/bin/sh` program named `name` in `dir`: a stand-in for an extension's
-/// helper in tests (it can say hello, flood, crash or hang on demand).
+/// helper in tests (it can say hello, flood, crash or hang on demand). A `/bin/sh` script runs only on unix; the
+/// Windows stand-in comes with extensions on Windows (#9).
+#[cfg(unix)]
 pub fn fake_helper(dir: &Path, name: &str, script: &str) -> SamoResult<PathBuf> {
     let io = |e: std::io::Error| SamoError::new(ErrorCode::InternalError, e.to_string());
     fs::create_dir_all(dir).map_err(io)?;
