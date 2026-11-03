@@ -49,7 +49,9 @@ fn direct_dependencies(cargo_toml: &str) -> Vec<String> {
             continue;
         }
         if let Some((key, _)) = line.split_once('=') {
-            deps.push(key.trim().trim_matches('"').to_string());
+            // `ureq.workspace = true` names `ureq`.
+            let name = key.split('.').next().unwrap_or(key);
+            deps.push(name.trim().trim_matches('"').to_string());
         }
     }
     deps
@@ -199,6 +201,15 @@ pub fn check_network(root: &Path) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `reqwest.workspace = true` names `reqwest`: a dotted key can't hide an HTTP client (R6).
+    #[test]
+    fn dotted_http_dependency_is_found() {
+        let dotted = "[dependencies]\nreqwest.workspace = true\n";
+        assert!(check_manifest("samo-gpui", dotted).is_err());
+        let windows = "[target.'cfg(windows)'.dependencies]\nureq.workspace = true\n";
+        assert!(check_manifest("samo-windows", windows).is_err());
+    }
 
     /// A Windows checkout can have CRLF line endings (ADR-006 R30): the test module is still not shipped code.
     #[test]
