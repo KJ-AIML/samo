@@ -243,9 +243,16 @@ python3 scripts/make-icon.py     # redraw the app icon (needs Pillow)
 
 ### Windows (in progress)
 
-Samo is coming to Windows 10/11 ([ADR-006](docs/decisions/ADR-006-samo-on-windows.md), tracked in #13). So far the
-pure crates, the store, the engine, `xtask` and the `hello` extension build and pass their tests on Windows; the app
-itself comes with #1.
+Samo is coming to Windows 10/11 ([ADR-006](docs/decisions/ADR-006-samo-on-windows.md), tracked in #13). The app
+itself comes with #1. What works on Windows so far:
+- **`samo-windows`:**
+  - the scanner, which never follows a link
+  - the Recycle Bin, with Undo
+  - Quit, after checking the process
+  - live telemetry
+- **`samo-cli`**, with the same commands: `cargo run -p samo-cli -- scan C:\Users\you\source` and
+  `cargo run -p samo-cli -- top`.
+- **The web console**, `samo-server`.
 
 - Use the MSVC toolchain and the Visual Studio Build Tools. If rustup's default host is GNU, set
   `RUSTUP_TOOLCHAIN=1.99.0-x86_64-pc-windows-msvc`.

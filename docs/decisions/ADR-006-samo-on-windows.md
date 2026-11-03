@@ -120,6 +120,10 @@ These continue R1–R24.
 - **PR 2:**
   - `samo-windows`: scanner and identity, Recycle Bin with Undo, Quit, telemetry
   - `samo-cli` and `samo-server` on Windows
+  - **Built.** R2 is checked on the canonical path: the folder is resolved and the item keeps its own name.
+  - **The Recycle Bin** goes through the `trash` crate, on a thread of its own. A removable drive is refused, and
+    an item Windows didn't keep in the Recycle Bin is reported.
+  - **Quit** ends only the verified process, never its tree.
 - **PR 3, the app:**
   - the tray and quick panel
   - keeps running after its window closes, as one instance
