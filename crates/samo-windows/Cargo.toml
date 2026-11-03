@@ -1,0 +1,26 @@
+[package]
+name = "samo-windows"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+samo-primitives.workspace = true
+samo-blueprint.workspace = true
+samo-domain.workspace = true
+serde.workspace = true
+sysinfo.workspace = true
+chrono.workspace = true
+
+# ADR-006: Windows calls only through safe crates (R29). The Recycle Bin with Undo (`trash`), a file's volume serial
+# and file index (`winapi-util`), and its size on disk (`filesize`).
+[target.'cfg(windows)'.dependencies]
+trash = { version = "5.2.9", default-features = false, features = ["coinit_apartmentthreaded"] }
+winapi-util = "0.1.11"
+filesize = "0.2"
+
+[dev-dependencies]
+tempfile.workspace = true

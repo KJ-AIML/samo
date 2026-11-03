@@ -1,3 +1,4 @@
+#![cfg(target_os = "macos")]
 pub mod cleanup;
 pub mod process;
 pub mod scanner;

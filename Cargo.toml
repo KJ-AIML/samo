@@ -8,6 +8,7 @@ members = [
     "crates/samo-store",
     "crates/samo-engine",
     "crates/samo-macos",
+    "crates/samo-windows",
     "crates/samo-testkit",
     "crates/samo-ext-protocol",
     "crates/samo-extensions",
@@ -63,6 +64,7 @@ samo-domain = { path = "crates/samo-domain" }
 samo-store = { path = "crates/samo-store" }
 samo-engine = { path = "crates/samo-engine" }
 samo-macos = { path = "crates/samo-macos" }
+samo-windows = { path = "crates/samo-windows" }
 samo-testkit = { path = "crates/samo-testkit" }
 samo-ext-protocol = { path = "crates/samo-ext-protocol" }
 samo-extensions = { path = "crates/samo-extensions" }
