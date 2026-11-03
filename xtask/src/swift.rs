@@ -119,8 +119,13 @@ fn swift(args: &[String], what: &str) -> Result<(), String> {
     }
 }
 
-/// Builds and tests every Swift extension. A missing toolchain fails, rather than skipping anything.
+/// Builds and tests every Swift extension. On a Mac a missing toolchain fails, rather than skipping anything. The
+/// Swift extensions are AppKit apps that build only on macOS, so elsewhere this says so and skips them (ADR-006 R30).
 pub fn run_swift_tests(root: &Path) -> Result<(), String> {
+    if !cfg!(target_os = "macos") {
+        println!("    swift: the Swift extensions build only on macOS; skipped on this OS");
+        return Ok(());
+    }
     for dir in packages(root) {
         let path = dir.to_string_lossy().into_owned();
         let rel = crate::display_rel(root, &dir);
