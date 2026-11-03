@@ -80,6 +80,19 @@ pub fn classify_file_path(path: &str, is_app_bundle: bool) -> FileCategory {
     {
         return FileCategory::System;
     }
+    // Windows (ADR-006): its own folder is System and installed programs are Applications, in any case.
+    if let Some(after_drive) = crate::paths::drive_rest(path) {
+        let first = after_drive
+            .split('/')
+            .next()
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        match first.as_str() {
+            "windows" => return FileCategory::System,
+            "program files" | "program files (x86)" => return FileCategory::Applications,
+            _ => {}
+        }
+    }
 
     let lower = path.to_ascii_lowercase();
     let name = lower.rsplit('/').next().unwrap_or(&lower);
@@ -652,6 +665,83 @@ mod tests {
                 .largest_files
                 .iter()
                 .any(|f| f.path.contains("Xcode.app"))
+        );
+    }
+
+    /// ADR-006: Windows' own folders read as System and installed programs as Applications, in any case.
+    #[test]
+    fn windows_system_and_program_files_are_classified() {
+        let cat = |p: &str| classify_file_path(p, false);
+        assert_eq!(
+            cat("C:/Windows/System32/kernel32.dll"),
+            FileCategory::System
+        );
+        assert_eq!(cat("c:/windows/notepad.exe"), FileCategory::System);
+        assert_eq!(
+            cat("C:/Program Files/Git/bin/git.exe"),
+            FileCategory::Applications
+        );
+        assert_eq!(
+            cat("C:/Program Files (x86)/Steam/steam.dll"),
+            FileCategory::Applications
+        );
+        assert_eq!(cat("C:/Users/kj/dev/app/src/main.rs"), FileCategory::Code);
+        assert_eq!(
+            cat("C:/Users/kj/dev/app/target/debug/app"),
+            FileCategory::Code
+        );
+    }
+
+    /// ADR-006 R26: a scan of a drive root names its folders `C:/Users`, never `C://Users`, and counts artifacts.
+    #[test]
+    fn drive_root_scan_names_children_and_counts_artifacts() {
+        let dir = |path: &str, inode: u64, marker: Option<&str>| RawDiskEntry {
+            path: path.to_string(),
+            name: path.rsplit('/').next().unwrap_or(path).to_string(),
+            parent_path: path.rsplit_once('/').map(|(p, _)| p.to_string()),
+            kind: RawEntryKind::Directory,
+            allocated_bytes: 0,
+            identity: FileNodeIdentity {
+                device_id: 7,
+                inode,
+            },
+            project_marker: marker.map(str::to_string),
+        };
+        let file = |path: &str, inode: u64, bytes: u64| RawDiskEntry {
+            kind: RawEntryKind::File,
+            allocated_bytes: bytes,
+            ..dir(path, inode, None)
+        };
+        let entries = vec![
+            dir("C:/Users", 1, None),
+            dir("C:/Users/kj/dev/app", 2, Some("Rust (Cargo)")),
+            dir("C:/Users/kj/dev/app/target", 3, None),
+            file("C:/Users/kj/dev/app/target/debug/app.exe", 4, 8_000_000),
+            file("C:/Users/kj/dev/app/src/main.rs", 5, 50_000),
+        ];
+
+        let snap = aggregate_scan_entries(
+            "scn_w".to_string(),
+            "C:/".to_string(),
+            "C:".to_string(),
+            1000,
+            2000,
+            100_000_000,
+            50_000_000,
+            50_000_000,
+            0,
+            &entries,
+            ScanConfig::default(),
+        );
+
+        assert!(snap.largest_folders.iter().any(|f| f.path == "C:/Users"));
+        assert!(!snap.largest_folders.iter().any(|f| f.path.contains("//")));
+        assert_eq!(snap.projects.len(), 1);
+        assert_eq!(snap.projects[0].root_path, "C:/Users/kj/dev/app");
+        assert_eq!(snap.projects[0].artifact_bytes, 8_000_000);
+        assert_eq!(
+            snap.projects[0].artifacts.first().map(|a| a.path.as_str()),
+            Some("C:/Users/kj/dev/app/target")
         );
     }
 }
