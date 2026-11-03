@@ -23,9 +23,16 @@ Every crate obeys strict layering (`cargo run -p xtask -- verify`):
 - Clips (ADR-005): an extension may also ask for `paste-from-other-apps` and `accessibility`, and must say what it `watches` while idle; all shown before install (R20, R21). Clips reads one clipboard counter twice a second and the clipboard's kinds only when it changed; it reads contents only after the secret checks pass, so secrets never reach memory (R22). History stays in its `data/` (R23). ⌘V is pressed only right after a pick, into the app that was in front (R24). Shared Swift code lives in `extensions/kit` (SamoKit); a URL is made from text only in a file named `Links.swift`.
 - Claude Sessions: every change to `~/.claude/settings.json` is declared, backed up and exactly undone (R7); the hook prints nothing, exits 0 and finishes within 500 ms (R9); unknown is never `0` and a dead session is never shown working (R10).
 - Windows (ADR-006, in progress, #13):
-  - **The Mac doesn't change (R25).** Windows code sits behind `cfg(target_os = "windows")` or is platform-neutral and tested on both.
-  - **One path shape (R26).** Windows paths are kept as `C:/Users/kj` (`samo_domain::normalize_path`); only `/…` and `X:/…` are absolute.
-  - **R2 on Windows (R27).** Protects Windows' system paths in any case; anything not in the one shape fails closed.
+  - **The Mac doesn't change (R25).**
+    - Windows code sits behind `cfg(target_os = "windows")`, or is platform-neutral and tested on both.
+    - A rule that differs by OS takes it as a parameter (`is_protected_path_on`, `scan_root_on`).
+  - **One path shape (R26).**
+    - Windows paths are kept as `C:/Users/kj` (`samo_domain::normalize_path`).
+    - On Windows only a drive path is a scan root or trashable. On the Mac drive paths fail closed, as before.
+  - **R2 on Windows (R27).**
+    - Protects Windows' system paths in any case.
+    - Also protects names Windows resolves elsewhere: `.`, `..`, trailing dot or space, `:stream`, `~1` short names.
+    - Anything not in the one shape fails closed.
   - **Said, never faked (R28).** What Windows can't report is `Unsupported`, and a feature not built for Windows yet says so.
   - **No `unsafe` (R29).** Windows APIs go only through safe crates; a need with no safe wrapper goes to KJ.
   - **Gates on Windows (R30).**

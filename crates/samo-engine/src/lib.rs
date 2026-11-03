@@ -94,7 +94,7 @@ mod tests {
         );
     }
 
-    /// ADR-006 R26: a Windows scan root is kept in the one shape; only `/…` and `X:/…` are absolute.
+    /// ADR-006 R25/R26: on Windows a scan root is kept in the one shape (`C:/…`); on the Mac the rule is unchanged.
     #[tokio::test]
     async fn scan_root_accepts_drive_paths_and_rejects_relative() {
         let Ok(test_db) = TestDb::new().await else {
@@ -114,14 +114,25 @@ mod tests {
                 .map_err(|e| e.code)
         };
 
-        assert_eq!(
-            root_of(begin(r"C:\Users\kj\Developer").await),
-            Ok("C:/Users/kj/Developer".to_string())
-        );
-        assert_eq!(
-            root_of(begin("/Users/kj").await),
-            Ok("/Users/kj".to_string())
-        );
+        if cfg!(windows) {
+            assert_eq!(
+                root_of(begin(r"C:\Users\kj\Developer").await),
+                Ok("C:/Users/kj/Developer".to_string())
+            );
+            assert_eq!(
+                root_of(begin("/Users/kj").await),
+                Err(ErrorCode::InvalidInput)
+            );
+        } else {
+            assert_eq!(
+                root_of(begin(r"C:\Users\kj\Developer").await),
+                Err(ErrorCode::InvalidInput)
+            );
+            assert_eq!(
+                root_of(begin("/Users/kj").await),
+                Ok("/Users/kj".to_string())
+            );
+        }
         assert_eq!(
             root_of(begin("Developer").await),
             Err(ErrorCode::InvalidInput)

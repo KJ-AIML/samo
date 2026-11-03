@@ -32,14 +32,18 @@ impl CommandHandler for DiskScanBeginCmd {
         Box::pin(async move {
             let input: DiskScanBeginInput = serde_json::from_value(payload)
                 .map_err(|e| SamoError::new(ErrorCode::InvalidInput, e.to_string()))?;
-            // ADR-006 R26: a Windows root is kept in the one shape (`C:/…`); a Mac root is unchanged.
-            let root = samo_domain::normalize_path(input.root_path.trim());
-            if !samo_domain::is_absolute_path(&root) {
+            // ADR-006 R25/R26: on Windows a root is kept in the one shape (`C:/…`); on the Mac the rule is unchanged.
+            let Some(root) = samo_domain::scan_root_on(input.root_path.trim(), cfg!(windows))
+            else {
                 return Err(SamoError::new(
                     ErrorCode::InvalidInput,
-                    "scan root_path must be an absolute path (`/…` or `C:/…`)",
+                    if cfg!(windows) {
+                        "scan root_path must be an absolute drive path (`C:/…`)"
+                    } else {
+                        "scan root_path must be an absolute path starting with `/`"
+                    },
                 ));
-            }
+            };
             let scan_id = ScanId::generate();
             insert_scan_begin(tx, &scan_id, &root, ctx.now_ms).await?;
             serde_json::to_value(DiskScanBeginOutput {
