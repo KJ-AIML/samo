@@ -307,6 +307,7 @@ impl Serve {
                 .and_then(|b| serde_json::from_slice(&b).ok());
         }
 
+        let limits = crate::limits::with_hits(self.limits, self.reader.hits(), now);
         let tally = self.reader.tally();
         let rows: Vec<_> = self
             .known
@@ -326,7 +327,7 @@ impl Serve {
             tokens: tally.reading(now),
             split: tally.total(),
             counting: self.reader.behind(),
-            limits: self.limits,
+            limits,
             switches: Switches {
                 connected: self.active.connected,
                 plan_limits: self.active.plan_limits,
@@ -347,7 +348,7 @@ impl Serve {
             }
         }
         let (count, summary) = view::badge(&rows);
-        let meter = view::badge_meter(self.active.plan_limits, self.limits.as_ref(), now);
+        let meter = view::badge_meter(self.active.plan_limits, limits.as_ref(), now);
         let badge = (count, summary, meter);
         if self.sent_badge.as_ref() != Some(&badge) {
             self.sent_badge = Some(badge.clone());

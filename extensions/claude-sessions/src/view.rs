@@ -126,6 +126,17 @@ fn token_note(tokens: &Reading<f64>, split: Tokens) -> String {
     }
 }
 
+/// Past 10 minutes, how old a figure is: Claude Code may have been busy elsewhere without reporting.
+fn age(ms: i64) -> String {
+    let minutes = ms / 60_000;
+    match minutes {
+        ..10 => String::new(),
+        10..60 => format!(", {minutes} min ago"),
+        60..2_880 => format!(", {} h ago", minutes / 60),
+        _ => format!(", {} days ago", minutes / 1_440),
+    }
+}
+
 fn limit_meter(
     label: &str,
     window: Option<&crate::limits::Window>,
@@ -134,11 +145,19 @@ fn limit_meter(
 ) -> Widget {
     let fraction = reading(window, limits.observed_at_ms, input.now_ms);
     let note = match (&fraction, window) {
-        (Reading::Available { .. }, Some(w)) => format!(
-            "resets {} · as of {}",
-            (input.clock)(w.resets_at.saturating_mul(1_000)),
-            (input.clock)(observed_at(w, limits.observed_at_ms))
-        ),
+        (Reading::Available { .. }, Some(w)) => {
+            let resets = (input.clock)(w.resets_at.saturating_mul(1_000));
+            let seen = observed_at(w, limits.observed_at_ms);
+            if w.used_percentage >= 100.0 {
+                format!("limit reached at {} · resets {resets}", (input.clock)(seen))
+            } else {
+                format!(
+                    "resets {resets} · as of {}{}",
+                    (input.clock)(seen),
+                    age(input.now_ms - seen)
+                )
+            }
+        }
         (Reading::Stopped { .. }, Some(w)) => format!(
             "reset at {}; waiting for Claude Code to report again",
             (input.clock)(w.resets_at.saturating_mul(1_000))
@@ -223,9 +242,9 @@ pub fn build(input: &Input) -> Vec<Widget> {
             view.push(limit_meter("5-hour", limits.five_hour.as_ref(), &limits, input));
             view.push(limit_meter("Weekly", limits.seven_day.as_ref(), &limits, input));
             view.push(Widget::Note {
-                text: "Limits come from Claude Code's status line, which runs in a terminal. Its VS Code \
-                       panel and desktop app don't run it, so limits update when you use Claude Code in a \
-                       terminal."
+                text: "Claude Code reports your limits only when it replies in a terminal. In Cursor, VS \
+                       Code, the desktop app or claude -p it doesn't, so the figures say how old they are. A \
+                       limit reached in any session shows here at once."
                     .into(),
                 kind: NoteKind::Plain,
             });
@@ -373,6 +392,58 @@ mod tests {
             badge(&rows),
             (1, "Claude · 1 needs you · 1 working".to_string())
         );
+        Ok(())
+    }
+
+    #[test]
+    fn old_figures_say_their_age_and_a_limit_reached_says_so() -> Result<(), String> {
+        let minute = 60_000;
+        let now = 1_000 * minute;
+        let clock = |ms: i64| format!("t{}", ms / minute);
+        let limits = Limits {
+            five_hour: Some(Window {
+                used_percentage: 100.0,
+                resets_at: 1_100 * 60,
+                observed_at_ms: Some(now - 2 * minute),
+            }),
+            seven_day: Some(Window {
+                used_percentage: 15.0,
+                resets_at: 9_000 * 60,
+                observed_at_ms: None,
+            }),
+            observed_at_ms: now - 125 * minute,
+        };
+        let input = Input {
+            rows: &[],
+            tokens: Reading::unsupported(UnsupportedReason::NotReported),
+            counting: false,
+            split: Tokens::default(),
+            limits: Some(limits),
+            switches: Switches {
+                plan_limits: true,
+                ..Switches::default()
+            },
+            problem: None,
+            now_ms: now,
+            clock: &clock,
+        };
+        let notes: Vec<String> = build(&input)
+            .into_iter()
+            .filter_map(|w| match w {
+                Widget::Meter { note, .. } => note,
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            notes,
+            vec![
+                "limit reached at t998 · resets t1100".to_string(),
+                "resets t9000 · as of t875, 2 h ago".to_string(),
+            ]
+        );
+        assert_eq!(age(9 * minute), "");
+        assert_eq!(age(10 * minute), ", 10 min ago");
+        assert_eq!(age(3 * 1_440 * minute), ", 3 days ago");
         Ok(())
     }
 

@@ -1,7 +1,11 @@
 //! Plan limits from Claude Code's status line (ADR-002 C3). Claude Code documents `rate_limits.five_hour` and
 //! `rate_limits.seven_day`, each with `used_percentage` and `resets_at` (Unix seconds), for Pro and Max plans
 //! and only after the first reply. A report can leave a window out (KJ's had the 5-hour one without the weekly),
-//! so the last one seen is kept until it resets. Pure: the time is passed in.
+//! so the last one seen is kept until it resets.
+//!
+//! Only a terminal runs the status line: Claude Code in Cursor, VS Code, the desktop app or `claude -p` never reports
+//! limits. Every session, though, writes a refusal for a limit to its transcript (`apiErrorParams.rate_limit_info`,
+//! status `rejected`), so a limit reached anywhere is shown at once. Pure: the time is passed in.
 
 use samo_primitives::{Reading, UnsupportedReason};
 use serde::{Deserialize, Serialize};
@@ -73,6 +77,92 @@ impl Limits {
             observed_at_ms: now,
         }
     }
+}
+
+/// A session was refused for a plan limit, at `at_ms`, until `resets_at` (Unix seconds).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Hit {
+    pub at_ms: i64,
+    pub resets_at: i64,
+}
+
+/// The latest refusal for each window, from the transcripts.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Hits {
+    pub five_hour: Option<Hit>,
+    pub seven_day: Option<Hit>,
+}
+
+impl Hits {
+    /// Notes a refusal from a transcript line, if it is one. The latest one of each window is kept.
+    pub fn note_line(&mut self, text: &str) {
+        // Rare: only a refusal carries the key; one inside a string is escaped and doesn't match.
+        if !text.contains("\"rate_limit_info\"") {
+            return;
+        }
+        let Some((window, hit)) = hit_in(text) else {
+            return;
+        };
+        let slot = match window {
+            "five_hour" => &mut self.five_hour,
+            "seven_day" => &mut self.seven_day,
+            _ => return,
+        };
+        if slot.is_none_or(|old| old.at_ms <= hit.at_ms) {
+            *slot = Some(hit);
+        }
+    }
+}
+
+fn hit_in(text: &str) -> Option<(&'static str, Hit)> {
+    let v = serde_json::from_str::<Value>(text).ok()?;
+    let info = v.pointer("/apiErrorParams/rate_limit_info")?;
+    if info.get("status")?.as_str()? != "rejected" {
+        return None;
+    }
+    let window = match info.get("rateLimitType")?.as_str()? {
+        "five_hour" => "five_hour",
+        "seven_day" => "seven_day",
+        _ => return None,
+    };
+    let at_ms = chrono::DateTime::parse_from_rfc3339(v.get("timestamp")?.as_str()?)
+        .ok()?
+        .timestamp_millis();
+    Some((
+        window,
+        Hit {
+            at_ms,
+            resets_at: info.get("resetsAt")?.as_i64()?,
+        },
+    ))
+}
+
+/// The limits to show: the status line's, with a window replaced by a refusal that came after it and hasn't reset.
+pub fn with_hits(limits: Option<Limits>, hits: &Hits, now_ms: i64) -> Option<Limits> {
+    let in_force = |hit: &Option<Hit>| hit.filter(|h| now_ms < h.resets_at.saturating_mul(1_000));
+    let (five, seven) = (in_force(&hits.five_hour), in_force(&hits.seven_day));
+    if five.is_none() && seven.is_none() {
+        return limits;
+    }
+    let base = limits.unwrap_or(Limits {
+        five_hour: None,
+        seven_day: None,
+        observed_at_ms: five.or(seven).map_or(now_ms, |h| h.at_ms),
+    });
+    let pick = |window: Option<Window>, hit: Option<Hit>| match (window, hit) {
+        (Some(w), Some(h)) if observed_at(&w, base.observed_at_ms) >= h.at_ms => Some(w),
+        (_, Some(h)) => Some(Window {
+            used_percentage: 100.0,
+            resets_at: h.resets_at,
+            observed_at_ms: Some(h.at_ms),
+        }),
+        (w, None) => w,
+    };
+    Some(Limits {
+        five_hour: pick(base.five_hour, five),
+        seven_day: pick(base.seven_day, seven),
+        observed_at_ms: base.observed_at_ms,
+    })
 }
 
 /// When `window` was reported: its own time if it was kept from an earlier report, else the report's.
@@ -199,6 +289,90 @@ mod tests {
         let text = serde_json::to_string(&l).map_err(|e| e.to_string())?;
         assert_eq!(text, old);
         Ok(())
+    }
+
+    /// A refusal as Claude Code writes it (trimmed), from a session in Cursor.
+    fn refusal(ts: &str, kind: &str, resets_at: i64) -> String {
+        format!(
+            r#"{{"type":"assistant","timestamp":"{ts}","message":{{"id":"x","usage":{{"input_tokens":0,"output_tokens":0}}}},"apiError":"usage_limit_reached","apiErrorParams":{{"rate_limit_info":{{"status":"rejected","resetsAt":{resets_at},"rateLimitType":"{kind}","overageStatus":"rejected","isUsingOverage":false}}}},"error":"rate_limit","isApiErrorMessage":true,"apiErrorStatus":429,"entrypoint":"claude-vscode"}}"#
+        )
+    }
+
+    #[test]
+    fn refusals_are_noted_latest_first() {
+        let mut hits = Hits::default();
+        hits.note_line(&refusal("2026-11-03T18:00:00Z", "five_hour", 1_793_735_400));
+        hits.note_line(&refusal("2026-11-03T17:00:00Z", "five_hour", 1_793_700_000));
+        hits.note_line(&refusal(
+            "2026-11-03T18:00:00Z",
+            "seven_day_opus",
+            1_793_735_400,
+        ));
+        hits.note_line(
+            r#"{"type":"user","message":{"content":"see \"rate_limit_info\" in the docs"}}"#,
+        );
+        hits.note_line(r#"{"type":"assistant","usage":{}}"#);
+        let at = chrono::DateTime::parse_from_rfc3339("2026-11-03T18:00:00Z")
+            .map_or(0, |t| t.timestamp_millis());
+        assert_eq!(
+            hits.five_hour,
+            Some(Hit {
+                at_ms: at,
+                resets_at: 1_793_735_400
+            })
+        );
+        assert_eq!(hits.seven_day, None);
+    }
+
+    #[test]
+    fn a_newer_refusal_shows_the_limit_reached() {
+        let resets = 1_800_018_000;
+        let hit = |at_ms| Hits {
+            five_hour: Some(Hit {
+                at_ms,
+                resets_at: resets,
+            }),
+            seven_day: None,
+        };
+        let reported = Limits {
+            five_hour: Some(Window {
+                used_percentage: 34.0,
+                resets_at: resets,
+                observed_at_ms: None,
+            }),
+            seven_day: Some(Window {
+                used_percentage: 15.0,
+                resets_at: 1_800_500_000,
+                observed_at_ms: None,
+            }),
+            observed_at_ms: NOW,
+        };
+        // Refused after the last report: reached, as of the refusal; the weekly is untouched.
+        let l = with_hits(Some(reported), &hit(NOW + 60_000), NOW + 120_000);
+        assert_eq!(
+            reading(l.and_then(|l| l.five_hour).as_ref(), NOW, NOW + 120_000),
+            Reading::available(1.0, NOW + 60_000)
+        );
+        assert_eq!(l.and_then(|l| l.seven_day), reported.seven_day);
+        // A report after the refusal wins.
+        assert_eq!(
+            with_hits(Some(reported), &hit(NOW - 60_000), NOW),
+            Some(reported)
+        );
+        // Past its reset, a refusal is forgotten.
+        let after = resets * 1_000 + 1;
+        assert_eq!(
+            with_hits(Some(reported), &hit(NOW + 60_000), after),
+            Some(reported)
+        );
+        // With no report at all, the refusal alone shows.
+        let alone = with_hits(None, &hit(NOW), NOW + 1);
+        assert_eq!(
+            alone.and_then(|l| l.five_hour).map(|w| w.used_percentage),
+            Some(100.0)
+        );
+        assert_eq!(alone.and_then(|l| l.seven_day), None);
+        assert_eq!(with_hits(None, &Hits::default(), NOW), None);
     }
 
     #[test]

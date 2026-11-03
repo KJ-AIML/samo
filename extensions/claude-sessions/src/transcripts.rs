@@ -6,6 +6,7 @@
 //! touched in one morning). Lines are written in time order, so a new file is first searched for where today
 //! begins, and only that part is read.
 
+use crate::limits::Hits;
 use crate::usage::{DayTally, parse_line};
 use std::collections::HashMap;
 use std::fs::{self, File};
@@ -92,6 +93,8 @@ pub struct Reader {
     root: PathBuf,
     files: HashMap<PathBuf, Tracked>,
     tally: DayTally,
+    /// Refusals for a plan limit; kept across midnight, since a window can span it.
+    hits: Hits,
     /// The last read used its whole budget: there is more to read, so the count isn't complete yet.
     behind: bool,
 }
@@ -131,6 +134,7 @@ impl Reader {
             root,
             files: HashMap::new(),
             tally: DayTally::new(midnight_ms),
+            hits: Hits::default(),
             behind: false,
         }
     }
@@ -142,6 +146,10 @@ impl Reader {
 
     pub fn tally(&self) -> &DayTally {
         &self.tally
+    }
+
+    pub fn hits(&self) -> &Hits {
+        &self.hits
     }
 
     /// A new day starts the count again, reading today's files from their start.
@@ -228,6 +236,7 @@ impl Reader {
             let complete: Vec<u8> = tracked.partial.drain(..=last_newline).collect();
             for line in complete.split(|b| *b == b'\n').filter(|l| !l.is_empty()) {
                 let text = String::from_utf8_lossy(line);
+                self.hits.note_line(&text);
                 self.tally.add(&session, parse_line(&text));
             }
         }
@@ -392,6 +401,28 @@ mod tests {
             read < u64::try_from(text.len()).unwrap_or(0) / 10,
             "read {read} bytes"
         );
+        Ok(())
+    }
+
+    #[test]
+    fn a_refusal_in_any_transcript_is_noted() -> Result<(), String> {
+        let (_dir, projects) = setup()?;
+        let refusal = r#"{"type":"assistant","timestamp":"2026-11-01T09:30:00Z","message":{"id":"r1","usage":{"input_tokens":0,"output_tokens":0}},"apiErrorParams":{"rate_limit_info":{"status":"rejected","resetsAt":1793735400,"rateLimitType":"five_hour"}},"entrypoint":"claude-vscode"}"#;
+        append(
+            &projects.join("-Users-kj-samo/s1.jsonl"),
+            &(line("a", "s1", 3) + refusal + "\n"),
+        )?;
+        let mut reader = Reader::new(projects, 0);
+        reader.sweep();
+        reader.read_new(u64::MAX);
+        assert_eq!(reader.tally().total().input, 3);
+        assert_eq!(
+            reader.hits().five_hour.map(|h| h.resets_at),
+            Some(1_793_735_400)
+        );
+        // A new day keeps it: a 5-hour window can span midnight.
+        reader.set_midnight(1);
+        assert!(reader.hits().five_hour.is_some());
         Ok(())
     }
 
