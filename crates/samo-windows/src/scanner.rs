@@ -200,7 +200,7 @@ mod tests {
     #[test]
     fn scans_a_project_in_one_windows_shape() -> Result<(), String> {
         let tmp = tempfile::tempdir().map_err(|e| e.to_string())?;
-        let root = tmp.path();
+        let root = &tmp.path().join("root");
         let proj = root.join("rust-app");
         let target = proj.join("target");
         fs::create_dir_all(&target).map_err(|e| e.to_string())?;
@@ -209,20 +209,32 @@ mod tests {
         fs::write(target.join("app.bin"), vec![b'x'; 65_536]).map_err(|e| e.to_string())?;
         fs::hard_link(target.join("app.bin"), target.join("app_link.bin"))
             .map_err(|e| e.to_string())?;
-        // A junction back to `target`: never followed (a test of R1 and of honest totals).
-        let junction = root.join("link-to-target");
+        // A junction to a folder outside the scan with a file of its own: following it would count that file.
+        let outside = tmp.path().join("outside");
+        fs::create_dir_all(&outside).map_err(|e| e.to_string())?;
+        fs::write(outside.join("elsewhere.bin"), vec![b'o'; 32_768]).map_err(|e| e.to_string())?;
         let made_junction = Command::new("cmd")
             .args(["/C", "mklink", "/J"])
-            .arg(&junction)
-            .arg(&target)
+            .arg(root.join("link-to-outside"))
+            .arg(&outside)
             .output()
             .map(|o| o.status.success())
-            .unwrap_or(false);
+            .map_err(|e| e.to_string())?;
+        assert!(made_junction, "mklink /J needs no admin rights");
 
         let snap = scan_directory("scn_w".to_string(), root, ScanConfig::default())
             .map_err(|e| e.message)?;
 
-        assert_eq!(snap.scanned_files, 2, "Cargo.toml and app.bin, once each");
+        assert_eq!(
+            snap.scanned_files, 2,
+            "Cargo.toml and app.bin, once each; the junction not followed"
+        );
+        assert!(
+            !snap
+                .largest_files
+                .iter()
+                .any(|f| f.path.contains("elsewhere"))
+        );
         assert_eq!(snap.projects.len(), 1);
         assert_eq!(snap.projects[0].name, "rust-app");
         assert!(snap.projects[0].artifact_bytes >= 65_536);
@@ -242,14 +254,6 @@ mod tests {
             );
         for path in paths {
             assert!(!path.contains('\\') && !path.contains("~1"), "{path}");
-        }
-        if made_junction {
-            assert!(
-                !snap
-                    .largest_folders
-                    .iter()
-                    .any(|f| f.path.ends_with("/link-to-target"))
-            );
         }
         Ok(())
     }

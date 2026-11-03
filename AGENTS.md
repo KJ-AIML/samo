@@ -13,7 +13,7 @@ Every crate obeys strict layering (`cargo run -p xtask -- verify`):
 ## Golden Rules
 - Never use `unwrap`, `expect`, `panic`, `todo`, `unimplemented`, `unreachable`, `dbg!`, or `unsafe`.
 - Never put OS or network I/O inside `samo-domain` or inside an open `Engine::execute` database transaction; use the 2-phase `*.begin` / `*.finish` pattern.
-- Never call `remove_dir_all` or `remove_file` in `samo-macos` cleanup — all user cleanup moves items to `~/.Trash` after verifying `(device_id, inode)` (`R2`).
+- Never call `remove_dir_all`, `remove_file` or `purge_all` in `samo-macos` or `samo-windows` cleanup — all user cleanup moves items to `~/.Trash` (the Mac) or the Recycle Bin (Windows) after verifying `(device_id, inode)` (`R2`).
 - Every sensor reading uses `Reading<T>` (`Available`, `Unsupported`, `Stopped`) (`R3`).
 - Every process signal verifies `ProcessIdentity { pid, start_time_secs }` (`R4`).
 - Run `cargo run -p xtask -- verify` before finishing any task.

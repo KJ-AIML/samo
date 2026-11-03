@@ -4618,6 +4618,7 @@ dependencies = [
  "tempfile",
  "trash",
  "winapi-util",
+ "windows-registry 0.5.3",
 ]
 
 [[package]]

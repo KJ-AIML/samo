@@ -16,11 +16,13 @@ sysinfo.workspace = true
 chrono.workspace = true
 
 # ADR-006: Windows calls only through safe crates (R29). The Recycle Bin with Undo (`trash`), a file's volume serial
-# and file index (`winapi-util`), and its size on disk (`filesize`).
+# and file index (`winapi-util`), its size on disk (`filesize`), and each volume's Recycle Bin settings
+# (`windows-registry`, Microsoft's, already in the lockfile).
 [target.'cfg(windows)'.dependencies]
 trash = { version = "5.2.9", default-features = false, features = ["coinit_apartmentthreaded"] }
 winapi-util = "0.1.11"
 filesize = "0.2"
+windows-registry = "0.5.3"
 
 [dev-dependencies]
 tempfile.workspace = true

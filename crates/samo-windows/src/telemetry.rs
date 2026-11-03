@@ -5,13 +5,13 @@
 //! the Mac's stays untouched (R25).
 
 use samo_blueprint::{DEFAULT_SAMPLE_INTERVAL_MS, MAX_RING_BUFFER_SAMPLES};
-use samo_domain::{TelemetryRingBuffer, filter_and_sort_processes};
+use samo_domain::{TelemetryRingBuffer, filter_and_sort_processes, normalize_path};
 use samo_primitives::{
     DiskIoRates, EnergyImpact, MemoryBreakdown, MemoryPressure, NetworkRates, ProcessIdentity,
     ProcessRow, Reading, SystemSummary, TelemetryPoint, TelemetrySnapshot, UnsupportedReason,
 };
 use std::net::IpAddr;
-use sysinfo::{Networks, System};
+use sysinfo::{Disks, Networks, System};
 
 fn not_on_windows<T>() -> Reading<T> {
     Reading::unsupported(UnsupportedReason::PlatformNotSupported)
@@ -25,6 +25,7 @@ fn is_loopback(interface: &str) -> bool {
 pub struct SystemCollector {
     sys: System,
     networks: Networks,
+    disks: Disks,
     ring_buffer: TelemetryRingBuffer,
     generation: u64,
     last_sample_ms: Option<i64>,
@@ -37,10 +38,12 @@ impl SystemCollector {
         let mut sys = System::new_all();
         sys.refresh_all();
         let networks = Networks::new_with_refreshed_list();
+        let disks = Disks::new_with_refreshed_list();
         let system_summary = detect_system_summary(&sys);
         let mut collector = Self {
             sys,
             networks,
+            disks,
             ring_buffer: TelemetryRingBuffer::new(
                 MAX_RING_BUFFER_SAMPLES,
                 sample_interval_ms.max(DEFAULT_SAMPLE_INTERVAL_MS),
@@ -68,6 +71,7 @@ impl SystemCollector {
         self.sys
             .refresh_processes(sysinfo::ProcessesToUpdate::All, true);
         self.networks.refresh(true);
+        self.disks.refresh(true);
 
         let cpus = self.sys.cpus();
         let cpu_overall_pct = if cpus.is_empty() {
@@ -84,7 +88,7 @@ impl SystemCollector {
             cpu_perf_cores_pct: not_on_windows(),
             cpu_eff_cores_pct: not_on_windows(),
             memory: Reading::available(build_memory_breakdown(&self.sys), now_ms),
-            disk_io: Reading::available(build_disk_io_rates(&self.sys, elapsed_secs), now_ms),
+            disk_io: Reading::available(build_disk_io_rates(&self.disks, elapsed_secs), now_ms),
             network: Reading::available(build_network_rates(&self.networks, elapsed_secs), now_ms),
         };
         self.system_summary.uptime_secs = System::uptime();
@@ -185,15 +189,17 @@ fn build_memory_breakdown(sys: &System) -> MemoryBreakdown {
     }
 }
 
-fn build_disk_io_rates(sys: &System, elapsed_secs: f64) -> DiskIoRates {
+/// The drives' own read and write counters. A process's I/O on Windows counts the network and devices too, so the
+/// sum over processes isn't disk activity.
+fn build_disk_io_rates(disks: &Disks, elapsed_secs: f64) -> DiskIoRates {
     let (mut read_delta, mut write_delta, mut total_read, mut total_write) =
         (0u64, 0u64, 0u64, 0u64);
-    for proc_info in sys.processes().values() {
-        let du = proc_info.disk_usage();
-        read_delta = read_delta.saturating_add(du.read_bytes);
-        write_delta = write_delta.saturating_add(du.written_bytes);
-        total_read = total_read.saturating_add(du.total_read_bytes);
-        total_write = total_write.saturating_add(du.total_written_bytes);
+    for disk in disks.list() {
+        let usage = disk.usage();
+        read_delta = read_delta.saturating_add(usage.read_bytes);
+        write_delta = write_delta.saturating_add(usage.written_bytes);
+        total_read = total_read.saturating_add(usage.total_read_bytes);
+        total_write = total_write.saturating_add(usage.total_written_bytes);
     }
     DiskIoRates {
         read_bytes_per_sec: (read_delta as f64 / elapsed_secs) as u64,
@@ -275,7 +281,7 @@ fn collect_process_rows(sys: &System, self_pid: u32) -> Vec<ProcessRow> {
             name,
             executable_path: proc_info
                 .exe()
-                .map(|p| p.to_string_lossy().into_owned())
+                .map(|p| normalize_path(&p.to_string_lossy()))
                 .unwrap_or_default(),
             user: proc_info
                 .user_id()
@@ -323,6 +329,25 @@ mod tests {
         assert!(says_unsupported(&snapshot.system.eff_cores));
         assert!(snapshot.system.logical_cores > 0);
         assert!(snapshot.processes.iter().any(|p| p.is_self));
+        // Paths leave samo-windows in the one shape (ADR-006 R26).
+        for row in &snapshot.processes {
+            assert!(
+                !row.executable_path.contains('\\'),
+                "{}",
+                row.executable_path
+            );
+        }
         Ok(())
+    }
+
+    /// Disk activity is the drives' own counters, not every process's I/O (which on Windows counts the network too).
+    #[test]
+    fn disk_activity_comes_from_the_drives() {
+        let disks = sysinfo::Disks::new_with_refreshed_list();
+        let rates = build_disk_io_rates(&disks, 1.0);
+        assert!(
+            rates.total_read_bytes > 0,
+            "the system drive has been read since boot"
+        );
     }
 }

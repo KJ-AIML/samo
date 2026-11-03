@@ -1,47 +1,43 @@
 //! R4 on Windows: Quit only after checking it is still the same process (PID and start time).
 
+use crate::tools::{CREATE_NO_WINDOW, system_tool};
 use samo_domain::verify_identity;
 use samo_primitives::{ErrorCode, ProcessIdentity, SamoError, SamoResult};
 use std::os::windows::process::CommandExt;
-use std::path::PathBuf;
 use std::process::Command;
 use sysinfo::{Pid, ProcessesToUpdate, System};
 
-/// `CREATE_NO_WINDOW`: no console window flashes up.
-const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-
-pub fn inspect_process_identity(pid: u32) -> Option<ProcessIdentity> {
-    let mut sys = System::new();
+/// The process `pid` as `sys` sees it now. When Windows won't tell its start time, sysinfo says 0: that is no
+/// identity at all (R3, R4).
+fn identity_in(sys: &mut System, pid: u32) -> Option<ProcessIdentity> {
     let target_pid = Pid::from_u32(pid);
     sys.refresh_processes(ProcessesToUpdate::Some(&[target_pid]), true);
-    let proc_info = sys.process(target_pid)?;
-    Some(ProcessIdentity {
+    let start_time_secs = sys.process(target_pid)?.start_time();
+    (start_time_secs != 0).then_some(ProcessIdentity {
         pid,
-        start_time_secs: proc_info.start_time(),
+        start_time_secs,
     })
 }
 
-/// Windows' own `taskkill`, by its full path, as the Mac runs `/bin/kill`.
-fn taskkill() -> PathBuf {
-    std::env::var_os("SystemRoot")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(r"C:\Windows"))
-        .join("System32")
-        .join("taskkill.exe")
+pub fn inspect_process_identity(pid: u32) -> Option<ProcessIdentity> {
+    identity_in(&mut System::new(), pid)
 }
 
 /// R4: verifies that `requested` `(pid, start_time_secs)` still matches the live process right before closing it
 /// (`taskkill`, the TERM of Windows: it asks the app's windows to close) or ending it (`taskkill /F`, for
 /// `SIGKILL`). Only that process: its children were never verified.
 pub fn terminate_verified_process(requested: ProcessIdentity, signal: &str) -> SamoResult<()> {
-    let live = inspect_process_identity(requested.pid);
+    // `sys` holds the process's handle until taskkill is done, and Windows never reuses a PID with a handle open, so
+    // the process checked is the process closed.
+    let mut sys = System::new();
+    let live = identity_in(&mut sys, requested.pid);
     verify_identity(requested, live)?;
 
     let force = matches!(
         signal.to_ascii_uppercase().as_str(),
         "SIGKILL" | "KILL" | "9"
     );
-    let mut command = Command::new(taskkill());
+    let mut command = Command::new(system_tool("taskkill.exe"));
     command.arg("/PID").arg(requested.pid.to_string());
     if force {
         command.arg("/F");
@@ -74,6 +70,16 @@ mod tests {
     use super::*;
     use std::process::Stdio;
     use std::time::Duration;
+
+    /// When Windows won't tell a process's start time, sysinfo says 0: that is no identity at all (R3, R4).
+    #[test]
+    fn an_unknown_start_time_is_no_identity() {
+        for pid in [0, 4] {
+            if let Some(identity) = inspect_process_identity(pid) {
+                assert_ne!(identity.start_time_secs, 0, "pid {pid}");
+            }
+        }
+    }
 
     #[test]
     fn quits_only_the_verified_process() -> Result<(), String> {

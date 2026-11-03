@@ -193,7 +193,7 @@ pub struct TriggerScanRequest {
 
 /// 2-Phase Non-Transactional Disk Scan Workflow:
 /// 1. `disk.scan.begin` (Transaction 1)
-/// 2. `samo_macos::scan_directory` (Outside DB transaction)
+/// 2. `platform::scan_directory` (Outside DB transaction)
 /// 3. `disk.scan.finish` (Transaction 2)
 async fn disk_scan_workflow_handler(
     State(state): State<AppState>,
@@ -316,7 +316,7 @@ pub struct TrashWorkflowRequest {
 
 /// 2-Phase Non-Transactional Trash Cleanup Workflow (`R2`):
 /// 1. `disk.cleanup.begin` (validates protected path denylist & inode match in Transaction 1)
-/// 2. `samo_macos::move_to_trash` (collision-safe rename into `~/.Trash` outside DB transaction)
+/// 2. `platform::move_to_trash` (the Mac: collision-safe rename into `~/.Trash`; Windows: the Recycle Bin; outside DB transaction)
 /// 3. `disk.cleanup.finish` (records trashed path & reclaimed bytes in Transaction 2)
 async fn disk_trash_workflow_handler(
     State(state): State<AppState>,
@@ -349,7 +349,15 @@ async fn disk_trash_workflow_handler(
         .unwrap_or("cln_unknown")
         .to_string();
 
-    let trash_outcome = move_to_trash(Path::new(&req.target_path), req.identity, &state.trash_dir);
+    // Off the async workers, as the scan is: moving a big folder (and on Windows reading its Recycle Bin) takes time.
+    let target_path = req.target_path.clone();
+    let trash_dir = state.trash_dir.clone();
+    let trash_outcome = tokio::task::spawn_blocking(move || {
+        move_to_trash(Path::new(&target_path), req.identity, &trash_dir)
+    })
+    .await
+    .map_err(|e| SamoError::new(ErrorCode::InternalError, e.to_string()))
+    .and_then(|outcome| outcome);
 
     match trash_outcome {
         Ok(outcome) => match state
@@ -449,7 +457,7 @@ pub struct TerminateProcessRequest {
 
 /// 2-Phase Non-Transactional Process Termination Workflow (`R4`):
 /// 1. `process.terminate.begin` (verifies `ProcessIdentity { pid, start_time_secs }` in Transaction 1)
-/// 2. `samo_macos::terminate_verified_process` (re-verifies & sends signal outside DB transaction)
+/// 2. `platform::terminate_verified_process` (re-verifies & sends signal outside DB transaction)
 /// 3. `process.terminate.finish` (records result in Transaction 2)
 async fn process_terminate_workflow_handler(
     State(state): State<AppState>,

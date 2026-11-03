@@ -26,13 +26,15 @@ pub fn inspect_node_identity(path: &Path) -> Option<FileNodeIdentity> {
 }
 
 /// Where `path` really is, in the one shape: its folder resolved (long names, no `..`, true case) and its own name
-/// kept, so a link is named as itself. A drive root resolves whole. `None` if the folder can't be resolved.
+/// kept, so a link is named as itself. A drive root resolves whole. `None` if the folder can't be resolved, and for
+/// a relative or drive-relative path, which would mean the current folder.
 pub(crate) fn canonical_path(path: &Path) -> Option<String> {
     let resolved = match (path.parent(), path.file_name()) {
-        (Some(parent), Some(name)) if !parent.as_os_str().is_empty() => {
+        (Some(parent), Some(name)) if !parent.as_os_str().is_empty() && path.is_absolute() => {
             fs::canonicalize(parent).ok()?.join(name)
         }
-        _ => fs::canonicalize(path).ok()?,
+        (None, _) if path.is_absolute() => fs::canonicalize(path).ok()?,
+        _ => return None,
     };
     Some(normalize_path(&resolved.to_string_lossy()))
 }
@@ -80,5 +82,13 @@ mod tests {
         assert!(canonical.ends_with("/proj/target"), "{canonical}");
         assert_eq!(canonical_path(Path::new(r"C:\")).as_deref(), Some("C:/"));
         Ok(())
+    }
+
+    /// R2's building block takes no shortcut through the current folder: a relative or drive-relative path has no
+    /// canonical path here.
+    #[test]
+    fn canonical_path_takes_no_relative_shortcut() {
+        assert_eq!(canonical_path(Path::new(".")), None);
+        assert_eq!(canonical_path(Path::new("C:")), None);
     }
 }

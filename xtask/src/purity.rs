@@ -22,7 +22,7 @@ pub fn check_pure_source(rel_path: &str, content: &str) -> Result<(), String> {
 }
 
 pub fn check_cleanup_source(rel_path: &str, content: &str) -> Result<(), String> {
-    for forbidden in ["remove_dir_all", "remove_file"] {
+    for forbidden in ["remove_dir_all", "remove_file", "purge_all"] {
         if content.contains(forbidden) {
             return Err(format!(
                 "R2 purity violation in `{rel_path}`: `{forbidden}` is forbidden in cleanup module (must move to Trash)"
@@ -86,6 +86,13 @@ pub fn check_purity(root: &Path) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// R2: emptying the Recycle Bin is a permanent delete too (`trash`'s `purge_all`).
+    #[test]
+    fn cleanup_never_empties_the_recycle_bin() {
+        let purge = "fn f(items: Vec<TrashItem>) { let _ = trash::os_limited::purge_all(items); }";
+        assert!(check_cleanup_source("crates/samo-windows/src/cleanup.rs", purge).is_err());
+    }
 
     /// ADR-006: the Windows Recycle Bin mover is held to R2 like the Mac's Trash mover.
     #[test]
