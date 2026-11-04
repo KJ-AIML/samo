@@ -208,7 +208,14 @@ fn replace_dir(staging: &Path, target: &Path) -> Result<(), InstallError> {
         let _ = fs::remove_dir_all(&old);
         fs::rename(target, &old)
             .map_err(|e| InstallError::io("couldn't replace the old copy", e))?;
+        // The old copy goes only once the new one is in place: `current` never points at a removed version.
+        if let Err(e) = fs::rename(staging, target) {
+            let _ = fs::rename(&old, target);
+            return Err(InstallError::io("couldn't put the copy in place", e));
+        }
+        // On Windows a running helper .exe can't be deleted; what is left goes with the next install.
         let _ = fs::remove_dir_all(&old);
+        return Ok(());
     }
     fs::rename(staging, target).map_err(|e| InstallError::io("couldn't put the copy in place", e))
 }
@@ -810,6 +817,38 @@ mod tests {
             install_dev(&root, &src),
             Err(InstallError::NoHelper(_))
         ));
+        Ok(())
+    }
+
+    #[test]
+    fn a_failed_replace_keeps_the_old_copy() -> Result<(), String> {
+        let dir = tempfile::tempdir().map_err(|e| e.to_string())?;
+        let target = dir.path().join("0.1.0");
+        fs::create_dir_all(&target).map_err(|e| e.to_string())?;
+        fs::write(target.join("extension.toml"), "old").map_err(|e| e.to_string())?;
+        // The new copy can't be put in place (here it is missing; on Windows a scanner may hold a fresh .exe).
+        let missing = dir.path().join(".staging");
+        assert!(replace_dir(&missing, &target).is_err());
+        assert_eq!(
+            fs::read_to_string(target.join("extension.toml")).map_err(|e| e.to_string())?,
+            "old",
+            "`current` must never point at a version that was removed"
+        );
+        // And a good one replaces it, leaving nothing aside.
+        let staging = dir.path().join(".staging-2");
+        fs::create_dir_all(&staging).map_err(|e| e.to_string())?;
+        fs::write(staging.join("extension.toml"), "new").map_err(|e| e.to_string())?;
+        replace_dir(&staging, &target).map_err(|e| e.to_string())?;
+        assert_eq!(
+            fs::read_to_string(target.join("extension.toml")).map_err(|e| e.to_string())?,
+            "new"
+        );
+        let names: Vec<String> = fs::read_dir(dir.path())
+            .map_err(|e| e.to_string())?
+            .filter_map(Result::ok)
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(names, ["0.1.0"]);
         Ok(())
     }
 
