@@ -163,10 +163,26 @@ pub fn check_swift_source(rel_path: &str, content: &str) -> Result<(), String> {
 
 /// Claude Sessions never goes online.
 pub fn check_claude_source(rel_path: &str, content: &str) -> Result<(), String> {
+    check_offline_source("Claude Sessions", rel_path, content)
+}
+
+/// Clips for Windows keeps everything on this PC (ADR-005 R23).
+pub fn check_clips_source(rel_path: &str, content: &str) -> Result<(), String> {
+    check_offline_source("Clips", rel_path, content)
+}
+
+/// The Rust extensions that never go online, by folder, with their check.
+type SourceCheck = fn(&str, &str) -> Result<(), String>;
+const OFFLINE_EXTENSIONS: [(&str, SourceCheck); 2] = [
+    ("extensions/claude-sessions", check_claude_source),
+    ("extensions/clips-windows", check_clips_source),
+];
+
+fn check_offline_source(name: &str, rel_path: &str, content: &str) -> Result<(), String> {
     for needle in ["std::net", "TcpStream", "UdpSocket"] {
         if content.contains(needle) {
             return Err(format!(
-                "R6 network violation in `{rel_path}`: Claude Sessions must not use `{needle}`"
+                "R6 network violation in `{rel_path}`: {name} must not use `{needle}`"
             ));
         }
     }
@@ -189,11 +205,9 @@ pub fn check_network(root: &Path) -> Result<(), String> {
     for dir in ["apps", "crates", "extensions"] {
         crate::purity::visit_rs_files(root, &root.join(dir), &mut check_user_action)?;
     }
-    crate::purity::visit_rs_files(
-        root,
-        &root.join("extensions/claude-sessions"),
-        &mut check_claude_source,
-    )?;
+    for (dir, mut check) in OFFLINE_EXTENSIONS {
+        crate::purity::visit_rs_files(root, &root.join(dir), &mut check)?;
+    }
     crate::swift::visit_swift_files(root, &root.join("extensions"), &mut check_swift_source)?;
     Ok(())
 }
@@ -363,5 +377,18 @@ ureq = { version = "3", default-features = false }
         assert!(check_claude_source(path, "use std::net::TcpStream;").is_err());
         assert!(check_claude_source(path, "let s = UdpSocket::bind(a);").is_err());
         assert!(check_claude_source(path, "use std::fs;").is_ok());
+    }
+
+    /// Clips keeps everything on this PC (ADR-005 R23): no sockets in its Rust either.
+    #[test]
+    fn rejects_std_net_in_clips_for_windows() {
+        let path = "extensions/clips-windows/src/serve.rs";
+        assert!(check_clips_source(path, "use std::net::TcpStream;").is_err());
+        assert!(check_clips_source(path, "use std::fs;").is_ok());
+        assert!(
+            OFFLINE_EXTENSIONS
+                .iter()
+                .any(|(dir, _)| *dir == "extensions/clips-windows")
+        );
     }
 }
