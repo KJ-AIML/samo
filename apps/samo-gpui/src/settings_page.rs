@@ -10,7 +10,7 @@ use crate::store_view::{Here, SAMO_VERSION, Segment, update_count};
 use crate::theme::*;
 use crate::{Frame, NavSection, SamoWorkspaceApp};
 use gpui::{Context, Div, FontWeight, IntoElement, ParentElement, Styled, div, prelude::*, px};
-use samo_domain::store::{SamoRelease, newer};
+use samo_domain::store::{SamoRelease, newer, this_platform};
 use samo_extensions::net::UserAction;
 use samo_extensions::update::can_update;
 use samo_extensions::worker::{SamoUpdate, StoreJob, StoreView};
@@ -135,6 +135,12 @@ fn install_words(installed: bool, folder: &str) -> String {
     }
 }
 
+/// The catalog's Samo release, if it has a build for `platform`: on Windows one with only the Mac's zip is no update
+/// for this PC, and is never offered (ADR-006 R28).
+fn release_here<'a>(release: Option<&'a SamoRelease>, platform: &str) -> Option<&'a SamoRelease> {
+    release.filter(|r| r.package_on(platform).is_some())
+}
+
 /// What opening Settings asks of the store: the catalog, for Samo's own update, where Samo updates itself; nothing
 /// elsewhere, where the page says nothing is fetched (ADR-006 R28).
 fn refresh_on_open(updates_here: bool) -> Option<StoreJob> {
@@ -233,18 +239,20 @@ impl SamoWorkspaceApp {
             Some(Err(why)) => Err(why.to_string()),
             None => Err("Samo can't tell where it is running from".to_string()),
         };
+        let release = release_here(
+            view.catalog.as_ref().and_then(|c| c.samo.as_ref()),
+            this_platform(),
+        );
         let words = update_words(
             SAMO_VERSION,
-            view.catalog.as_ref().and_then(|c| c.samo.as_ref()),
+            release,
             view.fetched_at_ms,
             view.offline.as_deref(),
             can,
             &view.samo,
         );
-        let whats_new = view
-            .catalog
-            .as_ref()
-            .and_then(|c| c.samo.clone())
+        let whats_new = release
+            .cloned()
             .filter(|l| newer(&l.version, SAMO_VERSION))
             .map(|l| l.whats_new)
             .filter(|w| !w.trim().is_empty());
@@ -413,6 +421,20 @@ impl SamoWorkspaceApp {
 mod tests {
     use super::*;
     use samo_domain::store::FileRef;
+
+    #[test]
+    fn a_release_without_a_build_here_isnt_offered() {
+        use samo_domain::store::{MAC, WINDOWS};
+        let mac_only = release("0.9.0");
+        assert!(release_here(Some(&mac_only), MAC).is_some());
+        // On Windows a release with only the Mac's zip is no update at all (ADR-006 R28).
+        assert!(release_here(Some(&mac_only), WINDOWS).is_none());
+        let mut both = release("0.9.0");
+        both.platforms
+            .insert(WINDOWS.into(), mac_only.package.clone());
+        assert!(release_here(Some(&both), WINDOWS).is_some());
+        assert!(release_here(None, MAC).is_none());
+    }
 
     #[test]
     fn install_words_say_where_samo_runs_and_why_to_install() {
