@@ -1,4 +1,4 @@
-//! The one file in Shots that turns text into a link (R16, checked by the network gate): links are handed to Windows,
+//! The one file in Shots that turns text into a link (R16): links are handed to Windows,
 //! which opens them in the browser. Shots itself never goes online. Only web links found in a shot can be opened, and
 //! only on a click; anything else (`javascript:`, `file:`, an app's own scheme) can only be copied. Ported from the
 //! Mac's `Links.swift`.
@@ -13,7 +13,8 @@ pub struct WebLink {
 /// `text` as a web link (`http` or `https`, with a host), or `None`.
 pub fn web(text: &str) -> Option<WebLink> {
     let url = text.trim();
-    if url.chars().any(char::is_whitespace) {
+    // A backslash ends the host in a browser, so the host shown could differ from the one opened: never a link.
+    if url.chars().any(|c| c.is_whitespace() || c == '\\') {
         return None;
     }
     let (scheme, rest) = url.split_once("://")?;
@@ -59,6 +60,9 @@ mod tests {
             "mailto:kj@example.com",
             "samo://open",
             "https://@/",
+            // Browsers end the host at a backslash: this one would show github.com and open evil.com.
+            "https://evil.com\\@github.com",
+            "https://\\evil.com",
         ] {
             assert!(web(text).is_none(), "{text}");
         }

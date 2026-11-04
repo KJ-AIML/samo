@@ -30,15 +30,16 @@ pub struct ShotStore {
 }
 
 impl ShotStore {
-    /// A new shot, held by nothing yet.
-    pub fn add(&mut self, shot: Shot) -> ShotId {
+    /// A window shows a new shot: it is kept from now until the last window showing it closes. There is no shot
+    /// held by nothing, so none is kept or saved at shutdown without a window (R17, R19).
+    pub fn show(&mut self, shot: Shot) -> ShotId {
         self.next += 1;
         let id = ShotId(self.next);
         self.entries.insert(
             id,
             Entry {
                 shot,
-                holders: 0,
+                holders: 1,
                 edits: None,
             },
         );
@@ -53,7 +54,7 @@ impl ShotStore {
         self.entries.get_mut(&id).map(|e| &mut e.shot)
     }
 
-    /// A window now shows it.
+    /// Another window now shows it.
     pub fn retain(&mut self, id: ShotId) {
         if let Some(entry) = self.entries.get_mut(&id) {
             entry.holders += 1;
@@ -141,7 +142,8 @@ impl PinMath {
         (current + scrolled_by * 0.02).clamp(0.2, 1.0)
     }
 
-    /// A pin's size: the shot at its real size (its pixels over its scale), shrunk to fit 80 % of the screen.
+    /// A pin's size, in the target monitor's pixels at 100 % (device-independent): the shot's pixels over its scale,
+    /// shrunk to fit 80 % of `screen` (in the same units). Multiply by the monitor's scale for its physical pixels.
     pub fn size(pixels: (f64, f64), scale: f64, screen: (f64, f64)) -> (f64, f64) {
         let scale = scale.max(1.0);
         let (w, h) = (pixels.0 / scale, pixels.1 / scale);
@@ -171,9 +173,9 @@ mod tests {
     #[test]
     fn a_shot_is_let_go_when_its_windows_close() {
         let mut store = ShotStore::default();
-        let id = store.add(Shot::new(plain(8, 8), 2.0, chrono::Local::now()));
-        store.retain(id); // a pin
-        store.retain(id); // and an editor
+        // A pin shows it, and an editor too.
+        let id = store.show(Shot::new(plain(8, 8), 2.0, chrono::Local::now()));
+        store.retain(id);
         store.release(id);
         assert!(store.get(id).is_some(), "one window still shows it");
         assert_eq!(store.live(), 1);
@@ -191,12 +193,10 @@ mod tests {
         let taken = chrono::DateTime::from_timestamp(1_793_543_712, 0)
             .map(|t| t.with_timezone(&chrono::Local))
             .unwrap_or_default();
-        let pinned_only = store.add(Shot::new(plain(8, 8), 2.0, taken));
+        let pinned_only = store.show(Shot::new(plain(8, 8), 2.0, taken));
         let mut saved = Shot::new(plain(8, 8), 2.0, chrono::Local::now());
         saved.saved_to = Some(PathBuf::from("/tmp/already.png"));
-        let saved = store.add(saved);
-        store.retain(pinned_only);
-        store.retain(saved);
+        let saved = store.show(saved);
         let mut disk = disk();
         let written = store.save_unsaved(&Settings::default(), Path::new("/h"), &mut disk);
         assert_eq!(written.len(), 1, "only the shot never saved");
@@ -224,8 +224,7 @@ mod tests {
         let mut store = ShotStore::default();
         let mut shot = Shot::new(plain(8, 8), 1.0, chrono::Local::now());
         shot.saved_to = Some(PathBuf::from("/shots/Shot 1.png"));
-        let id = store.add(shot);
-        store.retain(id);
+        let id = store.show(shot);
         store.set_edits(id, Some(Box::new(|| Some(plain(4, 4)))));
         let mut disk = disk();
         let written = store.save_unsaved(&Settings::default(), Path::new("/h"), &mut disk);
