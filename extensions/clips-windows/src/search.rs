@@ -50,9 +50,9 @@ mod tests {
     fn words_are_found_in_any_order_without_minding_case_or_accents() {
         let mut h = History::default();
         let now = Utc::now();
-        h.add(Capture::text("Crème brûlée recipe", None), now);
-        h.add(Capture::text("ส้มตำไทย ใส่ปู", None), now);
-        h.add(Capture::text("ＦＵＬＬ width", None), now);
+        h.add(&Capture::text("Crème brûlée recipe", None), now);
+        h.add(&Capture::text("ส้มตำไทย ใส่ปู", None), now);
+        h.add(&Capture::text("ＦＵＬＬ width", None), now);
         let found =
             |q: &str| -> Vec<String> { filter(h.items(), q).iter().map(|i| i.title()).collect() };
         assert_eq!(found("RECIPE creme"), ["Crème brûlée recipe"]);

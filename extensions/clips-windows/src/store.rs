@@ -103,7 +103,11 @@ impl Store {
         item.text_file
             .as_deref()
             .and_then(|name| self.read(name))
-            .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+            // Valid UTF-8 (as Clips wrote it) becomes the String without another copy.
+            .map(|bytes| {
+                String::from_utf8(bytes)
+                    .unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).into_owned())
+            })
             .unwrap_or_else(|| item.text.clone())
     }
 }
@@ -150,7 +154,7 @@ mod tests {
             },
         ];
         for c in captures {
-            let added = h.add(c.clone(), now);
+            let added = h.add(&c, now);
             store.keep(&c, &added, &mut h)?;
         }
         store.save(&h)?;

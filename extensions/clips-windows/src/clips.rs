@@ -199,7 +199,7 @@ impl<B: Board> Clips<B> {
         let Some(capture) = self.watcher.tick(now) else {
             return false;
         };
-        let added = self.history.add(capture.clone(), now);
+        let added = self.history.add(&capture, now);
         let kept = self.store.keep(&capture, &added, &mut self.history);
         for gone in &added.dropped {
             self.store.delete(gone);

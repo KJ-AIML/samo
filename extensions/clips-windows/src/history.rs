@@ -3,7 +3,7 @@
 //! Mac's `History.swift`.
 
 use chrono::{DateTime, Utc};
-use ring::digest::{SHA256, digest};
+use ring::digest::{Context, SHA256};
 use serde::{Deserialize, Serialize};
 
 /// How many unpinned items are kept unless you choose otherwise.
@@ -58,14 +58,16 @@ impl Capture {
         }
     }
 
-    /// What makes two copies the same: a SHA-256 of the kind, the text and the data.
+    /// What makes two copies the same: a SHA-256 of the kind, the text and the data, hashed as they are (a large
+    /// copy isn't copied again to be hashed).
     fn fingerprint(&self) -> String {
-        let mut bytes = self.kind.name().as_bytes().to_vec();
-        bytes.extend_from_slice(self.text.as_bytes());
+        let mut hash = Context::new(&SHA256);
+        hash.update(self.kind.name().as_bytes());
+        hash.update(self.text.as_bytes());
         if let Some(data) = &self.data {
-            bytes.extend_from_slice(data);
+            hash.update(data);
         }
-        digest(&SHA256, &bytes)
+        hash.finish()
             .as_ref()
             .iter()
             .map(|b| format!("{b:02x}"))
@@ -118,9 +120,9 @@ impl Item {
             Kind::Text | Kind::Rich => self
                 .text
                 .lines()
-                .next()
+                .map(str::trim)
+                .find(|line| !line.is_empty())
                 .unwrap_or_default()
-                .trim()
                 .to_string(),
         }
     }
@@ -169,13 +171,13 @@ impl History {
     }
 
     /// Adds a capture copied at `now`. A repeat moves to the top of its group and counts once more.
-    pub fn add(&mut self, capture: Capture, now: DateTime<Utc>) -> Added {
+    pub fn add(&mut self, capture: &Capture, now: DateTime<Utc>) -> Added {
         let print = capture.fingerprint();
         if let Some(i) = self.items.iter().position(|it| it.fingerprint == print) {
             let mut item = self.items.remove(i);
             item.last = now;
             item.copies = item.copies.saturating_add(1);
-            item.source = capture.source.or(item.source);
+            item.source = capture.source.clone().or(item.source);
             if item.pinned {
                 // A pin stays where it was pinned.
                 self.items.insert(i, item.clone());
@@ -195,14 +197,14 @@ impl History {
             text: History::prefix(&capture.text, INLINE_TEXT),
             text_file: None,
             data_file: None,
-            data_type: capture.data_type,
-            files: capture.files,
+            data_type: capture.data_type.clone(),
+            files: capture.files.clone(),
             bytes: u64::try_from(bytes).unwrap_or(u64::MAX),
             first: now,
             last: now,
             copies: 1,
             pinned: false,
-            source: capture.source,
+            source: capture.source.clone(),
             fingerprint: print,
         };
         self.insert(item.clone());
@@ -292,6 +294,7 @@ impl History {
 mod tests {
     use super::*;
     use chrono::{Duration, TimeZone, Utc};
+    use ring::digest::digest;
 
     fn text(t: &str) -> Capture {
         Capture::text(t, Some("notepad.exe"))
@@ -304,9 +307,9 @@ mod tests {
             .with_ymd_and_hms(2026, 11, 5, 9, 0, 0)
             .single()
             .unwrap_or_default();
-        h.add(text("a"), t0);
-        h.add(text("b"), t0 + Duration::seconds(1));
-        let again = h.add(text("a"), t0 + Duration::seconds(2));
+        h.add(&text("a"), t0);
+        h.add(&text("b"), t0 + Duration::seconds(1));
+        let again = h.add(&text("a"), t0 + Duration::seconds(2));
         assert!(!again.is_new);
         let titles: Vec<String> = h.items().iter().map(Item::title).collect();
         assert_eq!(titles, ["a", "b"]);
@@ -322,17 +325,17 @@ mod tests {
             ..History::default()
         };
         let t0 = Utc::now();
-        let first = h.add(text("one"), t0).item.id.clone();
+        let first = h.add(&text("one"), t0).item.id.clone();
         h.pin(&first, true);
-        h.add(text("two"), t0);
-        h.add(text("three"), t0);
-        let added = h.add(text("four"), t0);
+        h.add(&text("two"), t0);
+        h.add(&text("three"), t0);
+        let added = h.add(&text("four"), t0);
         assert_eq!(added.dropped.len(), 1);
         assert_eq!(added.dropped[0].title(), "two");
         let titles: Vec<String> = h.items().iter().map(Item::title).collect();
         assert_eq!(titles, ["one", "four", "three"]);
         // A repeat of a pin stays where it was pinned.
-        h.add(text("one"), t0);
+        h.add(&text("one"), t0);
         assert_eq!(h.items()[0].title(), "one");
         assert!(h.items()[0].pinned);
         // Clear keeps pins; unpinning puts it at the top of the rest.
@@ -355,9 +358,9 @@ mod tests {
     fn titles_say_what_was_copied() {
         let t = Utc::now();
         let mut h = History::default();
-        h.add(text("  first line \nsecond"), t);
+        h.add(&text("  first line \nsecond"), t);
         h.add(
-            Capture {
+            &Capture {
                 kind: Kind::Files,
                 text: r"C:\a\one.txt".into(),
                 data: None,
@@ -368,7 +371,7 @@ mod tests {
             t,
         );
         h.add(
-            Capture {
+            &Capture {
                 kind: Kind::Image,
                 text: String::new(),
                 data: Some(vec![1, 2, 3]),
@@ -380,5 +383,37 @@ mod tests {
         );
         let titles: Vec<String> = h.items().iter().map(Item::title).collect();
         assert_eq!(titles, ["Image", "2 files: one.txt, two.png", "first line"]);
+    }
+
+    #[test]
+    fn a_title_skips_blank_lines() {
+        let mut h = History::default();
+        h.add(
+            &text(
+                "
+   
+	Hello there
+second",
+            ),
+            Utc::now(),
+        );
+        assert_eq!(
+            h.items().first().map(Item::title).as_deref(),
+            Some("Hello there")
+        );
+    }
+
+    #[test]
+    fn a_fingerprint_is_the_sha256_of_kind_text_and_data() {
+        let mut c = text("hello");
+        c.data = Some(vec![1, 2, 3]);
+        let mut whole = b"texthello".to_vec();
+        whole.extend_from_slice(&[1, 2, 3]);
+        let expected: String = digest(&SHA256, &whole)
+            .as_ref()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        assert_eq!(c.fingerprint(), expected);
     }
 }

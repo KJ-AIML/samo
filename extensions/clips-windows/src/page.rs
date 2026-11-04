@@ -338,8 +338,8 @@ mod tests {
     fn rows_have_copy_pin_and_delete() {
         let mut h = History::default();
         let t = now().with_timezone(&chrono::Utc);
-        h.add(Capture::text("first", Some("notepad.exe")), t);
-        let pinned = h.add(Capture::text("kept", None), t).item.id.clone();
+        h.add(&Capture::text("first", Some("notepad.exe")), t);
+        let pinned = h.add(&Capture::text("kept", None), t).item.id.clone();
         h.pin(&pinned, true);
         let view = build(&state(&h));
         assert_eq!(
@@ -368,7 +368,7 @@ mod tests {
     #[test]
     fn pause_ignore_next_and_clear_are_on_the_page() {
         let mut h = History::default();
-        h.add(Capture::text("x", None), now().with_timezone(&chrono::Utc));
+        h.add(&Capture::text("x", None), now().with_timezone(&chrono::Utc));
         let mut s = state(&h);
         let view = build(&s);
         assert!(
@@ -417,9 +417,9 @@ mod tests {
     fn the_badge_counts_what_is_kept() {
         let mut h = History::default();
         assert_eq!(badge(&h), (0, "Clips".to_string()));
-        h.add(Capture::text("a", None), chrono::Utc::now());
+        h.add(&Capture::text("a", None), chrono::Utc::now());
         assert_eq!(badge(&h), (0, "Clips · 1 item".to_string()));
-        h.add(Capture::text("b", None), chrono::Utc::now());
+        h.add(&Capture::text("b", None), chrono::Utc::now());
         assert_eq!(badge(&h).1, "Clips · 2 items");
     }
 }
