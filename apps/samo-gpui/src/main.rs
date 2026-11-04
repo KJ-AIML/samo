@@ -5,7 +5,6 @@ mod components;
 mod disk_view;
 mod ext_view;
 mod extensions_page;
-#[cfg(target_os = "macos")]
 mod finish_update;
 mod hub;
 mod instance;
@@ -277,13 +276,7 @@ fn show_extension_popups(cx: &mut App) {
 #[cfg(not(target_os = "macos"))]
 fn follow_captures(_cx: &mut App) {}
 
-/// On Windows the store and updates come with #10, so no update is ever prepared.
-#[cfg(not(target_os = "macos"))]
-fn finish_samo_update(_cx: &mut App) {}
-
-/// Quits Samo, stopping extensions' helpers first (each gets 2 s to finish).
 /// Once the worker has a new Samo downloaded and checked, starts its `--finish-update` and quits (R14).
-#[cfg(target_os = "macos")]
 fn finish_samo_update(cx: &mut App) {
     let state = cx.global::<AppState>();
     if state.updating {
@@ -311,6 +304,7 @@ fn finish_samo_update(cx: &mut App) {
     }
 }
 
+/// Quits Samo, stopping extensions' helpers first (each gets 2 s to finish).
 fn quit(cx: &mut App) {
     if let Some(host) = cx.global::<AppState>().hub.ext.get() {
         host.shutdown_all();
@@ -1137,7 +1131,6 @@ impl Render for SamoWorkspaceApp {
 
 fn main() {
     // The new Samo, finishing an update the old one prepared: no window, just the swap.
-    #[cfg(target_os = "macos")]
     if let Some(code) = finish_update::from_args(&env::args().collect::<Vec<_>>()) {
         std::process::exit(code);
     }
