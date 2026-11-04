@@ -330,6 +330,7 @@ mod tests {
             version: version.into(),
             whats_new: "- Faster".into(),
             min_macos: "11.0".into(),
+            platforms: Default::default(),
             package: FileRef {
                 file: format!("Samo-{version}-macos-arm64.zip"),
                 size: Some(1),

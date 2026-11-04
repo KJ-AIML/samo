@@ -264,6 +264,7 @@ pub fn merge(
         whats_new: listing.whats_new.clone(),
         package,
         icon: None,
+        platforms: Default::default(),
         screenshots: Vec::new(),
         changes: manifest.changes.clone(),
         windows: manifest.windows.clone(),
@@ -498,6 +499,7 @@ pub fn publish(args: &PublishArgs) -> Result<(), String> {
                 version,
                 whats_new: notes.whats_new,
                 min_macos: notes.min_macos,
+                platforms: Default::default(),
                 package: FileRef {
                     file,
                     size: Some(size),

@@ -111,6 +111,7 @@ pub fn listing(id: &str, version: &str, package: FileRef) -> Listing {
         whats_new: String::new(),
         package,
         icon: None,
+        platforms: Default::default(),
         screenshots: Vec::new(),
         changes: vec![Change {
             what: "Nothing outside its folder".into(),
@@ -141,6 +142,7 @@ pub fn listing_for(manifest: &Manifest, package: FileRef) -> Listing {
         whats_new: String::new(),
         package,
         icon: None,
+        platforms: Default::default(),
         screenshots: Vec::new(),
         changes: manifest.changes.clone(),
         windows: manifest.windows.clone(),
