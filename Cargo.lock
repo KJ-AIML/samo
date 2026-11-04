@@ -4502,6 +4502,7 @@ dependencies = [
  "clipboard-win",
  "ring",
  "samo-ext-protocol",
+ "samo-extensions",
  "serde",
  "serde_json",
  "tempfile",

@@ -34,3 +34,6 @@ tempfile.workspace = true
 [target.'cfg(windows)'.dependencies]
 clipboard-win = "5.4.3"
 winsafe = { version = "0.0.29", features = ["user", "kernel"] }
+
+[target.'cfg(windows)'.dev-dependencies]
+samo-extensions.workspace = true
