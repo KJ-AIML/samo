@@ -10,6 +10,7 @@ pub mod geom;
 pub mod links;
 pub mod modes;
 pub mod naming;
+pub mod page;
 pub mod reading;
 pub mod selection;
 pub mod settings;
