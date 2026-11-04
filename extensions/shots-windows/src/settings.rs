@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::fmt;
 use std::fs;
-use std::path::{MAIN_SEPARATOR, Path, PathBuf};
+use std::path::{MAIN_SEPARATOR, MAIN_SEPARATOR_STR, Path, PathBuf};
 
 /// First, the shot is copied, saved, or both (R19: before any window opens).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -300,10 +300,7 @@ pub fn abbreviate(path: &Path, home: &Path) -> String {
                 .components()
                 .map(|c| c.as_os_str().to_string_lossy().into_owned())
                 .collect();
-            format!(
-                "~{MAIN_SEPARATOR}{}",
-                parts.join(&MAIN_SEPARATOR.to_string())
-            )
+            format!("~{MAIN_SEPARATOR}{}", parts.join(MAIN_SEPARATOR_STR))
         }
         Err(_) => path.display().to_string(),
     }
