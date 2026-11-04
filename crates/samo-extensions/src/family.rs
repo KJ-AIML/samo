@@ -1,8 +1,9 @@
 //! A helper's family: the helper and every process it started, ended together (ADR-004 R15, R17).
 //!
-//! Members are found by walking parent pids (`tree`). On Windows they are also kept in a Job Object closed with
-//! kill-on-close, so whatever the walk can't see (a child whose parent already exited) still ends with the helper,
-//! and the whole family ends when Samo does, however it ends (ADR-006).
+//! On the Mac the family is found by walking parent pids (`tree`). On Windows the helper goes into a Job Object
+//! closed with kill-on-close, and the family is the job's own list: every process the helper started, whatever its
+//! parent pid says now, and nothing else. It ends when the helper stops, and when Samo does, however Samo ends. A
+//! helper that couldn't be put in a job falls back to the walk (ADR-006).
 
 use crate::tree::{self, Member};
 use std::process::Child;
@@ -18,7 +19,7 @@ pub struct Family {
 
 impl Family {
     /// Takes `child` (a helper just started) as the family's root. On Windows it goes into a new Job Object first;
-    /// `Err` says why it couldn't, and the family is then found by walking alone.
+    /// `Err` says why it couldn't, and the family is then found by walking.
     pub fn adopt(&mut self, child: &Child, sys: &mut System) -> Result<(), String> {
         self.root = child.id();
         let contained = self.contain(child);
@@ -46,44 +47,35 @@ impl Family {
 
     /// The family as it is now: what has exited is dropped.
     pub fn walk(&mut self, sys: &mut System) {
-        self.members = tree::tree(sys, self.root);
-        self.add_job_members(sys);
+        self.members = self.now(sys);
     }
 
     /// Adds the family as it is now to what was known: a child started just before a stop is caught, and one
     /// already orphaned is kept.
     pub fn refresh(&mut self, sys: &mut System) {
-        tree::refresh(sys, self.root, &mut self.members);
-        self.add_job_members(sys);
-    }
-
-    /// On Windows, the job's own list: every process in it, whoever its parent was. `sys` was just refreshed by
-    /// the walk, so each one's start time is there.
-    #[cfg(windows)]
-    fn add_job_members(&mut self, sys: &System) {
-        let Some(pids) = self
-            .job
-            .as_ref()
-            .and_then(|job| job.query_process_id_list().ok())
-        else {
-            return;
-        };
-        for pid in pids.into_iter().filter_map(|p| u32::try_from(p).ok()) {
-            let Some(process) = sys.process(sysinfo::Pid::from_u32(pid)) else {
-                continue;
-            };
-            let member = Member {
-                pid,
-                start: process.start_time(),
-            };
-            if !self.members.contains(&member) {
-                self.members.push(member);
+        for m in self.now(sys) {
+            if !self.members.contains(&m) {
+                self.members.push(m);
             }
         }
     }
 
-    #[cfg(not(windows))]
-    fn add_job_members(&mut self, _sys: &System) {}
+    /// Who is in the family now: on Windows the job's list, else (or without a job) the walk.
+    fn now(&self, sys: &mut System) -> Vec<Member> {
+        #[cfg(windows)]
+        if let Some(pids) = self
+            .job
+            .as_ref()
+            .and_then(|job| job.query_process_id_list().ok())
+        {
+            let pids: Vec<u32> = pids
+                .into_iter()
+                .filter_map(|p| u32::try_from(p).ok())
+                .collect();
+            return job_family(self.root, &pids, &tree::procs(sys));
+        }
+        tree::tree(sys, self.root)
+    }
 
     /// Who is in it, parents before children, as last walked.
     #[cfg(test)]
@@ -102,6 +94,23 @@ impl Family {
         #[cfg(windows)]
         drop(self.job.take());
     }
+}
+
+/// The family in a job: the processes in `job` that are still running (in `procs`), the helper (`root`) first,
+/// then by start time, so parents come before their children. Parent pids aren't read at all: in a job they can't
+/// mistake another process for the helper's.
+#[cfg(any(windows, test))]
+fn job_family(root: u32, job: &[u32], procs: &[tree::Proc]) -> Vec<Member> {
+    let mut members: Vec<Member> = procs
+        .iter()
+        .filter(|p| job.contains(&p.pid))
+        .map(|p| Member {
+            pid: p.pid,
+            start: p.start,
+        })
+        .collect();
+    members.sort_by_key(|m| (m.pid != root, m.start, m.pid));
+    members
 }
 
 #[cfg(test)]
@@ -156,6 +165,39 @@ mod tests {
             })
             .map(|m| m.pid)
             .collect()
+    }
+
+    fn proc(pid: u32, parent: u32, start: u64) -> tree::Proc {
+        tree::Proc {
+            pid,
+            parent: Some(parent),
+            start,
+        }
+    }
+
+    #[test]
+    fn with_a_job_the_family_is_the_job() {
+        let procs = [
+            proc(10, 1, 100),
+            proc(11, 10, 100),
+            // Names the helper as its parent and started in the same second, but isn't in its job: a process the
+            // pid's previous owner started. It is neither ended nor window-checked.
+            proc(12, 10, 100),
+            // An orphan whose parent is gone, still in the job.
+            proc(14, 99, 102),
+            proc(13, 11, 101),
+        ];
+        let members = job_family(10, &[14, 10, 11, 13, 77], &procs);
+        let pids: Vec<u32> = members.iter().map(|m| m.pid).collect();
+        // The helper first, then by start time, so parents come before their children; a pid that has gone is
+        // left out.
+        assert_eq!(pids, [10, 11, 13, 14]);
+        // The helper gone, what it started is still its family until the job ends it.
+        let left: Vec<u32> = job_family(10, &[11], &procs[1..])
+            .iter()
+            .map(|m| m.pid)
+            .collect();
+        assert_eq!(left, [11]);
     }
 
     #[test]

@@ -19,23 +19,27 @@ pub struct Proc {
 
 /// `root` and its descendants, parents before children. Empty if `root` is gone.
 pub fn tree(sys: &mut System, root: u32) -> Vec<Member> {
+    descendants_on(&procs(sys), root, cfg!(windows))
+}
+
+/// Every process as it is now (`sys` refreshed).
+pub fn procs(sys: &mut System) -> Vec<Proc> {
     sys.refresh_processes_specifics(ProcessesToUpdate::All, true, ProcessRefreshKind::nothing());
-    let procs: Vec<Proc> = sys
-        .processes()
+    sys.processes()
         .iter()
         .map(|(pid, p)| Proc {
             pid: pid.as_u32(),
             parent: p.parent().map(Pid::as_u32),
             start: p.start_time(),
         })
-        .collect();
-    descendants(&procs, root)
+        .collect()
 }
 
-/// `root` and its descendants in `procs`, parents before children. A process is a child only if it started no
-/// earlier than its parent: Windows keeps an orphan's old parent pid, and gives pids out again quickly, so an
-/// unrelated process can name the helper's pid as its parent (ADR-006).
-pub fn descendants(procs: &[Proc], root: u32) -> Vec<Member> {
+/// `root` and its descendants in `procs`, parents before children, for the given OS (ADR-006 R25). On Windows a
+/// process is a child only if it started no earlier than its parent: Windows keeps an orphan's old parent pid,
+/// and gives pids out again quickly, so an unrelated process can name the helper's pid as its parent. There this
+/// walk is only the fallback for a helper that couldn't be put in a job (`family.rs`).
+pub fn descendants_on(procs: &[Proc], root: u32, windows: bool) -> Vec<Member> {
     let Some(top) = procs.iter().find(|p| p.pid == root) else {
         return Vec::new();
     };
@@ -48,7 +52,7 @@ pub fn descendants(procs: &[Proc], root: u32) -> Vec<Member> {
         next += 1;
         let children: Vec<Member> = procs
             .iter()
-            .filter(|p| p.parent == Some(parent.pid) && p.start >= parent.start)
+            .filter(|p| p.parent == Some(parent.pid) && (!windows || p.start >= parent.start))
             .map(|p| Member {
                 pid: p.pid,
                 start: p.start,
@@ -62,16 +66,6 @@ pub fn descendants(procs: &[Proc], root: u32) -> Vec<Member> {
         }
     }
     members
-}
-
-/// Adds `root`'s tree as it is now to `known`, keeping what was known before: a child started just before a stop
-/// is caught, and one already orphaned is kept.
-pub fn refresh(sys: &mut System, root: u32, known: &mut Vec<Member>) {
-    for m in tree(sys, root) {
-        if !known.contains(&m) {
-            known.push(m);
-        }
-    }
 }
 
 /// Kills every member that is still the process it was, children first.
@@ -104,7 +98,7 @@ mod tests {
     }
 
     #[test]
-    fn a_child_never_started_before_its_parent() {
+    fn on_windows_a_child_never_started_before_its_parent() {
         let procs = [
             proc(10, 1, 100),
             proc(11, 10, 101),
@@ -116,9 +110,17 @@ mod tests {
             // Started in the same second as the helper (start times are in seconds).
             proc(15, 10, 100),
         ];
-        let pids: Vec<u32> = descendants(&procs, 10).iter().map(|m| m.pid).collect();
-        assert_eq!(pids, [10, 11, 15, 12]);
-        assert!(descendants(&procs, 99).is_empty());
+        let pids = |windows| -> Vec<u32> {
+            descendants_on(&procs, 10, windows)
+                .iter()
+                .map(|m| m.pid)
+                .collect()
+        };
+        assert_eq!(pids(true), [10, 11, 15, 12]);
+        // The Mac gives an orphan to launchd, so a parent pid is never stale there, and its walk is as it was
+        // (ADR-006 R25).
+        assert_eq!(pids(false), [10, 11, 13, 15, 12, 14]);
+        assert!(descendants_on(&procs, 99, true).is_empty());
     }
 
     #[cfg(unix)]
