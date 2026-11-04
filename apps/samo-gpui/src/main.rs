@@ -5,6 +5,7 @@ mod components;
 mod disk_view;
 mod ext_view;
 mod extensions_page;
+#[cfg(target_os = "macos")]
 mod finish_update;
 mod hub;
 mod layout;
@@ -34,7 +35,13 @@ use gpui::{
 use hub::Hub;
 use layout::Layout;
 use samo_blueprint::ScanConfig;
-use samo_macos::{
+// ADR-006: the platform crate of the OS this is built for, with the same functions on each.
+#[cfg(target_os = "macos")]
+pub(crate) use samo_macos as platform;
+#[cfg(windows)]
+pub(crate) use samo_windows as platform;
+
+use platform::{
     default_user_trash_dir, move_to_trash, restore_from_trash, scan_directory,
     terminate_verified_process,
 };
@@ -60,13 +67,18 @@ struct AppState {
     popup: Option<WindowHandle<popup::PopupView>>,
     popup_gen: u64,
     /// A new Samo has been started to finish an update; this one is quitting.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    // Used only on the Mac until #9 and #10 (ADR-006).
     updating: bool,
     /// Whether Samo is hidden while an extension captures the screen (ADR-004).
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    // Used only on the Mac until #9 and #10 (ADR-006).
     capture_hide: CaptureHide,
 }
 
 /// Samo out of the way while an extension captures the screen, so its windows aren't in the shot.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))] // Used only on the Mac until #9 and #10 (ADR-006).
 enum CaptureHide {
     Idle,
     /// Hidden since then; `by_us` is false if Samo was already hidden (then it isn't unhidden either).
@@ -79,9 +91,11 @@ enum CaptureHide {
 }
 
 /// How long Samo stays hidden for one capture at most.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))] // Used only on the Mac until #9 and #10 (ADR-006).
 const CAPTURE_HIDE_LIMIT: std::time::Duration = std::time::Duration::from_secs(60);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))] // Used only on the Mac until #9 and #10 (ADR-006).
 enum HideStep {
     Hide,
     Show,
@@ -89,6 +103,7 @@ enum HideStep {
 }
 
 /// The next state, and what to do, given whether any extension is capturing.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))] // Used only on the Mac until #9 and #10 (ADR-006).
 fn capture_step(state: CaptureHide, capturing: bool, now: Instant) -> (CaptureHide, HideStep) {
     match (state, capturing) {
         (CaptureHide::Idle, true) => (
@@ -111,6 +126,7 @@ fn capture_step(state: CaptureHide, capturing: bool, now: Instant) -> (CaptureHi
 
 /// Hides Samo (main window and quick panel) while an extension captures, and shows it again after, without
 /// taking focus. A timer brings it back if a capture never ends.
+#[cfg(target_os = "macos")]
 fn follow_captures(cx: &mut App) {
     let state = cx.global::<AppState>();
     let capturing = state
@@ -250,8 +266,17 @@ fn show_extension_popups(cx: &mut App) {
     );
 }
 
+/// On Windows no extension runs yet (#9), so none captures and there is nothing to hide for.
+#[cfg(not(target_os = "macos"))]
+fn follow_captures(_cx: &mut App) {}
+
+/// On Windows the store and updates come with #10, so no update is ever prepared.
+#[cfg(not(target_os = "macos"))]
+fn finish_samo_update(_cx: &mut App) {}
+
 /// Quits Samo, stopping extensions' helpers first (each gets 2 s to finish).
 /// Once the worker has a new Samo downloaded and checked, starts its `--finish-update` and quits (R14).
+#[cfg(target_os = "macos")]
 fn finish_samo_update(cx: &mut App) {
     let state = cx.global::<AppState>();
     if state.updating {
@@ -1036,6 +1061,7 @@ impl Render for SamoWorkspaceApp {
 
 fn main() {
     // The new Samo, finishing an update the old one prepared: no window, just the swap.
+    #[cfg(target_os = "macos")]
     if let Some(code) = finish_update::from_args(&env::args().collect::<Vec<_>>()) {
         std::process::exit(code);
     }

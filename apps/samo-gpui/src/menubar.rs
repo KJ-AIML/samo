@@ -49,8 +49,7 @@ impl MenuBar {
         TrayIconEvent::set_event_handler(Some(move |event| {
             let _ = tx.unbounded_send(event);
         }));
-        let tray = TrayIconBuilder::new()
-            .with_icon_templated(probe_icon(Mood::Asleep, 0)?)
+        let tray = with_probe(TrayIconBuilder::new(), probe_icon(Mood::Asleep, 0)?)
             .with_tooltip("Samo")
             .with_menu_on_left_click(false)
             .build()
@@ -104,7 +103,7 @@ impl MenuBar {
             None => (true, true),
         };
         if icon_changed && let Some(icon) = probe_icon(next.mood, next.step) {
-            let _ = self.tray.set_icon_templated(Some(icon));
+            set_probe(&self.tray, icon);
         }
         if title_changed {
             self.tray.set_title(Some(&next.title));
@@ -163,7 +162,30 @@ fn pad_figure(s: String) -> String {
     }
 }
 
+/// The probe as a template image, so macOS tints it for a light or dark menu bar.
+#[cfg(target_os = "macos")]
+fn with_probe(builder: TrayIconBuilder, icon: Icon) -> TrayIconBuilder {
+    builder.with_icon_templated(icon)
+}
+
+#[cfg(target_os = "macos")]
+fn set_probe(tray: &TrayIcon, icon: Icon) {
+    let _ = tray.set_icon_templated(Some(icon));
+}
+
+/// Windows has no template images: the probe is drawn as it is (ADR-006 §3).
+#[cfg(not(target_os = "macos"))]
+fn with_probe(builder: TrayIconBuilder, icon: Icon) -> TrayIconBuilder {
+    builder.with_icon(icon)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn set_probe(tray: &TrayIcon, icon: Icon) {
+    let _ = tray.set_icon(Some(icon));
+}
+
 /// The main screen's points-to-pixels factor; the item's rectangle arrives in pixels.
+#[cfg(target_os = "macos")]
 pub(crate) fn main_screen_scale() -> f64 {
     objc2::MainThreadMarker::new()
         .and_then(objc2_app_kit::NSScreen::mainScreen)
@@ -172,7 +194,20 @@ pub(crate) fn main_screen_scale() -> f64 {
         .unwrap_or(2.0)
 }
 
+/// On Windows: the display scale the user chose (`AppliedDPI`, 96 = 100 %); the tray's rectangle arrives in pixels.
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn main_screen_scale() -> f64 {
+    windows_registry::CURRENT_USER
+        .open(r"Control Panel\Desktop\WindowMetrics")
+        .and_then(|key| key.get_u32("AppliedDPI"))
+        .ok()
+        .filter(|dpi| *dpi > 0)
+        .map(|dpi| f64::from(dpi) / 96.0)
+        .unwrap_or(1.0)
+}
+
 /// Closes the quick panel, if it is open.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))] // Used only on the Mac until #9 and #10 (ADR-006).
 pub(crate) fn close_panel(cx: &mut App) {
     let state = cx.global::<AppState>();
     if let Some(handle) = state.panel {
