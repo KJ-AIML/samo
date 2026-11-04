@@ -3,6 +3,8 @@
 
 pub mod after;
 pub mod clipboard;
+pub mod colour;
+pub mod edges;
 pub mod encoding;
 pub mod geom;
 pub mod links;
