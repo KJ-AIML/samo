@@ -122,6 +122,24 @@ fn store_note(view: &StoreView) -> Option<(String, bool)> {
     }
 }
 
+/// Where extensions don't run yet (Windows, until #9 and #10), the page says so; nothing is fetched (ADR-006 R28).
+fn extensions_come_later() -> Page {
+    Page {
+        head: Head {
+            icon: "plug",
+            title: "Extensions".to_string(),
+            sub: "Extensions come to Samo on Windows later.".to_string(),
+            crumbs: false,
+            actions: Vec::new(),
+        },
+        body: div().child(card().child(empty(
+            "Claude Sessions, Shots, Clips and the store run on the Mac today. On Windows they come in a later \
+             version of Samo, and nothing is fetched until then.",
+        ))),
+        fill: false,
+    }
+}
+
 impl SamoWorkspaceApp {
     fn store_submit(&self, job: StoreJob, action: UserAction) {
         if let Some(store) = self.hub.store.get() {
@@ -212,6 +230,9 @@ impl SamoWorkspaceApp {
     }
 
     pub(crate) fn render_extensions(&mut self, frame: &Frame, cx: &mut Context<Self>) -> Page {
+        if !samo_extensions::RUNS_ON_THIS_OS {
+            return extensions_come_later();
+        }
         let all = rows(frame.store.catalog.as_deref(), &frame.ext, Here::now());
         if let Some(id) = self.store_ui.detail.clone() {
             if let Some(row) = all.iter().find(|r| r.listing.id == id) {

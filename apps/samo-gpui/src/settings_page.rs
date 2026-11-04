@@ -102,6 +102,25 @@ pub fn update_words(
     }
 }
 
+/// Samo on Windows updates with its installer, which comes later (#10). The page says so, with no button that would
+/// do nothing, and nothing is checked or fetched (ADR-006 R28).
+fn updates_come_later() -> Page {
+    Page {
+        head: Head {
+            icon: "gear",
+            title: "Settings".to_string(),
+            sub: format!("Samo {SAMO_VERSION}."),
+            crumbs: false,
+            actions: Vec::new(),
+        },
+        body: div().child(section_rule("Updates", None)).child(card().child(empty(
+            "Samo on Windows updates with its installer, which comes in a later version. Until then, nothing is \
+             checked or fetched.",
+        ))),
+        fill: false,
+    }
+}
+
 impl SamoWorkspaceApp {
     fn settings_submit(&self, job: StoreJob, action: UserAction) {
         if let Some(store) = self.hub.store.get() {
@@ -117,6 +136,9 @@ impl SamoWorkspaceApp {
     }
 
     pub(crate) fn render_settings(&mut self, frame: &Frame, cx: &mut Context<Self>) -> Page {
+        if !samo_extensions::RUNS_ON_THIS_OS {
+            return updates_come_later();
+        }
         let view: &StoreView = &frame.store;
         let exe = std::env::current_exe().ok();
         let can = match exe.as_deref().map(can_update) {
