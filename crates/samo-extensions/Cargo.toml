@@ -44,6 +44,9 @@ objc2-core-graphics = { version = "0.3.2", default-features = false, features = 
 junction = { version = "2.1.0", default-features = false }
 winapi-util = "0.1.11"
 win32job = "2.0.3"
+# R15 on Windows: the visible top-level windows and the process owning each (`winsafe`, MIT, safe bindings with no
+# dependencies of its own; only its `user` part).
+winsafe = { version = "0.0.29", features = ["user"] }
 
 [dev-dependencies]
 samo-testkit.workspace = true
