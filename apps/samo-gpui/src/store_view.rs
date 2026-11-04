@@ -3,7 +3,9 @@
 
 use crate::components::TagKind;
 use samo_domain::extensions::samo_satisfies;
-use samo_domain::store::{Catalog, FileRef, Listing, macos_satisfies, newer, rank};
+use samo_domain::store::{
+    Catalog, FileRef, Listing, WINDOWS, newer, os_satisfies_on, rank, this_platform,
+};
 use samo_ext_protocol::{
     Change, KNOWN_PERMISSIONS, Limits, MAX_CPU_PCT, MAX_MEMORY_MB, PROTOCOL_VERSION,
 };
@@ -19,11 +21,13 @@ pub fn this_macos() -> &'static str {
     MACOS.get_or_init(|| samo_extensions::this_macos().unwrap_or_default())
 }
 
-/// Where a listing is judged: this Samo and this Mac.
+/// Where a listing is judged: this Samo, this Mac's macOS, and the platform whose package it installs.
 #[derive(Debug, Clone, Copy)]
 pub struct Here<'a> {
     pub samo: &'a str,
     pub macos: &'a str,
+    /// `MAC` or `WINDOWS` (ADR-006).
+    pub platform: &'a str,
 }
 
 impl Here<'static> {
@@ -31,7 +35,14 @@ impl Here<'static> {
         Here {
             samo: SAMO_VERSION,
             macos: this_macos(),
+            platform: this_platform(),
         }
+    }
+}
+
+impl Here<'_> {
+    fn windows(&self) -> bool {
+        self.platform == WINDOWS
     }
 }
 
@@ -50,6 +61,8 @@ pub enum RowState {
     NeedsNewerSamo,
     /// Its `min_macos` is newer than this Mac's.
     NeedsNewerMac,
+    /// The store has no package for this platform: on Windows, a Mac-only extension (ADR-006).
+    MacOnly,
     Installed,
     Off,
     /// The store has a newer version.
@@ -64,6 +77,7 @@ impl RowState {
             RowState::Available => None,
             RowState::NeedsNewerSamo => Some(("needs a newer Samo", TagKind::Neutral)),
             RowState::NeedsNewerMac => Some(("needs a newer macOS", TagKind::Neutral)),
+            RowState::MacOnly => Some(("Mac only", TagKind::Neutral)),
             RowState::Installed => Some(("installed", TagKind::Neutral)),
             RowState::Off => Some(("off", TagKind::Neutral)),
             RowState::Update => Some(("update", TagKind::Accent)),
@@ -104,9 +118,12 @@ fn samo_can_run(listing: &Listing, samo: &str) -> bool {
         && limits.cpu_pct.is_none_or(|c| c <= MAX_CPU_PCT)
 }
 
-/// Whether this Samo, on this Mac, can run `listing`'s version.
+/// Whether this Samo, here, can run `listing`'s version: it has a package for this platform, and on the Mac this
+/// macOS is new enough.
 pub fn can_run(listing: &Listing, here: Here) -> bool {
-    samo_can_run(listing, here.samo) && macos_satisfies(listing.min_macos.as_deref(), here.macos)
+    listing.package_on(here.platform).is_some()
+        && samo_can_run(listing, here.samo)
+        && os_satisfies_on(listing.min_macos.as_deref(), here.macos, here.windows())
 }
 
 pub fn row_state(
@@ -115,6 +132,7 @@ pub fn row_state(
     here: Here,
 ) -> RowState {
     match (installed, listing) {
+        (None, Some(l)) if l.package_on(here.platform).is_none() => RowState::MacOnly,
         (None, Some(l)) if !samo_can_run(l, here.samo) => RowState::NeedsNewerSamo,
         (None, Some(l)) if !can_run(l, here) => RowState::NeedsNewerMac,
         (None, _) => RowState::Available,
@@ -231,6 +249,18 @@ pub fn capability_words(
     permissions: &[String],
     limits: Option<Limits>,
 ) -> Vec<String> {
+    capability_words_on(windows, watches, permissions, limits, cfg!(windows))
+}
+
+/// `capability_words` for the given OS (ADR-006 R25). The permissions are macOS's (Screen Recording,
+/// Accessibility …): Windows asks for none of them, so on Windows they aren't listed.
+pub fn capability_words_on(
+    windows: Option<&str>,
+    watches: Option<&str>,
+    permissions: &[String],
+    limits: Option<Limits>,
+    on_windows: bool,
+) -> Vec<String> {
     let mut words = Vec::new();
     if let Some(w) = windows {
         words.push(w.to_string());
@@ -238,6 +268,7 @@ pub fn capability_words(
     if let Some(w) = watches {
         words.push(w.to_string());
     }
+    let permissions: &[String] = if on_windows { &[] } else { permissions };
     for p in permissions {
         words.push(match p.as_str() {
             "screen-recording" => {
@@ -328,6 +359,7 @@ pub fn size_words(bytes: Option<u64>) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use samo_domain::store::MAC;
     use samo_extensions::{ExtView, Status};
     use std::sync::Arc;
 
@@ -414,6 +446,7 @@ mod tests {
         let here = Here {
             samo: "0.2.0",
             macos: "15.0",
+            platform: MAC,
         };
         let rows = rows(Some(&catalog), &ext, here);
         let got: Vec<(&str, Option<&str>)> = rows
@@ -468,7 +501,8 @@ mod tests {
 
     #[test]
     fn capability_words() {
-        let words = super::capability_words(
+        // The Mac's words (on Windows the permission line is left out).
+        let words = super::capability_words_on(
             Some("Opens its own windows: the capture overlay"),
             None,
             &["screen-recording".to_string()],
@@ -476,6 +510,7 @@ mod tests {
                 memory_mb: Some(800),
                 cpu_pct: Some(60),
             }),
+            false,
         );
         assert_eq!(
             words,
@@ -487,8 +522,8 @@ mod tests {
             ]
         );
         assert!(super::capability_words(None, None, &[], None).is_empty());
-        // Clips (ADR-005): what it watches, then both of its permissions.
-        let clips = super::capability_words(
+        // Clips on the Mac (ADR-005): what it watches, then both of its permissions.
+        let clips = super::capability_words_on(
             Some("Opens its own window: the list at ⇧⌘C"),
             Some("Watches the clipboard: checks for a new copy twice a second"),
             &[
@@ -496,6 +531,7 @@ mod tests {
                 "accessibility".to_string(),
             ],
             None,
+            false,
         );
         assert_eq!(
             clips,
@@ -515,10 +551,12 @@ mod tests {
         let old_mac = Here {
             samo: "0.3.0",
             macos: "13.6",
+            platform: MAC,
         };
         let new_mac = Here {
             samo: "0.3.0",
             macos: "15.1",
+            platform: MAC,
         };
         assert_eq!(row_state(Some(&l), None, old_mac), RowState::NeedsNewerMac);
         assert!(!can_run(&l, old_mac));
@@ -526,6 +564,59 @@ mod tests {
         // A Samo that doesn't know a permission it asks for can't install it either.
         l.permissions = vec!["camera".into()];
         assert_eq!(row_state(Some(&l), None, new_mac), RowState::NeedsNewerSamo);
+    }
+
+    #[test]
+    fn on_windows_a_mac_only_listing_is_mac_only() {
+        let windows = Here {
+            samo: "0.3.0",
+            macos: "",
+            platform: WINDOWS,
+        };
+        let mut l = listing("shots", "0.1.0", "0.3.0");
+        l.min_macos = Some("14.0".into());
+        assert_eq!(row_state(Some(&l), None, windows), RowState::MacOnly);
+        assert_eq!(RowState::MacOnly.tag().map(|t| t.0), Some("Mac only"));
+        assert!(!can_run(&l, windows));
+        // Installed (from a dev folder), it is what it is.
+        let dev = InstalledAs {
+            slot: ExtSlot(0),
+            version: "0.1.0".into(),
+            dev: true,
+            on: true,
+            changes: Vec::new(),
+        };
+        assert_eq!(row_state(Some(&l), Some(&dev), windows), RowState::Dev);
+    }
+
+    #[test]
+    fn on_windows_min_macos_and_permissions_dont_apply() {
+        let windows = Here {
+            samo: "0.3.0",
+            macos: "",
+            platform: WINDOWS,
+        };
+        let mut l = listing("clips", "0.1.0", "0.3.0");
+        l.min_macos = Some("14.0".into());
+        l.platforms.insert(
+            WINDOWS.into(),
+            FileRef {
+                file: "clips-0.1.0-windows-x86_64.tar.gz".into(),
+                size: None,
+                sha256: String::new(),
+                width: None,
+                height: None,
+            },
+        );
+        assert_eq!(row_state(Some(&l), None, windows), RowState::Available);
+        assert!(can_run(&l, windows));
+        // The Mac's permission lines mean nothing on Windows, so they aren't shown there.
+        let perms = vec!["accessibility".to_string()];
+        assert!(capability_words_on(None, None, &perms, None, true).is_empty());
+        assert_eq!(
+            capability_words_on(None, None, &perms, None, false).len(),
+            1
+        );
     }
 
     #[test]

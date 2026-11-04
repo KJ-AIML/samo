@@ -7,7 +7,7 @@ use crate::state::{ExtSlot, Status};
 use crate::supervisor::one_shot;
 use crate::{History, InstallError, Installed, MAX_EXTENSIONS, Registry};
 use samo_domain::extensions::{Source, may_run, samo_satisfies};
-use samo_domain::store::{Listing, macos_satisfies};
+use samo_domain::store::{Listing, os_satisfies_on};
 use samo_ext_protocol::{Manifest, PROTOCOL_VERSION};
 use std::fmt;
 use std::fs;
@@ -153,7 +153,11 @@ impl Host {
             )));
         }
         if let Some(min) = &listing.min_macos
-            && !macos_satisfies(Some(min), inner.config.macos.as_deref().unwrap_or_default())
+            && !os_satisfies_on(
+                Some(min),
+                inner.config.macos.as_deref().unwrap_or_default(),
+                cfg!(windows),
+            )
         {
             return Err(InstallError::Refused(format!(
                 "{} needs macOS {min} or newer",

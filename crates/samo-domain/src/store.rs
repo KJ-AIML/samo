@@ -486,6 +486,12 @@ pub fn macos_satisfies(min: Option<&str>, current: &str) -> bool {
     }
 }
 
+/// Whether this OS meets a listing's `min_macos`, for the given OS (ADR-006 R25). On Windows it is about the Mac's
+/// package, never the one Windows installs, so it is always met.
+pub fn os_satisfies_on(min_macos: Option<&str>, macos: &str, windows: bool) -> bool {
+    windows || macos_satisfies(min_macos, macos)
+}
+
 /// How two versions compare; an unreadable version compares as unknown.
 pub fn compare_versions(a: &str, b: &str) -> Option<Ordering> {
     Some(numeric(a)?.cmp(&numeric(b)?))
@@ -710,6 +716,15 @@ mod tests {
         // Without Windows packages, the JSON is as it always was.
         let json = serde_json::to_string(&listing()).unwrap_or_default();
         assert!(!json.contains("platforms"), "{json}");
+    }
+
+    #[test]
+    fn min_macos_applies_only_on_the_mac() {
+        assert!(!os_satisfies_on(Some("14.0"), "13.6", false));
+        assert!(os_satisfies_on(Some("14.0"), "15.1", false));
+        assert!(os_satisfies_on(None, "", false));
+        // On Windows a `min_macos` is about the Mac's package, never this one.
+        assert!(os_satisfies_on(Some("14.0"), "", true));
     }
 
     #[test]
