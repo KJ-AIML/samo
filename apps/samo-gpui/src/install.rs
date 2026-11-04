@@ -59,19 +59,86 @@ pub fn is_installed_at(exe: &Path, dir: &Path) -> bool {
             .eq_ignore_ascii_case(&dir.replace('/', "\\"))
 }
 
-/// The PowerShell that makes the shortcut at `lnk` to `target`, with every path in single quotes (a `'` in one is
-/// doubled). It is given on PowerShell's standard input, so nothing in it is a command-line argument.
+/// The PowerShell that makes the shortcut, through Windows' own Unicode shortcut interface (`IShellLinkW`, declared in
+/// C# that PowerShell compiles): WScript.Shell's shortcuts go through the old ANSI code page and turn a Thai or
+/// accented name into `???`. It holds no path; they come in environment variables (`shortcut_env`), which Windows
+/// keeps in Unicode, so no `'` or space in them needs quoting. It is passed whole as `-EncodedCommand`.
 #[cfg(any(windows, test))]
-pub fn shortcut_script(lnk: &Path, target: &Path) -> String {
-    let quote = |p: &str| format!("'{}'", p.replace('\'', "''"));
+pub const SHORTCUT_SCRIPT: &str = r#"Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+using System.Runtime.InteropServices.ComTypes;
+using System.Text;
+namespace Samo {
+  [ComImport, Guid("00021401-0000-0000-C000-000000000046")] class ShellLink {}
+  [ComImport, InterfaceType(ComInterfaceType.InterfaceIsIUnknown), Guid("000214F9-0000-0000-C000-000000000046")]
+  interface IShellLinkW {
+    void GetPath([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder f, int c, IntPtr d, int fl);
+    void GetIDList(out IntPtr p);
+    void SetIDList(IntPtr p);
+    void GetDescription([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder n, int c);
+    void SetDescription([MarshalAs(UnmanagedType.LPWStr)] string n);
+    void GetWorkingDirectory([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder d, int c);
+    void SetWorkingDirectory([MarshalAs(UnmanagedType.LPWStr)] string d);
+    void GetArguments([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder a, int c);
+    void SetArguments([MarshalAs(UnmanagedType.LPWStr)] string a);
+    void GetHotkey(out short h);
+    void SetHotkey(short h);
+    void GetShowCmd(out int s);
+    void SetShowCmd(int s);
+    void GetIconLocation([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder p, int c, out int i);
+    void SetIconLocation([MarshalAs(UnmanagedType.LPWStr)] string p, int i);
+    void SetRelativePath([MarshalAs(UnmanagedType.LPWStr)] string p, int r);
+    void Resolve(IntPtr h, int f);
+    void SetPath([MarshalAs(UnmanagedType.LPWStr)] string f);
+  }
+  public static class Link {
+    public static void Make(string lnk, string target, string dir) {
+      IShellLinkW link = (IShellLinkW)new ShellLink();
+      link.SetPath(target);
+      link.SetWorkingDirectory(dir);
+      ((IPersistFile)link).Save(lnk, true);
+    }
+  }
+}
+'@
+[Samo.Link]::Make($env:SAMO_LNK, $env:SAMO_TARGET, $env:SAMO_DIR)
+"#;
+
+/// A script as PowerShell's `-EncodedCommand` takes it: its UTF-16LE bytes in base64.
+#[cfg(any(windows, test))]
+pub fn encoded_command(script: &str) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let bytes: Vec<u8> = script.encode_utf16().flat_map(u16::to_le_bytes).collect();
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let b = [
+            chunk.first().copied().unwrap_or(0),
+            chunk.get(1).copied().unwrap_or(0),
+            chunk.get(2).copied().unwrap_or(0),
+        ];
+        let n = (u32::from(b[0]) << 16) | (u32::from(b[1]) << 8) | u32::from(b[2]);
+        for (i, shift) in [18u32, 12, 6, 0].into_iter().enumerate() {
+            if i <= chunk.len() {
+                let at = usize::try_from((n >> shift) & 63).unwrap_or(0);
+                out.push(char::from(ALPHABET[at]));
+            } else {
+                out.push('=');
+            }
+        }
+    }
+    out
+}
+
+/// The environment `SHORTCUT_SCRIPT` reads: the shortcut at `lnk`, to `target`, starting in `target`'s folder.
+#[cfg(any(windows, test))]
+pub fn shortcut_env(lnk: &Path, target: &Path) -> [(&'static str, String); 3] {
     let (folder, _) = split_last(target);
-    format!(
-        "$s = (New-Object -ComObject WScript.Shell).CreateShortcut({})\n$s.TargetPath = {}\n\
-         $s.WorkingDirectory = {}\n$s.Save()\n",
-        quote(&lnk.to_string_lossy()),
-        quote(&target.to_string_lossy()),
-        quote(&folder),
-    )
+    [
+        ("SAMO_LNK", lnk.to_string_lossy().into_owned()),
+        ("SAMO_TARGET", target.to_string_lossy().into_owned()),
+        ("SAMO_DIR", folder),
+    ]
 }
 
 /// The `Run` value that starts `exe` at sign-in: its path, quoted, as Windows runs it.
@@ -96,7 +163,7 @@ pub fn after_from(args: &[String]) -> Option<ProcessIdentity> {
 mod windows {
     use super::*;
     use std::fs;
-    use std::io::Write;
+
     use std::process::{Command, Stdio};
     use std::time::{Duration, Instant};
 
@@ -142,22 +209,21 @@ mod windows {
         if let Some(parent) = lnk.parent() {
             fs::create_dir_all(parent).map_err(|e| e.to_string())?;
         }
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         let root = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into());
-        let mut ps = Command::new(format!(
+        let done = Command::new(format!(
             r"{root}\System32\WindowsPowerShell\v1.0\powershell.exe"
         ))
-        .args(["-NoProfile", "-NonInteractive", "-Command", "-"])
-        .stdin(Stdio::piped())
+        .args(["-NoProfile", "-NonInteractive", "-EncodedCommand"])
+        .arg(encoded_command(SHORTCUT_SCRIPT))
+        .envs(shortcut_env(lnk, target))
+        .creation_flags(CREATE_NO_WINDOW)
+        .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
-        .spawn()
+        .status()
         .map_err(|e| format!("couldn't run PowerShell: {e}"))?;
-        if let Some(mut stdin) = ps.stdin.take() {
-            stdin
-                .write_all(shortcut_script(lnk, target).as_bytes())
-                .map_err(|e| e.to_string())?;
-        }
-        let done = ps.wait().map_err(|e| e.to_string())?;
         if done.success() && lnk.is_file() {
             Ok(())
         } else {
@@ -287,24 +353,39 @@ mod tests {
     }
 
     #[test]
-    fn the_shortcut_script_quotes_its_paths() {
-        let script = shortcut_script(
-            Path::new(r"C:\Users\O'Brien\Start Menu\Samo.lnk"),
-            Path::new(r"C:\Users\O'Brien\Programs\Samo\Samo.exe"),
+    fn the_shortcut_takes_its_paths_from_the_environment() {
+        // No path in the script itself: it could be garbled on its way to PowerShell 5.1.
+        assert!(SHORTCUT_SCRIPT.is_ascii());
+        assert!(!SHORTCUT_SCRIPT.contains(":\\"));
+        assert!(SHORTCUT_SCRIPT.contains("IShellLinkW"));
+        // -EncodedCommand is UTF-16LE in base64.
+        assert_eq!(encoded_command("ab"), "YQBiAA==");
+        assert_eq!(encoded_command("abc"), "YQBiAGMA");
+        assert_eq!(encoded_command(""), "");
+        let env = shortcut_env(
+            Path::new(r"C:\Users\ไทย O'Brien\Start Menu\Samo.lnk"),
+            Path::new(r"C:\Users\ไทย O'Brien\Programs\Samo\Samo.exe"),
         );
-        assert!(
-            script.contains(r"CreateShortcut('C:\Users\O''Brien\Start Menu\Samo.lnk')"),
-            "{script}"
+        assert_eq!(
+            env,
+            [
+                (
+                    "SAMO_LNK",
+                    r"C:\Users\ไทย O'Brien\Start Menu\Samo.lnk".to_string()
+                ),
+                (
+                    "SAMO_TARGET",
+                    r"C:\Users\ไทย O'Brien\Programs\Samo\Samo.exe".to_string()
+                ),
+                (
+                    "SAMO_DIR",
+                    r"C:\Users\ไทย O'Brien\Programs\Samo".to_string()
+                ),
+            ]
         );
-        assert!(
-            script.contains(r"TargetPath = 'C:\Users\O''Brien\Programs\Samo\Samo.exe'"),
-            "{script}"
-        );
-        assert!(
-            script.contains(r"WorkingDirectory = 'C:\Users\O''Brien\Programs\Samo'"),
-            "{script}"
-        );
-        assert!(script.trim_end().ends_with("$s.Save()"), "{script}");
+        for (name, _) in &env {
+            assert!(SHORTCUT_SCRIPT.contains(&format!("$env:{name}")), "{name}");
+        }
     }
 
     #[test]
@@ -321,7 +402,7 @@ mod tests {
     #[test]
     fn a_shortcut_is_made_through_powershell() -> Result<(), String> {
         let dir = tempfile::tempdir().map_err(|e| e.to_string())?;
-        let folder = dir.path().join("Jo O'Brien");
+        let folder = dir.path().join("ไทย Jo O'Brien");
         std::fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
         let target = folder.join("Samo.exe");
         std::fs::write(&target, b"MZ").map_err(|e| e.to_string())?;
