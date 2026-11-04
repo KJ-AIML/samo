@@ -72,7 +72,7 @@
   },
   {
     "widget": "note",
-    "text": "Limits come from Claude Code's status line, which runs in a terminal. Its VS Code panel and desktop app don't run it, so limits update when you use Claude Code in a terminal.",
+    "text": "Claude Code reports your limits only when it replies in a terminal. In Cursor, VS Code, the desktop app or claude -p it doesn't, so the figures say how old they are. A limit reached in any session shows here at once.",
     "kind": "plain"
   },
   {
