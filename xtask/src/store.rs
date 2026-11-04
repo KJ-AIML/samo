@@ -5,16 +5,20 @@
 //! package itself declares (id, name, version, protocol, min_samo, summary, changes) from the package's manifest,
 //! and only the store's own fields from `listing.toml`, so the store can't describe one thing and ship another.
 
+use flate2::Compression;
+use flate2::read::GzDecoder;
+use flate2::write::GzEncoder;
 use ring::rand::SystemRandom;
 use ring::signature::{Ed25519KeyPair, KeyPair};
 use samo_domain::store::{
-    Catalog, FileRef, ICON_CAP, ICON_MAX, Listing, MAX_SHOTS, PACKAGE_CAP, SAMO_CAP, SHOT_CAP,
-    SHOT_MAX, SamoRelease, Screenshot, hex, image_size, sha256_hex, verify_catalog, verify_file,
-    verify_image,
+    Catalog, FileRef, ICON_CAP, ICON_MAX, Listing, MAC, MAX_SHOTS, PACKAGE_CAP, SAMO_CAP, SHOT_CAP,
+    SHOT_MAX, SamoRelease, Screenshot, WINDOWS, hex, image_size, manifest_matches, sha256_hex,
+    this_platform, verify_catalog, verify_file, verify_image,
 };
 use samo_ext_protocol::Manifest;
 use serde::Deserialize;
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -31,8 +35,8 @@ fn io<E: std::fmt::Display>(what: &str) -> impl Fn(E) -> String + '_ {
 /// The signing key lives in KJ's login Keychain, so only a Mac can make or use it (ADR-006 R30). Elsewhere `xtask`
 /// still builds and runs its gates, and `ext-publish` signs only with `--test-key`.
 #[cfg(not(target_os = "macos"))]
-const NO_KEYCHAIN: &str =
-    "the store signing key lives in the macOS Keychain; on this OS use `--test-key`";
+const NO_KEYCHAIN: &str = "the store's signing key lives in the macOS Keychain: sign the catalog on the Mac (Windows packages made here \
+     go in its --packages folder), or use `--test-key` for a test store";
 
 #[cfg(target_os = "macos")]
 fn keychain_has() -> bool {
@@ -95,7 +99,8 @@ pub(crate) fn field(text: &str, key: &str) -> Option<String> {
     })
 }
 
-/// `cargo run -p xtask -- ext-package <dir>`: builds an extension's helper and writes `target/ext-dist/<id>-<v>-macos-arm64.tar.gz`.
+/// `cargo run -p xtask -- ext-package <dir>`: builds an extension's helper and writes
+/// `target/ext-dist/<id>-<v>-<platform>.tar.gz` (`macos-arm64`, or `windows-x86_64` on Windows).
 pub fn package(root: &Path, dir: &Path) -> Result<PathBuf, String> {
     let manifest_text =
         fs::read_to_string(dir.join("extension.toml")).map_err(io("extension.toml"))?;
@@ -125,11 +130,18 @@ pub fn package(root: &Path, dir: &Path) -> Result<PathBuf, String> {
         if !status.success() {
             return Err(format!("building {package} failed"));
         }
-        root.join("target/release").join(&bin)
+        root.join("target")
+            .join("release")
+            .join(format!("{bin}{}", std::env::consts::EXE_SUFFIX))
     };
-    let stage = root.join("target/ext-dist/stage");
+    let stage = root.join("target").join("ext-dist").join("stage");
     let _ = fs::remove_dir_all(stage.join(&manifest.id));
-    let helper_dest = stage.join(&manifest.id).join(&manifest.helper);
+    // On Windows the helper is `<helper>.exe`; the manifest names it once (ADR-006).
+    let helper_dest = stage.join(&manifest.id).join(format!(
+        "{}{}",
+        manifest.helper,
+        std::env::consts::EXE_SUFFIX
+    ));
     if let Some(parent) = helper_dest.parent() {
         fs::create_dir_all(parent).map_err(io("staging"))?;
     }
@@ -144,33 +156,23 @@ pub fn package(root: &Path, dir: &Path) -> Result<PathBuf, String> {
     if dir.join("share").is_dir() {
         copy_plain_tree(&dir.join("share"), &stage.join(&manifest.id).join("share"))?;
     }
-    let status = Command::new("chmod")
-        .arg("755")
-        .arg(&helper_dest)
-        .status()
-        .map_err(io("chmod"))?;
-    if !status.success() {
-        return Err("couldn't make the helper executable".into());
+    // Executable on unix; Windows has no such bit.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&helper_dest, fs::Permissions::from_mode(0o755))
+            .map_err(io("making the helper executable"))?;
     }
     // A helper that asks macOS for a permission keeps one identity across updates (ADR-004).
     crate::codesign::sign_if_needed(&manifest, &helper_dest)?;
-    let out = root.join("target/ext-dist").join(format!(
-        "{}-{}-macos-arm64.tar.gz",
-        manifest.id, manifest.version
+    let out = root.join("target").join("ext-dist").join(format!(
+        "{}-{}-{}.tar.gz",
+        manifest.id,
+        manifest.version,
+        this_platform()
     ));
-    let status = Command::new("tar")
-        .env("COPYFILE_DISABLE", "1")
-        .arg("-C")
-        .arg(&stage)
-        .arg("-czf")
-        .arg(&out)
-        .arg(&manifest.id)
-        .status()
-        .map_err(io("tar"))?;
-    if !status.success() {
-        return Err("tar failed".into());
-    }
-    let bytes = fs::read(&out).map_err(io("the package"))?;
+    let bytes = tar_gz(&stage, &manifest.id)?;
+    fs::write(&out, &bytes).map_err(io("the package"))?;
     println!(
         "{}  {} ({} bytes)",
         sha256_hex(&bytes),
@@ -310,25 +312,48 @@ pub fn image_ref(
     })
 }
 
+/// `<root>/<id>/` packed as a package (`<id>/…`, tar.gz), in-process on every OS. Links are stored as links, which
+/// Samo then refuses (R5), never followed.
+pub(crate) fn tar_gz(root: &Path, id: &str) -> Result<Vec<u8>, String> {
+    let mut gz = GzEncoder::new(Vec::new(), Compression::default());
+    {
+        let mut tar = tar::Builder::new(&mut gz);
+        tar.follow_symlinks(false);
+        tar.append_dir_all(id, root.join(id))
+            .map_err(io("packing"))?;
+        tar.finish().map_err(io("packing"))?;
+    }
+    gz.finish().map_err(io("packing"))
+}
+
 /// The manifest inside a package, read without unpacking it.
 fn manifest_in(package: &Path) -> Result<Manifest, String> {
-    let list = Command::new("tar")
-        .arg("-tzf")
-        .arg(package)
-        .output()
-        .map_err(io("tar"))?;
-    let names = String::from_utf8_lossy(&list.stdout);
-    let entry = names
-        .lines()
-        .find(|n| n.ends_with("/extension.toml") && n.matches('/').count() == 1)
-        .ok_or_else(|| format!("{} has no <id>/extension.toml", package.display()))?;
-    let out = Command::new("tar")
-        .arg("-xOzf")
-        .arg(package)
-        .arg(entry)
-        .output()
-        .map_err(io("tar"))?;
-    Manifest::parse(&String::from_utf8_lossy(&out.stdout)).map_err(|e| e.to_string())
+    let bytes = fs::read(package).map_err(io("a package"))?;
+    let mut tar = tar::Archive::new(GzDecoder::new(bytes.as_slice()));
+    for entry in tar.entries().map_err(io("a package"))? {
+        let mut entry = entry.map_err(io("a package"))?;
+        let path = entry
+            .path()
+            .map_err(io("a package"))?
+            .to_string_lossy()
+            .replace('\\', "/");
+        if path.ends_with("/extension.toml") && path.matches('/').count() == 1 {
+            let mut text = String::new();
+            entry
+                .read_to_string(&mut text)
+                .map_err(io("extension.toml"))?;
+            return Manifest::parse(&text).map_err(|e| e.to_string());
+        }
+    }
+    Err(format!("{} has no <id>/extension.toml", package.display()))
+}
+
+/// The platform a package's file name says it is for: `<id>-<version>-<platform>.tar.gz`.
+fn platform_of(name: &str) -> Option<&'static str> {
+    let stem = name.strip_suffix(".tar.gz")?;
+    [MAC, WINDOWS]
+        .into_iter()
+        .find(|p| stem.ends_with(&format!("-{p}")))
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -404,48 +429,71 @@ pub fn publish(args: &PublishArgs) -> Result<(), String> {
         let text = fs::read_to_string(dir.join("listing.toml")).map_err(io("listing.toml"))?;
         let listing: ListingFile =
             toml::from_str(&text).map_err(|e| format!("{id}/listing.toml: {}", e.message()))?;
-        // The newest package for this id.
-        let mut best: Option<(Manifest, PathBuf)> = None;
+        // Every package for this id, by platform (`<id>-<version>-<platform>.tar.gz`).
+        let mut found: Vec<(Manifest, PathBuf, &'static str)> = Vec::new();
         for p in &packages {
             let name = p
                 .file_name()
                 .map(|n| n.to_string_lossy().into_owned())
                 .unwrap_or_default();
-            if !name.starts_with(&format!("{id}-")) {
+            let Some(platform) = platform_of(&name).filter(|_| name.starts_with(&format!("{id}-")))
+            else {
                 continue;
-            }
+            };
             let m = manifest_in(p)?;
-            if m.id == *id
-                && best
-                    .as_ref()
-                    .is_none_or(|(b, _)| samo_domain::store::newer(&m.version, &b.version))
-            {
-                best = Some((m, p.clone()));
+            if m.id == *id {
+                found.push((m, p.clone(), platform));
             }
         }
-        let (manifest, path) =
-            best.ok_or_else(|| format!("{id}: no package in {}", args.packages.display()))?;
-        let bytes = fs::read(&path).map_err(io("a package"))?;
-        let size = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
-        if size > PACKAGE_CAP {
-            return Err(format!("{id}'s package is over {PACKAGE_CAP} bytes"));
-        }
-        let file = path
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        copy(&file, &bytes)?;
-        let mut entry = merge(
-            &manifest,
-            &listing,
-            FileRef {
+        // The newest version, with the Mac's package (which every listing needs: Samo 0.4.1 reads only it) and
+        // Windows' if there is one for that version.
+        let newest = found
+            .iter()
+            .map(|(m, _, _)| m.version.clone())
+            .reduce(|a, b| {
+                if samo_domain::store::newer(&b, &a) {
+                    b
+                } else {
+                    a
+                }
+            })
+            .ok_or_else(|| format!("{id}: no package in {}", args.packages.display()))?;
+        let pick = |platform: &str| {
+            found
+                .iter()
+                .find(|(m, _, p)| *p == platform && m.version == newest)
+        };
+        let Some((manifest, path, _)) = pick(MAC) else {
+            return Err(format!(
+                "{id} {newest} has no Mac package: every listing needs the Mac's, which Samo 0.4.1 reads"
+            ));
+        };
+        let pin = |path: &Path| -> Result<FileRef, String> {
+            let bytes = fs::read(path).map_err(io("a package"))?;
+            let size = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
+            if size > PACKAGE_CAP {
+                return Err(format!("{id}'s package is over {PACKAGE_CAP} bytes"));
+            }
+            let file = path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            copy(&file, &bytes)?;
+            Ok(FileRef {
                 file,
                 size: Some(size),
                 sha256: sha256_hex(&bytes),
                 width: None,
                 height: None,
-            },
-        )?;
+            })
+        };
+        let mut entry = merge(manifest, &listing, pin(path)?)?;
+        if let Some((windows, path, _)) = pick(WINDOWS) {
+            // One listing for both: Windows' manifest must say what the Mac's says (R11).
+            manifest_matches(windows, &entry)
+                .map_err(|e| format!("{id}'s Windows package doesn't match its listing: {e}"))?;
+            entry.platforms.insert(WINDOWS.to_string(), pin(path)?);
+        }
         if let Ok(icon) = fs::read(dir.join("icon.png")) {
             let r = image_ref(id, "icon", &icon, ICON_CAP, ICON_MAX)?;
             copy(&r.file, &icon)?;
@@ -583,8 +631,9 @@ pub fn verify_written(out: &Path, public: &[u8; 32]) -> Result<Catalog, String> 
     let catalog = verify_catalog(&bytes, &sig, public).map_err(|e| e.to_string())?;
     let read = |f: &FileRef| fs::read(out.join(&f.file)).map_err(io("a file in dist"));
     for l in &catalog.extensions {
-        verify_file(&l.id, &read(&l.package)?, &l.package, PACKAGE_CAP)
-            .map_err(|e| e.to_string())?;
+        for package in std::iter::once(&l.package).chain(l.platforms.values()) {
+            verify_file(&l.id, &read(package)?, package, PACKAGE_CAP).map_err(|e| e.to_string())?;
+        }
         if let Some(icon) = &l.icon {
             verify_image(&l.id, &read(icon)?, icon, ICON_CAP, ICON_MAX)
                 .map_err(|e| e.to_string())?;
@@ -734,16 +783,11 @@ mod tests {
         .map_err(|e| e.to_string())?;
         let packages = dir.join("packages");
         fs::create_dir_all(&packages).map_err(|e| e.to_string())?;
-        let ok = Command::new("tar")
-            .env("COPYFILE_DISABLE", "1")
-            .arg("-C")
-            .arg(dir.join("stage"))
-            .arg("-czf")
-            .arg(packages.join("hello-0.2.0-macos-arm64.tar.gz"))
-            .arg("hello")
-            .status()
-            .map_err(|e| e.to_string())?;
-        assert!(ok.success());
+        fs::write(
+            packages.join("hello-0.2.0-macos-arm64.tar.gz"),
+            tar_gz(&dir.join("stage"), "hello")?,
+        )
+        .map_err(|e| e.to_string())?;
 
         let key = Ed25519KeyPair::generate_pkcs8(&SystemRandom::new()).map_err(|_| "key")?;
         fs::write(dir.join("test-key.pk8"), key.as_ref()).map_err(|e| e.to_string())?;
@@ -773,6 +817,78 @@ mod tests {
         fs::write(&p, bytes).map_err(|e| e.to_string())?;
         assert!(verify_written(&out, &public).is_err());
         let _ = fs::remove_dir_all(&dir);
+        Ok(())
+    }
+
+    /// A store with Hello's listing, Hello 0.2.0 staged, and packages named `names` packed from it; then publish.
+    fn publish_with(
+        names: &[&str],
+    ) -> Result<(tempfile::TempDir, Result<Catalog, String>), String> {
+        let dir = tempfile::tempdir().map_err(|e| e.to_string())?;
+        let store = dir.path().join("store/extensions/hello");
+        fs::create_dir_all(&store).map_err(|e| e.to_string())?;
+        fs::write(store.join("listing.toml"), "author = \"KJ\"\n").map_err(|e| e.to_string())?;
+        let stage = dir.path().join("stage/hello");
+        fs::create_dir_all(&stage).map_err(|e| e.to_string())?;
+        fs::write(
+            stage.join("extension.toml"),
+            "id = \"hello\"\nname = \"Hello\"\nversion = \"0.2.0\"\nprotocol = 1\nmin_samo = \"0.2.0\"\n\
+             helper = \"bin/samo-ext-hello\"\nsummary = \"Every widget\"\n\n[[changes]]\nwhat = \"Nothing\"\n\
+             where = \"nowhere\"\nundo = \"nothing\"\n",
+        )
+        .map_err(|e| e.to_string())?;
+        let packages = dir.path().join("packages");
+        fs::create_dir_all(&packages).map_err(|e| e.to_string())?;
+        let tar = tar_gz(&dir.path().join("stage"), "hello")?;
+        for name in names {
+            fs::write(packages.join(name), &tar).map_err(|e| e.to_string())?;
+        }
+        let key = Ed25519KeyPair::generate_pkcs8(&SystemRandom::new()).map_err(|_| "key")?;
+        fs::write(dir.path().join("test-key.pk8"), key.as_ref()).map_err(|e| e.to_string())?;
+        let out = dir.path().join("dist");
+        let published = publish(&PublishArgs {
+            trusted: None,
+            store: dir.path().join("store"),
+            packages,
+            samo: None,
+            out: out.clone(),
+            test_key: Some(dir.path().join("test-key.pk8")),
+            published_at: "2026-11-05T10:00:00Z".into(),
+        })
+        .and_then(|()| {
+            let pair = Ed25519KeyPair::from_pkcs8(key.as_ref()).map_err(|_| "key")?;
+            let mut public = [0u8; 32];
+            public.copy_from_slice(pair.public_key().as_ref());
+            verify_written(&out, &public)
+        });
+        Ok((dir, published))
+    }
+
+    #[test]
+    fn publish_pairs_platform_packages() -> Result<(), String> {
+        let (_dir, catalog) = publish_with(&[
+            "hello-0.2.0-macos-arm64.tar.gz",
+            "hello-0.2.0-windows-x86_64.tar.gz",
+        ])?;
+        let catalog = catalog?;
+        let l = &catalog.extensions[0];
+        assert_eq!(l.package.file, "hello-0.2.0-macos-arm64.tar.gz");
+        assert_eq!(
+            l.package_on(WINDOWS).map(|f| f.file.as_str()),
+            Some("hello-0.2.0-windows-x86_64.tar.gz")
+        );
+        // A Mac package alone is a Mac-only listing, as before.
+        let (_dir, catalog) = publish_with(&["hello-0.2.0-macos-arm64.tar.gz"])?;
+        assert!(catalog?.extensions[0].platforms.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn publish_refuses_a_windows_only_extension() -> Result<(), String> {
+        // Every listing needs the Mac's package: Samo 0.4.1 refuses a catalog with a listing without one.
+        let (_dir, catalog) = publish_with(&["hello-0.2.0-windows-x86_64.tar.gz"])?;
+        let err = catalog.err().unwrap_or_default();
+        assert!(err.contains("Mac"), "{err}");
         Ok(())
     }
 

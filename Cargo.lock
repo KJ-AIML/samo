@@ -7029,12 +7029,14 @@ name = "xtask"
 version = "0.4.1"
 dependencies = [
  "chrono",
+ "flate2",
  "ring",
  "samo-domain",
  "samo-ext-protocol",
  "security-framework",
  "serde",
  "serde_json",
+ "tar",
  "tempfile",
  "toml 0.8.23",
 ]

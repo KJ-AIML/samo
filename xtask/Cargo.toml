@@ -15,6 +15,9 @@ chrono.workspace = true
 ring.workspace = true
 samo-domain.workspace = true
 samo-ext-protocol.workspace = true
+# Packages are made and read in-process, the same on the Mac and Windows (ADR-006).
+tar = { version = "0.4.46", default-features = false }
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 security-framework = "3"
