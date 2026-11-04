@@ -222,12 +222,22 @@ pub fn duration(ms: i64) -> String {
 }
 
 fn project_name(cwd: &str) -> String {
-    cwd.trim_end_matches('/')
-        .rsplit('/')
+    last_folder(cwd).unwrap_or("a session").to_string()
+}
+
+/// The last folder of a session's working folder: what Samo calls its project.
+pub(crate) fn last_folder(cwd: &str) -> Option<&str> {
+    last_folder_on(cwd, cfg!(windows))
+}
+
+/// `last_folder` for the given OS (ADR-006 R25): on Windows `\` separates folders too; on the Mac it is part of
+/// a name.
+fn last_folder_on(cwd: &str, windows: bool) -> Option<&str> {
+    let separators: &[char] = if windows { &['/', '\\'] } else { &['/'] };
+    cwd.trim_end_matches(separators)
+        .rsplit(separators)
         .next()
         .filter(|n| !n.is_empty())
-        .unwrap_or("a session")
-        .to_string()
 }
 
 /// What Samo says about a session, or `None` if it's gone: its Claude process ended (`alive` is `Some(false)`), or
@@ -276,6 +286,17 @@ pub fn derive(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn project_name_from_a_windows_cwd() {
+        assert_eq!(last_folder_on(r"D:\KJ\repo\samo\", true), Some("samo"));
+        assert_eq!(last_folder_on("D:/KJ/repo/samo", true), Some("samo"));
+        assert_eq!(last_folder_on("/Users/kj/samo/", false), Some("samo"));
+        assert_eq!(last_folder_on(r"D:\", true), Some("D:"));
+        assert_eq!(last_folder_on("", true), None);
+        // On the Mac a backslash is part of a name (ADR-006 R25).
+        assert_eq!(last_folder_on(r"/Users/kj/a\b", false), Some(r"a\b"));
+    }
 
     fn fixture(name: &str) -> HookEvent {
         let text = match name {
