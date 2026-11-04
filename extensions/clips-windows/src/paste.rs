@@ -60,8 +60,11 @@ impl PasteFlow {
         let mut waited = Duration::ZERO;
         loop {
             if w.front() == Some(target) {
-                // A moment for the window to take the keyboard back.
+                // A moment for the window to take the keyboard back; then it must still be in front (R24).
                 w.sleep(Duration::from_millis(50));
+                if w.front().as_ref() != Some(&target) {
+                    return Outcome::CopiedOnly(COPIED.into());
+                }
                 w.press_paste();
                 return Outcome::Pasted;
             }
@@ -150,6 +153,12 @@ mod tests {
         flow.remember(Some(7));
         assert_eq!(flow.picked(&w), Outcome::CopiedOnly(COPIED.into()));
         assert_eq!(w.pressed.get(), 0);
+
+        // It comes forward, then something else takes the front before Ctrl+V: nothing is pressed.
+        let w = FakeWindows::new(vec![Some(7), Some(3)]);
+        flow.remember(Some(7));
+        assert_eq!(flow.picked(&w), Outcome::CopiedOnly(COPIED.into()));
+        assert_eq!(w.pressed.get(), 0, "Ctrl+V went to another window");
 
         // Run as administrator: Windows doesn't let Clips type into it.
         let mut w = FakeWindows::new(vec![Some(7)]);
