@@ -16,6 +16,7 @@ members = [
     "apps/samo-cli",
     "apps/samo-gpui",
     "extensions/clips-windows",
+    "extensions/shots-windows",
     "extensions/claude-sessions",
     "extensions/hello",
 ]

@@ -86,7 +86,7 @@ pub fn check_cargo_toml_edges(crate_name: &str, cargo_toml_content: &str) -> Res
 }
 
 /// Every crate in the workspace and its manifest. A crate missing here goes unchecked by `layers` and `network`.
-pub const MANIFESTS: [(&str, &str); 16] = [
+pub const MANIFESTS: [(&str, &str); 17] = [
     ("samo-primitives", "crates/samo-primitives/Cargo.toml"),
     ("samo-blueprint", "crates/samo-blueprint/Cargo.toml"),
     ("samo-ext-protocol", "crates/samo-ext-protocol/Cargo.toml"),
@@ -102,6 +102,7 @@ pub const MANIFESTS: [(&str, &str); 16] = [
     ("samo-gpui", "apps/samo-gpui/Cargo.toml"),
     ("samo-claude", "extensions/claude-sessions/Cargo.toml"),
     ("samo-clips", "extensions/clips-windows/Cargo.toml"),
+    ("samo-shots", "extensions/shots-windows/Cargo.toml"),
     ("samo-ext-hello", "extensions/hello/Cargo.toml"),
 ];
 
