@@ -1134,6 +1134,10 @@ impl Render for SamoWorkspaceApp {
 }
 
 fn main() {
+    // Started from its shortcut or Explorer, Samo's working folder is its own, which Windows then won't let an update
+    // move; Samo reads nothing relative to it, so it stands in the temporary folder instead (ADR-006, R14).
+    #[cfg(windows)]
+    let _ = env::set_current_dir(finish_update::neutral_dir());
     // The new Samo, finishing an update the old one prepared: no window, just the swap.
     if let Some(code) = finish_update::from_args(&env::args().collect::<Vec<_>>()) {
         std::process::exit(code);

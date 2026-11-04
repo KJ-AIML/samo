@@ -176,6 +176,7 @@ mod windows {
             .arg(AFTER)
             .arg(me.pid.to_string())
             .arg(me.start_time_secs.to_string())
+            .current_dir(crate::finish_update::neutral_dir())
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())

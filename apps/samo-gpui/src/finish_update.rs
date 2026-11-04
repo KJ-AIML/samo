@@ -61,6 +61,20 @@ fn detach(command: &mut Command) {
 pub fn launch(prepared: &PreparedUpdate, old_app: &Path) -> Result<(), String> {
     let me =
         inspect_process_identity(std::process::id()).ok_or("Samo couldn't read its own process")?;
+    finisher(prepared, old_app, me)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| format!("couldn't start the new Samo: {e}"))
+}
+
+/// Where Samo's processes stand while it updates: the temporary folder, never inside an app's folder, which Windows
+/// won't move while a process has it as its working folder.
+pub fn neutral_dir() -> PathBuf {
+    std::env::temp_dir()
+}
+
+/// The new Samo's program in update mode, apart from this Samo, standing outside both apps.
+fn finisher(prepared: &PreparedUpdate, old_app: &Path, me: ProcessIdentity) -> Command {
     let mut command = Command::new(program_in(&prepared.app_path));
     command
         .arg(FLAG)
@@ -68,14 +82,12 @@ pub fn launch(prepared: &PreparedUpdate, old_app: &Path) -> Result<(), String> {
         .arg(&prepared.app_path)
         .arg(me.pid.to_string())
         .arg(me.start_time_secs.to_string())
+        .current_dir(neutral_dir())
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
     detach(&mut command);
     command
-        .spawn()
-        .map(|_| ())
-        .map_err(|e| format!("couldn't start the new Samo: {e}"))
 }
 
 /// Update mode, if `args` ask for it: returns the exit code, and Samo doesn't start its window.
@@ -136,6 +148,7 @@ fn start(app: &Path) {
     if cfg!(windows) {
         let mut command = Command::new(program_in(app));
         command
+            .current_dir(neutral_dir())
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null());
@@ -398,6 +411,29 @@ mod tests {
         assert!(matches!(result, Err(SwapFailed::Restored(_))), "{result:?}");
         assert_eq!(marker(&p.old), "old");
         assert!(trashed(&p).is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn the_finisher_stands_outside_both_apps() -> Result<(), String> {
+        // Windows won't move a folder a running process has as its working folder, so neither the finisher nor the
+        // Samo it starts may stand in the old or the new app.
+        let prepared = PreparedUpdate {
+            version: "0.5.0".into(),
+            app_path: PathBuf::from(r"C:\Users\Jo\AppData\Local\Samo\Update\0.5.0\unpacked\Samo"),
+        };
+        let old = Path::new(r"C:\Users\Jo\AppData\Local\Programs\Samo");
+        let me = ProcessIdentity {
+            pid: 1,
+            start_time_secs: 2,
+        };
+        let command = finisher(&prepared, old, me);
+        let dir = command.get_current_dir().ok_or("no working folder")?;
+        assert!(
+            !dir.starts_with(old) && !dir.starts_with(&prepared.app_path),
+            "{dir:?}"
+        );
+        assert_eq!(dir, neutral_dir());
         Ok(())
     }
 
