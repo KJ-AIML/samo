@@ -33,7 +33,7 @@ impl Store {
     }
 
     /// Writes `bytes` to `to` through a temporary file beside it, so a crash never leaves half a file.
-    fn write_atomic(to: &Path, bytes: &[u8]) -> Result<(), String> {
+    pub(crate) fn write_atomic(to: &Path, bytes: &[u8]) -> Result<(), String> {
         let tmp = to.with_extension(format!("tmp-{}", std::process::id()));
         fs::write(&tmp, bytes).map_err(|e| format!("couldn't save: {e}"))?;
         fs::rename(&tmp, to).map_err(|e| {

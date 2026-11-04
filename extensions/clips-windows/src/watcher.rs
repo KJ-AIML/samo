@@ -20,6 +20,26 @@ pub mod clip {
     /// DWORD markers a password manager sets to 0.
     pub const CAN_INCLUDE_IN_HISTORY: &str = "CanIncludeInClipboardHistory";
     pub const CAN_UPLOAD_TO_CLOUD: &str = "CanUploadToCloudClipboard";
+
+    /// The format an item's `data_type` was read from.
+    pub fn of(data_type: &str) -> Option<&'static str> {
+        match data_type {
+            "png" => Some(PNG),
+            "dib" => Some(DIB),
+            "rtf" => Some(RTF),
+            "html" => Some(HTML),
+            _ => None,
+        }
+    }
+}
+
+/// What Clips puts on the clipboard: an item, back, to copy or paste it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Put {
+    pub text: Option<String>,
+    /// A format, by name (`clip::PNG`, …), and its bytes.
+    pub data: Option<(String, Vec<u8>)>,
+    pub files: Vec<String>,
 }
 
 /// The clipboard, as the watcher reads it; tests stand in for Windows'.
@@ -33,6 +53,9 @@ pub trait Board {
     fn text(&self) -> Option<String>;
     fn data(&self, format: &str) -> Option<Vec<u8>>;
     fn files(&self) -> Vec<String>;
+    /// Replaces what is on the clipboard; the sequence number after, or `None` if Windows refused (another app has
+    /// the clipboard open).
+    fn put(&mut self, put: &Put) -> Option<u32>;
 }
 
 pub struct Watcher<B: Board> {
@@ -164,62 +187,8 @@ impl<B: Board> Watcher<B> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::cell::Cell;
+    use crate::fake::FakeBoard;
     use std::rc::Rc;
-
-    /// A clipboard for tests: what is on it, and how often each part of it was read.
-    #[derive(Default)]
-    struct FakeBoard {
-        sequence: u32,
-        formats: Vec<String>,
-        no_history: bool,
-        text: Option<String>,
-        data: Vec<(String, Vec<u8>)>,
-        files: Vec<String>,
-        sequence_reads: Rc<Cell<u32>>,
-        format_reads: Rc<Cell<u32>>,
-        content_reads: Rc<Cell<u32>>,
-    }
-
-    impl FakeBoard {
-        fn copy_text(&mut self, text: &str) {
-            self.sequence += 1;
-            self.formats = vec![clip::TEXT.into()];
-            self.no_history = false;
-            self.text = Some(text.into());
-            self.data.clear();
-            self.files.clear();
-        }
-    }
-
-    impl Board for FakeBoard {
-        fn sequence(&self) -> u32 {
-            self.sequence_reads.set(self.sequence_reads.get() + 1);
-            self.sequence
-        }
-        fn formats(&self) -> Vec<String> {
-            self.format_reads.set(self.format_reads.get() + 1);
-            self.formats.clone()
-        }
-        fn marker(&self, name: &str) -> Option<u32> {
-            (name == clip::CAN_INCLUDE_IN_HISTORY && self.no_history).then_some(0)
-        }
-        fn text(&self) -> Option<String> {
-            self.content_reads.set(self.content_reads.get() + 1);
-            self.text.clone()
-        }
-        fn data(&self, format: &str) -> Option<Vec<u8>> {
-            self.content_reads.set(self.content_reads.get() + 1);
-            self.data
-                .iter()
-                .find(|(f, _)| f == format)
-                .map(|(_, d)| d.clone())
-        }
-        fn files(&self) -> Vec<String> {
-            self.content_reads.set(self.content_reads.get() + 1);
-            self.files.clone()
-        }
-    }
 
     fn watcher(board: FakeBoard, front: &'static str) -> Watcher<FakeBoard> {
         Watcher::new(board, Box::new(move || Some(front.to_string())))
