@@ -128,7 +128,7 @@ fn walk(
                 EntryKind::Symlink
             } else if meta.is_dir() {
                 EntryKind::Dir
-            } else if meta.is_file() && more_than_one_link(&meta) {
+            } else if meta.is_file() && more_than_one_link(&path, &meta) {
                 EntryKind::Hardlink
             } else if meta.is_file() {
                 EntryKind::File
@@ -213,15 +213,22 @@ fn replace_dir(staging: &Path, target: &Path) -> Result<(), InstallError> {
     fs::rename(staging, target).map_err(|e| InstallError::io("couldn't put the copy in place", e))
 }
 
-/// A file with more than one name (a hard link), which a package may not hold. Off unix Samo can't tell yet, so it
-/// says yes and the dev install is refused (extensions come to Windows with #9, ADR-006 R28).
+/// A file with more than one name (a hard link), which a package may not hold.
 #[cfg(unix)]
-fn more_than_one_link(meta: &fs::Metadata) -> bool {
+fn more_than_one_link(_path: &Path, meta: &fs::Metadata) -> bool {
     meta.nlink() > 1
 }
 
-#[cfg(not(unix))]
-fn more_than_one_link(_meta: &fs::Metadata) -> bool {
+/// On Windows the count is read from the file itself. If it can't be, the answer is yes and the install is refused.
+#[cfg(windows)]
+fn more_than_one_link(path: &Path, _meta: &fs::Metadata) -> bool {
+    !fs::File::open(path)
+        .and_then(|file| winapi_util::file::information(&file))
+        .is_ok_and(|info| info.number_of_links() <= 1)
+}
+
+#[cfg(not(any(unix, windows)))]
+fn more_than_one_link(_path: &Path, _meta: &fs::Metadata) -> bool {
     true
 }
 
@@ -236,27 +243,50 @@ fn set_mode(_path: &Path, _mode: u32) -> io::Result<()> {
     Ok(())
 }
 
-#[cfg(unix)]
-fn link_current(version: &str, tmp: &Path) -> Result<(), InstallError> {
-    symlink(version, tmp).map_err(|e| InstallError::io("couldn't link the current version", e))
-}
-
-/// `current` is a link, which Windows allows only in Developer Mode; its Windows form comes with #9.
-#[cfg(not(unix))]
-fn link_current(_version: &str, _tmp: &Path) -> Result<(), InstallError> {
-    Err(InstallError::Io(
-        "extensions come to Samo on Windows later (#9)".into(),
-    ))
-}
-
 /// Points `current` at `version` with a relative link, replacing the old link in one rename so `current` is
 /// never missing.
+#[cfg(unix)]
 pub(crate) fn point_current(root: &ExtRoot, id: &str, version: &str) -> Result<(), InstallError> {
     let current = root.current(id);
     let tmp = root.ext_dir(id).join(".current-tmp");
     let _ = fs::remove_file(&tmp);
-    link_current(version, &tmp)?;
+    symlink(version, &tmp).map_err(|e| InstallError::io("couldn't link the current version", e))?;
     fs::rename(&tmp, &current).map_err(|e| InstallError::io("couldn't link the current version", e))
+}
+
+/// On Windows `current` is a junction, which needs no Developer Mode or admin (ADR-006). One folder can't be
+/// renamed over another, so the old junction steps aside first, and comes back if the new one can't take its
+/// place: `current` is missing only between two renames, and never points at a version that isn't there.
+#[cfg(windows)]
+pub(crate) fn point_current(root: &ExtRoot, id: &str, version: &str) -> Result<(), InstallError> {
+    let failed = |e| InstallError::io("couldn't link the current version", e);
+    let ext_dir = std::path::absolute(root.ext_dir(id)).map_err(failed)?;
+    let current = ext_dir.join("current");
+    let tmp = ext_dir.join(".current-tmp");
+    let old = ext_dir.join(".current-old");
+    remove_link(&tmp);
+    remove_link(&old);
+    junction::create(ext_dir.join(version), &tmp).map_err(failed)?;
+    let had_one = fs::symlink_metadata(&current).is_ok();
+    if had_one && let Err(e) = fs::rename(&current, &old) {
+        remove_link(&tmp);
+        return Err(failed(e));
+    }
+    if let Err(e) = fs::rename(&tmp, &current) {
+        if had_one {
+            let _ = fs::rename(&old, &current);
+        }
+        remove_link(&tmp);
+        return Err(failed(e));
+    }
+    remove_link(&old);
+    Ok(())
+}
+
+/// Removes a junction without touching the folder it points at (removing a junction removes only the link).
+#[cfg(windows)]
+fn remove_link(path: &Path) {
+    let _ = fs::remove_dir(path);
 }
 
 /// Removes version folders other than `keep` (and leftovers from interrupted installs).
@@ -539,9 +569,10 @@ pub(crate) fn unpack(package: &[u8], id: &str, dest: &Path) -> Result<(), Instal
     }
 }
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
 
     fn make_dev(dir: &Path, version: &str) -> Result<PathBuf, String> {
@@ -556,11 +587,25 @@ mod tests {
             ),
         )
         .map_err(|e| e.to_string())?;
-        let helper = src.join("bin/hello");
+        let helper = src.join(hello_file());
         fs::write(&helper, "#!/bin/sh\necho hi\n").map_err(|e| e.to_string())?;
+        #[cfg(unix)]
         fs::set_permissions(&helper, fs::Permissions::from_mode(0o755))
             .map_err(|e| e.to_string())?;
         Ok(src)
+    }
+
+    /// The helper's file in a dev folder: `bin/hello`, or `bin/hello.exe` on Windows.
+    fn hello_file() -> String {
+        helper_file_on("bin/hello", cfg!(windows))
+    }
+
+    /// The version `current` points at, read through it.
+    fn current_version(root: &ExtRoot) -> Result<String, String> {
+        let text = fs::read_to_string(root.current("hello").join("extension.toml"))
+            .map_err(|e| e.to_string())?;
+        let manifest = Manifest::parse(&text).map_err(|e| e.to_string())?;
+        Ok(manifest.version)
     }
 
     #[test]
@@ -574,10 +619,24 @@ mod tests {
         assert_eq!(done.manifest.id, "hello");
 
         let helper = root.helper("hello", "bin/hello");
-        let meta = fs::metadata(&helper).map_err(|e| e.to_string())?;
-        assert_eq!(meta.permissions().mode() & 0o111, 0o111);
-        let link = fs::read_link(root.current("hello")).map_err(|e| e.to_string())?;
-        assert_eq!(link, PathBuf::from("0.1.0"));
+        assert!(helper.is_file(), "{}", helper.display());
+        #[cfg(unix)]
+        {
+            let meta = fs::metadata(&helper).map_err(|e| e.to_string())?;
+            assert_eq!(meta.permissions().mode() & 0o111, 0o111);
+            let link = fs::read_link(root.current("hello")).map_err(|e| e.to_string())?;
+            assert_eq!(link, PathBuf::from("0.1.0"));
+        }
+        assert_eq!(current_version(&root)?, "0.1.0");
+        // Pointing again replaces the link and never what it points at.
+        point_current(&root, "hello", "0.1.0").map_err(|e| e.to_string())?;
+        point_current(&root, "hello", "0.1.0").map_err(|e| e.to_string())?;
+        assert!(
+            root.version_dir("hello", "0.1.0")
+                .join("extension.toml")
+                .is_file()
+        );
+        assert_eq!(current_version(&root)?, "0.1.0");
         assert!(root.data_dir("hello").is_dir());
         assert_eq!(
             find_dev_packages(&dir.path().join("dev")),
@@ -596,7 +655,7 @@ mod tests {
         let again = install_dev(&root, &src).map_err(|e| e.to_string())?;
         assert!(!again.copied, "an unchanged source isn't copied again");
 
-        fs::write(src.join("bin/hello"), "#!/bin/sh\necho hello again\n")
+        fs::write(src.join(hello_file()), "#!/bin/sh\necho hello again\n")
             .map_err(|e| e.to_string())?;
         let changed = install_dev(&root, &src).map_err(|e| e.to_string())?;
         assert!(changed.copied);
@@ -616,8 +675,12 @@ mod tests {
 
         let src = make_dev(dir.path(), "0.2.0")?;
         install_dev(&root, &src).map_err(|e| e.to_string())?;
-        let link = fs::read_link(root.current("hello")).map_err(|e| e.to_string())?;
-        assert_eq!(link, PathBuf::from("0.2.0"));
+        #[cfg(unix)]
+        {
+            let link = fs::read_link(root.current("hello")).map_err(|e| e.to_string())?;
+            assert_eq!(link, PathBuf::from("0.2.0"));
+        }
+        assert_eq!(current_version(&root)?, "0.2.0");
         assert!(root.helper("hello", "bin/hello").is_file());
         // The old version is gone, data stays, and nothing temporary is left behind.
         assert!(!root.version_dir("hello", "0.1.0").exists());
@@ -660,6 +723,8 @@ mod tests {
         enc.finish().map_err(|e| e.to_string())
     }
 
+    /// macOS's bsdtar and exec bits; the store comes to Windows with #10.
+    #[cfg(unix)]
     #[test]
     fn unpack_reads_macos_tar_and_keeps_the_helper_executable() -> Result<(), String> {
         let dir = tempfile::tempdir().map_err(|e| e.to_string())?;
@@ -722,6 +787,8 @@ mod tests {
         Ok(())
     }
 
+    /// A symlink needs Developer Mode on Windows; there, a hard link stands for every link (below).
+    #[cfg(unix)]
     #[test]
     fn dev_install_refuses_links_and_missing_helper() -> Result<(), String> {
         let dir = tempfile::tempdir().map_err(|e| e.to_string())?;
@@ -743,6 +810,33 @@ mod tests {
             install_dev(&root, &src),
             Err(InstallError::NoHelper(_))
         ));
+        Ok(())
+    }
+
+    #[test]
+    fn hard_links_are_refused() -> Result<(), String> {
+        let dir = tempfile::tempdir().map_err(|e| e.to_string())?;
+        let root = ExtRoot::at(dir.path().join("Extensions"));
+        let src = make_dev(dir.path(), "0.1.0")?;
+        // A second name for the helper: a package may not hold one (R5).
+        fs::hard_link(src.join(hello_file()), src.join("bin/twin")).map_err(|e| e.to_string())?;
+        assert!(matches!(
+            install_dev(&root, &src),
+            Err(InstallError::Package(_))
+        ));
+        assert!(
+            !root.ext_dir("hello").exists(),
+            "nothing is copied when refused"
+        );
+
+        fs::remove_file(src.join("bin/twin")).map_err(|e| e.to_string())?;
+        install_dev(&root, &src).map_err(|e| e.to_string())?;
+        fs::remove_file(src.join(hello_file())).map_err(|e| e.to_string())?;
+        let missing = install_dev(&root, &src);
+        assert!(
+            matches!(&missing, Err(InstallError::NoHelper(h)) if *h == hello_file()),
+            "{missing:?}"
+        );
         Ok(())
     }
 }
