@@ -1,6 +1,7 @@
-//! PR E's demo, end to end: the real `samo-clips.exe` under Samo's real extension host, on this PC's real clipboard.
-//! A copy shows on Clips' page in Samo; a copy marked secret doesn't; Delete and Pause from Samo work; turning Clips
-//! off stops it and keeps the history. The shortcut is left unset, so the test never takes one from this PC.
+//! Clips' demo, end to end: the real `samo-clips.exe` under Samo's real extension host, on this PC's real clipboard.
+//! A shortcut chosen on the page is held by the list (Alt+Shift+V, for a moment, then none); a copy shows on Clips'
+//! page in Samo; a copy marked secret doesn't; Delete and Pause from Samo work; turning Clips off stops it and keeps
+//! the history. It starts with no shortcut, and presses no keys.
 //!
 //! It replaces what you copied, so it runs on CI, or when `SAMO_TEST_CLIPBOARD=1`; the text that was there goes back.
 #![cfg(windows)]

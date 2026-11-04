@@ -21,6 +21,8 @@ pub enum ShortcutState {
     Ready,
     /// Windows refused it: another app has it (R18, never forced).
     Refused,
+    /// The list couldn't start, so nothing can hold the shortcut (R28).
+    Broken,
 }
 
 /// Everything the page shows.
@@ -228,6 +230,10 @@ pub fn build(s: &PageState) -> Vec<Widget> {
         (Some(_), ShortcutState::NotYet) => {
             (Lamp::Off, "Not ready yet: the list is starting".to_string())
         }
+        (Some(_), ShortcutState::Broken) => (
+            Lamp::Error,
+            "The list couldn't start: turn Clips off and on again".to_string(),
+        ),
     };
     view.push(Widget::Rows {
         items: vec![RowItem {
@@ -509,6 +515,18 @@ mod tests {
                 "{one}"
             );
         }
+    }
+
+    #[test]
+    fn a_list_that_couldnt_start_says_so() {
+        let h = History::default();
+        let mut s = state(&h);
+        s.shortcut = ShortcutState::Broken;
+        let row = rows(&build(&s))
+            .into_iter()
+            .find(|r| r.title == "Open the list");
+        assert_eq!(row.as_ref().map(|r| r.lamp), Some(Lamp::Error));
+        assert!(row.is_some_and(|r| r.detail.contains("couldn't start")));
     }
 
     #[test]

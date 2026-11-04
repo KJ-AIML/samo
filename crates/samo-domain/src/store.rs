@@ -335,6 +335,9 @@ fn check_listing(l: &Listing) -> Result<(), StoreError> {
     if l.changes.is_empty() {
         return bad("it must say what it changes on the Mac".into());
     }
+    if l.overrides.contains_key(MAC) {
+        return bad("the Mac's own are the listing's; it has no override".into());
+    }
     if l.overrides.values().any(|caps| caps.changes.is_empty()) {
         return bad("each platform it overrides must say what it changes there".into());
     }
@@ -493,13 +496,13 @@ pub fn image_size(bytes: &[u8]) -> Option<(u32, u32)> {
     None
 }
 
-/// The package's manifest must say what its listing says (ADR-003 M3): what you read in the store is what you
-/// install.
 /// `manifest_matches` against the listing as `platform` sees it: a Windows package against Windows' capabilities.
 pub fn manifest_matches_on(m: &Manifest, l: &Listing, platform: &str) -> Result<(), StoreError> {
     manifest_matches(m, &l.on(platform))
 }
 
+/// The package's manifest must say what its listing says (ADR-003 M3): what you read in the store is what you
+/// install.
 pub fn manifest_matches(m: &Manifest, l: &Listing) -> Result<(), StoreError> {
     if m.id != l.id {
         return Err(StoreError::ManifestMismatch("id"));
@@ -1052,6 +1055,15 @@ undo = \"u\"
                 .contains("overrides")
         );
         Ok(())
+    }
+
+    /// The Mac's own are the listing's, which Samo 0.4.1 reads: an override for the Mac would show new Samos
+    /// something else (R25).
+    #[test]
+    fn the_mac_has_no_override() {
+        let mut l = listing();
+        l.overrides.insert(MAC.into(), windows_capabilities());
+        assert!(matches!(check_listing(&l), Err(StoreError::BadListing(_))));
     }
 
     #[test]

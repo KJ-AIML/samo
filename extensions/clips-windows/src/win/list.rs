@@ -7,7 +7,7 @@
 use crate::clips::ListAsk;
 use crate::history::{Item, Kind};
 use crate::list_model::{Key, ListModel, Mods, Outcome};
-use crate::page;
+use crate::page::{self, ShortcutState};
 use crate::paste::{Outcome as Pasted, PasteFlow};
 use crate::serve::Event;
 use crate::settings::Shortcut;
@@ -137,9 +137,11 @@ struct List {
     rows: gui::ListView,
     clips: Sender<Event>,
     state: Rc<RefCell<State>>,
+    /// Where to hand the window once it is made (for the shortcut bridge).
+    made: Rc<RefCell<Option<Sender<gui::WindowMain>>>>,
 }
 
-/// What a row says beside its title: pinned, its kind, and its Ctrl+number.
+/// What a row says beside its title: its Ctrl+number first (the part you use), then its kind, and pinned.
 fn info(item: &Item, row: usize) -> String {
     let kind = match item.kind {
         Kind::Text => "Text",
@@ -148,18 +150,22 @@ fn info(item: &Item, row: usize) -> String {
         Kind::Files => "Files",
     };
     let mut words = Vec::new();
-    if item.pinned {
-        words.push("Pinned".to_string());
-    }
-    words.push(kind.to_string());
     if row < 9 {
         words.push(format!("Ctrl+{}", row + 1));
+    }
+    words.push(kind.to_string());
+    if item.pinned {
+        words.push("Pinned".to_string());
     }
     words.join(" · ")
 }
 
 impl List {
-    fn new(clips: Sender<Event>, shortcut: Option<Shortcut>) -> Self {
+    fn new(
+        clips: Sender<Event>,
+        shortcut: Option<Shortcut>,
+        made: Sender<gui::WindowMain>,
+    ) -> Self {
         let accel: Vec<w::ACCEL> = keys()
             .iter()
             .map(|(flags, vk, cmd, _, _)| w::ACCEL {
@@ -214,6 +220,7 @@ impl List {
                 flow: PasteFlow::default(),
                 open: false,
             })),
+            made: Rc::new(RefCell::new(Some(made))),
         };
         list.events(shortcut);
         list
@@ -224,6 +231,9 @@ impl List {
         self.wnd.on().wm_create(move |_| {
             let state = hotkey::register(me.wnd.hwnd(), shortcut);
             let _ = me.clips.send(Event::List(ListAsk::Shortcut(state)));
+            if let Some(made) = me.made.borrow_mut().take() {
+                let _ = made.send(me.wnd.clone());
+            }
             Ok(0)
         });
         let me = self.clone();
@@ -392,7 +402,9 @@ impl List {
             self.state.borrow_mut().flow.cancelled();
             return;
         }
-        let pasted = self.state.borrow_mut().flow.picked(&WinWindows);
+        // Out of the state first: the paste brings windows forward, which must find the state free.
+        let mut flow = std::mem::take(&mut self.state.borrow_mut().flow);
+        let pasted = flow.picked(&WinWindows);
         if let Pasted::CopiedOnly(words) = pasted {
             let _ = self.clips.send(Event::List(ListAsk::Say(words)));
         }
@@ -419,11 +431,16 @@ pub fn start(
     let (made_tx, made_rx) = mpsc::channel();
     let to_clips = clips.clone();
     let started = thread::Builder::new().name("list".into()).spawn(move || {
-        let list = List::new(to_clips, shortcut);
-        let _ = made_tx.send(list.wnd.clone());
+        let list = List::new(to_clips.clone(), shortcut, made_tx);
         let _ = list.wnd.run_main(Some(co::SW::HIDE));
+        // The list is gone (it couldn't be made, or its loop ended): nothing holds the shortcut now (R28).
+        let _ = to_clips.send(Event::List(ListAsk::Shortcut(ShortcutState::Broken)));
     });
-    let (Ok(_), Ok(wnd)) = (started, made_rx.recv()) else {
+    let made = started
+        .ok()
+        .and_then(|_| made_rx.recv_timeout(Duration::from_secs(5)).ok());
+    let Some(wnd) = made else {
+        let _ = clips.send(Event::List(ListAsk::Shortcut(ShortcutState::Broken)));
         return Box::new(|_| {});
     };
     let (new_tx, new_rx) = mpsc::channel::<Option<Shortcut>>();
@@ -466,6 +483,22 @@ mod tests {
             Ok(Event::List(ListAsk::Shortcut(state))) => Some(state),
             _ => None,
         }
+    }
+
+    #[test]
+    fn a_rows_ctrl_number_comes_first() {
+        let mut h = crate::history::History::default();
+        h.add(
+            &crate::history::Capture::text("one", None),
+            chrono::Utc::now(),
+        );
+        let Some(item) = h.items().first() else {
+            return;
+        };
+        let mut pinned = item.clone();
+        pinned.pinned = true;
+        assert_eq!(info(&pinned, 0), "Ctrl+1 · Text · Pinned");
+        assert_eq!(info(item, 9), "Text", "only rows 1 to 9 have a Ctrl+number");
     }
 
     /// The list's thread starts, holds its shortcut as its window is made, and takes a new one from the page; each

@@ -206,6 +206,10 @@ impl<B: Board> Clips<B> {
                 if let Some((_, shortcut)) =
                     shortcut_choices().into_iter().find(|(id, _)| *id == value)
                 {
+                    if self.settings.shortcut != shortcut {
+                        // The old one's answer isn't the new one's: the list says again.
+                        self.shortcut = ShortcutState::NotYet;
+                    }
                     self.settings.shortcut = shortcut;
                     self.save_settings();
                 }
@@ -835,6 +839,37 @@ mod tests {
             lamp,
             Some(Lamp::Off),
             "the page said Ready with nothing holding the shortcut"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_new_shortcut_isnt_judged_by_the_old_ones_answer() -> Result<(), String> {
+        let tmp = tempfile::tempdir().map_err(|e| e.to_string())?;
+        let now = Utc::now();
+        let mut c = open(tmp.path());
+        c.set_shortcut_state(ShortcutState::Refused);
+        c.handle(
+            &HostMsg::Choice {
+                key: "shortcut".into(),
+                value: "alt-shift-v".into(),
+            },
+            now,
+        );
+        let msgs = c.updates(now, false);
+        let lamp = view(&msgs).and_then(|v| {
+            v.iter().find_map(|w| match w {
+                Widget::Rows { items } => items
+                    .iter()
+                    .find(|r| r.title == "Open the list")
+                    .map(|r| r.lamp),
+                _ => None,
+            })
+        });
+        assert_eq!(
+            lamp,
+            Some(Lamp::Off),
+            "the old shortcut's refusal was shown for the new one"
         );
         Ok(())
     }
