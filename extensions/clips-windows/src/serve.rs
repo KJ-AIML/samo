@@ -1,6 +1,7 @@
 //! `samo-clips serve`: what Samo runs while Clips is on. It says hello, sends the page and the badge, looks at the
-//! clipboard twice a second (one sequence-number read when nothing changed, R21), and answers Samo's messages. It
-//! exits when Samo says `shutdown` or closes its stdin; the history stays.
+//! clipboard when Windows says it changed (twice a second if Windows won't say; one sequence-number read when
+//! nothing changed, R21), and answers Samo's messages. It exits when Samo says `shutdown` or closes its stdin; the
+//! history stays.
 
 use crate::clips::Clips;
 use crate::watcher::Board;
@@ -14,14 +15,18 @@ use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::thread;
 use std::time::Duration;
 
-/// How often Clips looks at the clipboard.
+/// How often Clips looks at the clipboard when Windows won't say when it changes.
 pub const EVERY: Duration = Duration::from_millis(500);
+/// How often the page is refreshed when Windows does say (a pause ending shows within this).
+pub const QUIET: Duration = Duration::from_secs(5);
 
 /// What the serving loop waits for.
 pub enum Event {
     Host(HostMsg),
     /// Samo closed Clips' stdin.
     Gone,
+    /// Windows says the clipboard changed: look now.
+    Changed,
 }
 
 fn send(out: &mut impl Write, msg: &HelperMsg) -> bool {
@@ -50,7 +55,7 @@ pub fn serve<B: Board>(
                     Ok(Event::Host(HostMsg::Shutdown) | Event::Gone)
                     | Err(RecvTimeoutError::Disconnected) => break,
                     Ok(Event::Host(msg)) => said = clips.handle(&msg, now),
-                    Err(RecvTimeoutError::Timeout) => {}
+                    Ok(Event::Changed) | Err(RecvTimeoutError::Timeout) => {}
                 }
                 clips.tick(now);
             }
@@ -82,8 +87,13 @@ pub fn data_dir() -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
-/// `serve` on this process's stdin and stdout, with this OS's clipboard.
-pub fn run<B: Board>(board: B, front: Box<dyn Fn() -> Option<String> + Send>) -> ExitCode {
+/// `serve` on this process's stdin and stdout, with this OS's clipboard. `listen` starts telling of changes on the
+/// channel it is given, and says whether it could.
+pub fn run<B: Board>(
+    board: B,
+    front: Box<dyn Fn() -> Option<String> + Send>,
+    listen: impl FnOnce(mpsc::Sender<Event>) -> bool,
+) -> ExitCode {
     let Some(dir) = data_dir() else {
         eprintln!("samo-clips: Samo didn't say where Clips keeps its files (SAMO_EXT_DATA_DIR)");
         return ExitCode::FAILURE;
@@ -113,6 +123,7 @@ pub fn run<B: Board>(board: B, front: Box<dyn Fn() -> Option<String> + Send>) ->
         }
     };
     let (tx, rx) = mpsc::channel();
+    let every = if listen(tx.clone()) { QUIET } else { EVERY };
     let _ = thread::Builder::new().name("stdin".into()).spawn(move || {
         for line in std::io::stdin().lock().lines() {
             let Ok(line) = line else { break };
@@ -125,7 +136,7 @@ pub fn run<B: Board>(board: B, front: Box<dyn Fn() -> Option<String> + Send>) ->
         let _ = tx.send(Event::Gone);
     });
     let mut clips = Clips::open(&dir, board, front);
-    serve(&mut clips, &rx, &mut stdout, EVERY);
+    serve(&mut clips, &rx, &mut stdout, every);
     drop(held);
     ExitCode::SUCCESS
 }
@@ -167,6 +178,21 @@ mod tests {
         ));
         assert!(matches!(msgs.get(1), Some(HelperMsg::View { .. })));
         assert!(matches!(msgs.get(2), Some(HelperMsg::Badge { .. })));
+        Ok(())
+    }
+
+    #[test]
+    fn a_change_windows_tells_of_is_kept_at_once() -> Result<(), String> {
+        let tmp = tempfile::tempdir().map_err(|e| e.to_string())?;
+        let mut clips = Clips::open(tmp.path(), FakeBoard::default(), Box::new(|| None));
+        clips.board_mut().copy_text("told");
+        let (tx, rx) = mpsc::channel();
+        let _ = tx.send(Event::Changed);
+        let _ = tx.send(Event::Gone);
+        let mut out = Vec::new();
+        // An hour between looks: only Windows' word makes it look.
+        serve(&mut clips, &rx, &mut out, Duration::from_secs(3600));
+        assert_eq!(clips.history().items().len(), 1);
         Ok(())
     }
 

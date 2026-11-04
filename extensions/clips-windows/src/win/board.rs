@@ -118,44 +118,8 @@ mod tests {
     use super::*;
     use crate::clips::Clips;
     use crate::watcher::{Watcher, clip};
+    use crate::win::real::real_clipboard;
     use chrono::Utc;
-    use std::sync::{Mutex, MutexGuard};
-
-    static ONE_AT_A_TIME: Mutex<()> = Mutex::new(());
-
-    /// The real clipboard, for one test at a time; what was on it (as text) goes back after. These tests replace
-    /// what you copied, so they run on CI, or when `SAMO_TEST_CLIPBOARD=1`.
-    struct RealClipboard {
-        before: Option<String>,
-        _one: MutexGuard<'static, ()>,
-    }
-
-    impl Drop for RealClipboard {
-        fn drop(&mut self) {
-            if let Some(text) = self.before.take() {
-                WinBoard.put(&Put {
-                    text: Some(text),
-                    ..Put::default()
-                });
-            }
-        }
-    }
-
-    fn real_clipboard() -> Option<RealClipboard> {
-        let allowed =
-            std::env::var_os("CI").is_some() || std::env::var_os("SAMO_TEST_CLIPBOARD").is_some();
-        if !allowed {
-            eprintln!("skipped: the real clipboard tests run on CI, or with SAMO_TEST_CLIPBOARD=1");
-            return None;
-        }
-        let one = ONE_AT_A_TIME
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        Some(RealClipboard {
-            before: WinBoard.text(),
-            _one: one,
-        })
-    }
 
     #[test]
     fn a_text_put_is_read_back_as_text() {

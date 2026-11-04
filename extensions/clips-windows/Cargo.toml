@@ -32,7 +32,7 @@ tempfile.workspace = true
 # `clipboard-win` (BSL-1.0, by DoumanAsh, maintained since 2015) is a safe API over the Win32 clipboard: its sequence
 # number, formats, registered formats, text, bytes and file lists. `winsafe` (MIT) is already Samo's for R15.
 [target.'cfg(windows)'.dependencies]
-clipboard-win = "5.4.3"
+clipboard-win = { version = "5.4.3", features = ["monitor"] }
 winsafe = { version = "0.0.29", features = ["user", "kernel"] }
 
 [target.'cfg(windows)'.dev-dependencies]

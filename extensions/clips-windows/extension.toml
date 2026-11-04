@@ -6,7 +6,7 @@ min_samo = "0.4.0"
 helper = "bin/samo-clips"
 summary = "Clipboard history: Win+Alt+V finds anything you copied and pastes it where you are"
 windows = "Opens its own window: the list at its shortcut (Win+Alt+V unless you change it)"
-watches = "Watches the clipboard: checks for a new copy twice a second, and keeps it on this PC"
+watches = "Watches the clipboard: Windows tells it of each new copy, which it keeps on this PC"
 
 [limits]
 memory_mb = 300
