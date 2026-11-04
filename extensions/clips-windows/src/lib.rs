@@ -7,6 +7,7 @@ pub mod dib;
 mod fake;
 pub mod filters;
 pub mod history;
+pub mod list_model;
 pub mod page;
 pub mod paste;
 pub mod search;
