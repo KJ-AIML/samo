@@ -5,6 +5,7 @@
 //! extension has `<id>/<version>/`, a `current` link to the version in use, and its own `data/`.
 
 mod error;
+mod family;
 mod history;
 mod host;
 mod install;
