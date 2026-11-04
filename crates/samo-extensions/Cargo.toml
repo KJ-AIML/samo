@@ -29,9 +29,13 @@ objc2-core-graphics = { version = "0.3.2", default-features = false, features = 
 # Installing on Windows (ADR-006): `current` is a junction, which needs no Developer Mode or admin (`junction`,
 # safe API, windows-sys already in the lockfile), and a hard-linked file is told by its link count (`winapi-util`,
 # as in samo-windows).
+# A helper and everything it starts are kept in one Job Object, closed with kill-on-close, so they end together
+# and can't outlive Samo (ADR-004 R15, R17; `win32job`, a safe API over the Microsoft `windows` crate, whose 0.61 is
+# already in the lockfile).
 [target.'cfg(windows)'.dependencies]
 junction = { version = "2.1.0", default-features = false }
 winapi-util = "0.1.11"
+win32job = "2.0.3"
 
 [dev-dependencies]
 samo-testkit.workspace = true
