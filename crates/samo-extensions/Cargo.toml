@@ -25,6 +25,8 @@ toml.workspace = true
 sysinfo.workspace = true
 chrono.workspace = true
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+# Samo for Windows' update is a zip (ADR-006), unpacked in-process with every entry checked; deflate only.
+zip = { version = "9.3.0", default-features = false, features = ["deflate-flate2"] }
 ureq = { version = "3", default-features = false, features = ["rustls"] }
 
 # The window check (ADR-004, R15) reads the Mac's window server; Windows' comes with #9 (ADR-006).

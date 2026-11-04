@@ -4553,6 +4553,7 @@ dependencies = [
  "win32job",
  "winapi-util",
  "winsafe 0.0.29",
+ "zip",
 ]
 
 [[package]]
