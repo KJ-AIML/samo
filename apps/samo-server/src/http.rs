@@ -1,3 +1,7 @@
+use crate::platform::{
+    SystemCollector, default_user_trash_dir, inspect_node_identity, inspect_process_identity,
+    move_to_trash, scan_directory, terminate_verified_process,
+};
 use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
@@ -5,10 +9,6 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use samo_blueprint::{DEFAULT_SAMPLE_INTERVAL_MS, ScanConfig, Surface};
 use samo_engine::{DEFAULT_LOCAL_WEB_TOKEN, Engine};
-use samo_macos::{
-    SystemCollector, default_user_trash_dir, inspect_node_identity, inspect_process_identity,
-    move_to_trash, scan_directory, terminate_verified_process,
-};
 use samo_primitives::{
     ErrorCode, FileNodeIdentity, PhosphorTheme, ProcessIdentity, SamoError, SamoResult, TenantId,
 };
@@ -41,7 +41,11 @@ pub async fn initialize_server_state(
         ensure_tenant(
             &mut sys_tx,
             &TenantId::local_default(),
-            "Personal Mac",
+            if cfg!(windows) {
+                "Personal PC"
+            } else {
+                "Personal Mac"
+            },
             now_ms,
         )
         .await?;
@@ -189,7 +193,7 @@ pub struct TriggerScanRequest {
 
 /// 2-Phase Non-Transactional Disk Scan Workflow:
 /// 1. `disk.scan.begin` (Transaction 1)
-/// 2. `samo_macos::scan_directory` (Outside DB transaction)
+/// 2. `platform::scan_directory` (Outside DB transaction)
 /// 3. `disk.scan.finish` (Transaction 2)
 async fn disk_scan_workflow_handler(
     State(state): State<AppState>,
@@ -219,6 +223,13 @@ async fn disk_scan_workflow_handler(
         .and_then(Value::as_str)
         .unwrap_or("scn_unknown")
         .to_string();
+    // The root as the engine kept it (ADR-006 R26: `C:/…` on Windows; unchanged on the Mac), so the stored scan and
+    // its snapshot name the same folder.
+    let root_path = begin_val
+        .get("root_path")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .unwrap_or(root_path);
 
     let scan_cfg = ScanConfig {
         max_threads: req.max_threads.unwrap_or(4),
@@ -305,7 +316,7 @@ pub struct TrashWorkflowRequest {
 
 /// 2-Phase Non-Transactional Trash Cleanup Workflow (`R2`):
 /// 1. `disk.cleanup.begin` (validates protected path denylist & inode match in Transaction 1)
-/// 2. `samo_macos::move_to_trash` (collision-safe rename into `~/.Trash` outside DB transaction)
+/// 2. `platform::move_to_trash` (the Mac: collision-safe rename into `~/.Trash`; Windows: the Recycle Bin; outside DB transaction)
 /// 3. `disk.cleanup.finish` (records trashed path & reclaimed bytes in Transaction 2)
 async fn disk_trash_workflow_handler(
     State(state): State<AppState>,
@@ -338,7 +349,15 @@ async fn disk_trash_workflow_handler(
         .unwrap_or("cln_unknown")
         .to_string();
 
-    let trash_outcome = move_to_trash(Path::new(&req.target_path), req.identity, &state.trash_dir);
+    // Off the async workers, as the scan is: moving a big folder (and on Windows reading its Recycle Bin) takes time.
+    let target_path = req.target_path.clone();
+    let trash_dir = state.trash_dir.clone();
+    let trash_outcome = tokio::task::spawn_blocking(move || {
+        move_to_trash(Path::new(&target_path), req.identity, &trash_dir)
+    })
+    .await
+    .map_err(|e| SamoError::new(ErrorCode::InternalError, e.to_string()))
+    .and_then(|outcome| outcome);
 
     match trash_outcome {
         Ok(outcome) => match state
@@ -384,6 +403,7 @@ pub struct RevealRequest {
     pub path: String,
 }
 
+#[cfg(not(windows))]
 async fn disk_reveal_handler(Json(req): Json<RevealRequest>) -> impl IntoResponse {
     let status = std::process::Command::new("/usr/bin/open")
         .arg("-R")
@@ -401,6 +421,33 @@ async fn disk_reveal_handler(Json(req): Json<RevealRequest>) -> impl IntoRespons
     }
 }
 
+/// Show in Explorer (ADR-006 §3): the folder opens with the item selected. Explorer exits 1 even when it worked,
+/// so only a path that isn't there, or Explorer not starting, is an error.
+#[cfg(windows)]
+async fn disk_reveal_handler(Json(req): Json<RevealRequest>) -> impl IntoResponse {
+    let windows_path = req.path.replace('/', "\\");
+    let explorer = std::env::var_os("SystemRoot")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(r"C:\Windows"))
+        .join("explorer.exe");
+    let shown = Path::new(&windows_path).exists()
+        && std::process::Command::new(explorer)
+            .arg(format!("/select,{windows_path}"))
+            .spawn()
+            .is_ok();
+    if shown {
+        (
+            StatusCode::OK,
+            Json(serde_json::json!({ "revealed": req.path })),
+        )
+    } else {
+        error_response(SamoError::new(
+            ErrorCode::NotFound,
+            format!("could not show `{}` in Explorer", req.path),
+        ))
+    }
+}
+
 #[derive(Debug, Deserialize)]
 pub struct TerminateProcessRequest {
     pub identity: ProcessIdentity,
@@ -410,7 +457,7 @@ pub struct TerminateProcessRequest {
 
 /// 2-Phase Non-Transactional Process Termination Workflow (`R4`):
 /// 1. `process.terminate.begin` (verifies `ProcessIdentity { pid, start_time_secs }` in Transaction 1)
-/// 2. `samo_macos::terminate_verified_process` (re-verifies & sends signal outside DB transaction)
+/// 2. `platform::terminate_verified_process` (re-verifies & sends signal outside DB transaction)
 /// 3. `process.terminate.finish` (records result in Transaction 2)
 async fn process_terminate_workflow_handler(
     State(state): State<AppState>,

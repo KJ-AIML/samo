@@ -88,7 +88,7 @@ These continue R1–R24.
 | **R26 — One shape for Windows paths** | Anti-goal 2 | **Normalising.** `samo_domain::paths::normalize_path` gives Windows paths `/` separators, an upper-case drive, and no trailing `/` except on the drive root (`C:/`). A `/`-rooted path is never changed, since a Mac name may contain `\`. **On Windows,** only a drive path in that shape is a scan root or can be trashed. A `/`-rooted path there is on the current drive, so it fails closed, as do relative, UNC and `C:foo` paths. **On the Mac,** a drive path is a relative name and fails closed, as it always did. | `normalize_keeps_mac_paths_and_shapes_windows_ones`, `scan_roots_follow_the_os` |
 | **R27 — R2 on Windows** | Anti-goal 2 | **Protected, in any case:** drive roots; `Windows`, `Program Files`, `Program Files (x86)` and `ProgramData`, with everything under them; `Users` and `Documents and Settings`, and each `<name>` under them; `$Recycle.Bin` anywhere; `System Volume Information`, `Recovery`, `Boot`, `bootmgr`, `pagefile.sys`, `hiberfil.sys` and `swapfile.sys`. **Also protected:** a name Windows resolves to somewhere else, so it can't be judged by how it reads. That means `.` and `..`, a trailing dot or space, a stream (`name:stream`), and an 8.3 short name (`PROGRA~1`). **Unchanged:** the identity check. | `windows_system_paths_are_protected_in_any_case`, `windows_lookalike_forms_fail_closed` |
 | **R28 — Said, never faked** | Anti-goals 2, 4 | A reading Windows can't give is `Unsupported` (R3). A feature whose Windows mechanism isn't built yet stays off on Windows, and its page says so. | Per phase |
-| **R29 — No `unsafe` for Windows** | Anti-goal 3 | `unsafe_code = "forbid"` stays for every crate. Windows APIs are reached only through safe crates (`sysinfo`, `trash`, `winapi-util`, `tray-icon`, GPUI). A need with no safe wrapper comes back to KJ as a decision. | The compiler |
+| **R29 — No `unsafe` for Windows** | Anti-goal 3 | `unsafe_code = "forbid"` stays for every crate. Windows APIs are reached only through safe crates (`sysinfo`, `trash`, `winapi-util`, `filesize`, `windows-registry`, `tray-icon`, GPUI) and Windows' own tools run by full path (`taskkill`, `mountvol`). A need with no safe wrapper comes back to KJ as a decision. | The compiler |
 | **R30 — The gates run on Windows** | Anti-goals 1, 2 | `xtask` builds on Windows. Gates 1–6 run there. Gate 7's Swift build and tests run only on macOS, where the Swift extensions are. Files are LF in every checkout (`.gitattributes`), and the gates read CRLF too. CI has a Windows job (`scripts/ci-windows.sh`). | `crlf_test_module_is_not_shipped`; CI `windows` |
 
 ---
@@ -120,6 +120,16 @@ These continue R1–R24.
 - **PR 2:**
   - `samo-windows`: scanner and identity, Recycle Bin with Undo, Quit, telemetry
   - `samo-cli` and `samo-server` on Windows
+  - **Built.** R2 is checked on the canonical path: the folder is resolved and the item keeps its own name.
+  - **The Recycle Bin** goes through the `trash` crate, on a thread of its own.
+  - **What Windows would delete for good is refused before anything moves.**
+    - Cleanup runs only on a fixed NTFS volume that Samo can see, and only where its Recycle Bin is on (`NukeOnDelete`)
+      and holds the item (`MaxCapacity`). Samo reads both from the volume's own settings.
+    - Anything Samo can't tell is a no: other file systems (FAT has no stable file index, ReFS no unique 64-bit
+      one), removable or unlisted drives, and settings it can't read.
+  - **The moved item is found again by its identity**, not by its shown name (Windows hides known extensions), so
+    Undo brings back that item under its real name.
+  - **Quit** ends only the verified process, never its tree.
 - **PR 3, the app:**
   - the tray and quick panel
   - keeps running after its window closes, as one instance

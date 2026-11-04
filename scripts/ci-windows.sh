@@ -16,6 +16,9 @@ CRATES=(
   samo-engine
   samo-testkit
   samo-ext-hello
+  samo-windows
+  samo-cli
+  samo-server
   xtask
 )
 PACKAGES=()
