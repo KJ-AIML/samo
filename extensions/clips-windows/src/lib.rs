@@ -3,6 +3,7 @@
 
 pub mod filters;
 pub mod history;
+pub mod page;
 pub mod paste;
 pub mod search;
 pub mod settings;
