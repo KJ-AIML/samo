@@ -174,7 +174,20 @@ These continue R1–R24.
   - The app starts the host. The Extensions page lists what runs from `SAMO_EXT_DEV_DIR` and says the store comes
     later.
   - `cargo run -p xtask -- ext-dev <folder>` lays out an extension on either OS.
-- **PR B:** Claude Sessions on Windows.
+- **PR B, Claude Sessions. Built:**
+  - It reads `%USERPROFILE%\.claude` and keeps its data in `%LOCALAPPDATA%`.
+  - **Hooks** use Claude Code's exec form (`command` + `args`, CLI 2.1.139+): Claude Code runs Samo's helper with no
+    shell, so it makes no difference whether Git Bash is installed.
+  - **The status line** has no exec form; Claude Code runs it through Git Bash, or PowerShell without Git Bash. Its
+    command is the helper's path with forward slashes and no quotes, which both shells run, or `~/…` when the path
+    has a space. With neither, Plan limits says why and writes nothing.
+  - Samo's entries are recognised by the helper's own path as well, so Disconnect finds them wherever
+    `SAMO_EXT_ROOT` keeps extensions (R7).
+  - A hook finds Claude Code above Git Bash's two `bash.exe`, `pwsh.exe`, `powershell.exe` or `cmd.exe`. A
+    "parent" that started after its child is a reused pid, and is skipped.
+  - **Checked on this PC.** Connect and Disconnect bring a copy of its real `settings.json` back byte for byte
+    (an ignored test, `real_settings`). The installed hook, fed a real event, recorded the session and found the
+    `claude.exe` running it.
 
 ### Phases 3–5
 Store and updates (#10), Clips (#11), Shots (#12). Each issue has its own plan and "done when".
