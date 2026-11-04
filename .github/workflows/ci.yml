@@ -22,8 +22,17 @@ jobs:
       - name: Run xtask verify (layers, purity, rls, commands-complete, tests)
         run: cargo run -p xtask -- verify
 
+  # ADR-006 R30: the crates that build on Windows so far, their tests, and the static gates. The list is in the script.
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check formatting, clippy, the static gates and tests on Windows
+        shell: bash
+        run: bash scripts/ci-windows.sh
+
   ci-ok:
     runs-on: ubuntu-latest
-    needs: [check, db]
+    needs: [check, db, windows]
     steps:
       - run: echo "All CI gates passed"

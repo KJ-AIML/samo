@@ -357,6 +357,7 @@ mod tests {
     }
 
     /// The user's keychain search list, as `security list-keychains` prints it.
+    #[cfg(target_os = "macos")]
     fn search_list() -> Result<Vec<String>, String> {
         let out = Command::new("security")
             .args(["list-keychains", "-d", "user"])
@@ -369,6 +370,7 @@ mod tests {
             .collect())
     }
 
+    #[cfg(target_os = "macos")]
     fn set_search_list(paths: &[String]) -> Result<(), String> {
         let mut args: Vec<OsString> = vec![
             "list-keychains".into(),
@@ -385,6 +387,8 @@ mod tests {
     ///
     /// Older macOS (GitHub's runners) finds a signing identity for `codesign --keychain` only in a keychain on the
     /// search list, so the throwaway keychain joins the list while the test runs, and the list is put back after.
+    /// It needs macOS's `security` and `codesign`, so it runs only on a Mac (ADR-006 R30).
+    #[cfg(target_os = "macos")]
     #[test]
     fn two_builds_share_one_requirement() -> Result<(), String> {
         let dir = std::env::temp_dir().join(format!("samo-codesign-test-{}", std::process::id()));

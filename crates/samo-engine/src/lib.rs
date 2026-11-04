@@ -14,7 +14,9 @@ pub use registry::CommandRegistry;
 mod tests {
     use super::*;
     use samo_blueprint::Surface;
-    use samo_primitives::{ErrorCode, FileNodeIdentity, PhosphorTheme, ProcessIdentity, TenantId};
+    use samo_primitives::{
+        ErrorCode, FileNodeIdentity, PhosphorTheme, ProcessIdentity, SamoResult, TenantId,
+    };
     use samo_store::count_audit_entries;
     use samo_testkit::TestDb;
 
@@ -89,6 +91,55 @@ mod tests {
         assert_eq!(
             res.map_err(|e| e.code),
             Err(ErrorCode::ProcessIdentityMismatch)
+        );
+    }
+
+    /// ADR-006 R25/R26: on Windows a scan root is kept in the one shape (`C:/…`); on the Mac the rule is unchanged.
+    #[tokio::test]
+    async fn scan_root_accepts_drive_paths_and_rejects_relative() {
+        let Ok(test_db) = TestDb::new().await else {
+            return;
+        };
+        let engine = Engine::new(test_db.pool.clone());
+        let begin = |root: &str| {
+            engine.execute(
+                DEFAULT_LOCAL_WEB_TOKEN,
+                Surface::Web,
+                "disk.scan.begin",
+                serde_json::json!({ "root_path": root }),
+            )
+        };
+        let root_of = |out: SamoResult<serde_json::Value>| {
+            out.map(|v| v["root_path"].as_str().unwrap_or_default().to_string())
+                .map_err(|e| e.code)
+        };
+
+        if cfg!(windows) {
+            assert_eq!(
+                root_of(begin(r"C:\Users\kj\Developer").await),
+                Ok("C:/Users/kj/Developer".to_string())
+            );
+            assert_eq!(
+                root_of(begin("/Users/kj").await),
+                Err(ErrorCode::InvalidInput)
+            );
+        } else {
+            assert_eq!(
+                root_of(begin(r"C:\Users\kj\Developer").await),
+                Err(ErrorCode::InvalidInput)
+            );
+            assert_eq!(
+                root_of(begin("/Users/kj").await),
+                Ok("/Users/kj".to_string())
+            );
+        }
+        assert_eq!(
+            root_of(begin("Developer").await),
+            Err(ErrorCode::InvalidInput)
+        );
+        assert_eq!(
+            root_of(begin("C:Developer").await),
+            Err(ErrorCode::InvalidInput)
         );
     }
 }

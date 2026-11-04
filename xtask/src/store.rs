@@ -21,17 +21,58 @@ use std::process::Command;
 pub const KEYCHAIN_SERVICE: &str = "dev.talvyn.samo.store";
 /// Where Samo's trusted store key is compiled in.
 pub const TRUSTED_KEY_FILE: &str = "crates/samo-extensions/src/store/mod.rs";
+#[cfg(target_os = "macos")]
 pub const KEYCHAIN_ACCOUNT: &str = "catalog-signing";
 
 fn io<E: std::fmt::Display>(what: &str) -> impl Fn(E) -> String + '_ {
     move |e| format!("{what}: {e}")
 }
 
+/// The signing key lives in KJ's login Keychain, so only a Mac can make or use it (ADR-006 R30). Elsewhere `xtask`
+/// still builds and runs its gates, and `ext-publish` signs only with `--test-key`.
+#[cfg(not(target_os = "macos"))]
+const NO_KEYCHAIN: &str =
+    "the store signing key lives in the macOS Keychain; on this OS use `--test-key`";
+
+#[cfg(target_os = "macos")]
+fn keychain_has() -> bool {
+    security_framework::passwords::get_generic_password(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT).is_ok()
+}
+
+#[cfg(target_os = "macos")]
+fn keychain_get() -> Result<Vec<u8>, String> {
+    security_framework::passwords::get_generic_password(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT).map_err(
+        |_| {
+            "no store signing key in your Keychain; run `cargo run -p xtask -- ext-keygen` first"
+                .to_string()
+        },
+    )
+}
+
+#[cfg(target_os = "macos")]
+fn keychain_set(pkcs8: &[u8]) -> Result<(), String> {
+    security_framework::passwords::set_generic_password(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT, pkcs8)
+        .map_err(io("couldn't store the key in your Keychain"))
+}
+
+#[cfg(not(target_os = "macos"))]
+fn keychain_has() -> bool {
+    false
+}
+
+#[cfg(not(target_os = "macos"))]
+fn keychain_get() -> Result<Vec<u8>, String> {
+    Err(NO_KEYCHAIN.to_string())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn keychain_set(_pkcs8: &[u8]) -> Result<(), String> {
+    Err(NO_KEYCHAIN.to_string())
+}
+
 /// `cargo run -p xtask -- ext-keygen`: a new ed25519 key, the private half into the Keychain, the public half printed.
 pub fn keygen() -> Result<(), String> {
-    if security_framework::passwords::get_generic_password(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT)
-        .is_ok()
-    {
+    if keychain_has() {
         return Err(format!(
             "a store signing key already exists in your Keychain ({KEYCHAIN_SERVICE}); Samo never overwrites it"
         ));
@@ -40,12 +81,7 @@ pub fn keygen() -> Result<(), String> {
         Ed25519KeyPair::generate_pkcs8(&SystemRandom::new()).map_err(|_| "couldn't make a key")?;
     let pair =
         Ed25519KeyPair::from_pkcs8(pkcs8.as_ref()).map_err(|_| "couldn't read the new key")?;
-    security_framework::passwords::set_generic_password(
-        KEYCHAIN_SERVICE,
-        KEYCHAIN_ACCOUNT,
-        pkcs8.as_ref(),
-    )
-    .map_err(io("couldn't store the key in your Keychain"))?;
+    keychain_set(pkcs8.as_ref())?;
     println!("The store's signing key is in your Keychain ({KEYCHAIN_SERVICE}).");
     println!("Its public key, for STORE_PUBLIC_KEY in {TRUSTED_KEY_FILE}:");
     println!("{}", hex(pair.public_key().as_ref()));
@@ -483,14 +519,7 @@ pub fn publish(args: &PublishArgs) -> Result<(), String> {
     let bytes = serde_json::to_vec_pretty(&catalog).map_err(|e| e.to_string())?;
     let pkcs8 = match &args.test_key {
         Some(path) => fs::read(path).map_err(io("the test key"))?,
-        None => security_framework::passwords::get_generic_password(
-            KEYCHAIN_SERVICE,
-            KEYCHAIN_ACCOUNT,
-        )
-        .map_err(|_| {
-            "no store signing key in your Keychain; run `cargo run -p xtask -- ext-keygen` first"
-                .to_string()
-        })?,
+        None => keychain_get()?,
     };
     // `ext-keygen` stores PKCS#8 v2; a test key from `openssl genpkey -algorithm ed25519` is v1.
     let pair = Ed25519KeyPair::from_pkcs8(&pkcs8)

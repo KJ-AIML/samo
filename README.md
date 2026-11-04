@@ -241,6 +241,16 @@ cargo run --release -p samo-gpui # the Mac app; use --release, debug builds idle
 python3 scripts/make-icon.py     # redraw the app icon (needs Pillow)
 ```
 
+### Windows (in progress)
+
+Samo is coming to Windows 10/11 ([ADR-006](docs/decisions/ADR-006-samo-on-windows.md), tracked in #13). So far the
+pure crates, the store, the engine, `xtask` and the `hello` extension build and pass their tests on Windows; the app
+itself comes with #1.
+
+- Use the MSVC toolchain and the Visual Studio Build Tools. If rustup's default host is GNU, set
+  `RUSTUP_TOOLCHAIN=1.99.0-x86_64-pc-windows-msvc`.
+- Run `scripts/ci-windows.sh` (in Git Bash) before pushing. It is what the Windows CI job runs.
+
 ## Credits
 
 - [GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui) by Zed Industries (Apache-2.0).

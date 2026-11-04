@@ -76,13 +76,16 @@ pub fn check_gpui_source(rel_path: &str, content: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// The part of a file that ships: integration tests, and a `#[cfg(test)] mod tests` block, don't.
+/// The part of a file that ships: integration tests, and a `#[cfg(test)] mod tests` block, don't. A checkout may
+/// have LF or CRLF line endings (ADR-006 R30).
 fn shipped<'a>(rel_path: &str, content: &'a str) -> &'a str {
     if rel_path.contains("/tests/") {
         return "";
     }
-    content
-        .find("#[cfg(test)]\nmod tests")
+    ["#[cfg(test)]\nmod tests", "#[cfg(test)]\r\nmod tests"]
+        .iter()
+        .filter_map(|marker| content.find(marker))
+        .min()
         .and_then(|i| content.get(..i))
         .unwrap_or(content)
 }
@@ -196,6 +199,20 @@ pub fn check_network(root: &Path) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A Windows checkout can have CRLF line endings (ADR-006 R30): the test module is still not shipped code.
+    #[test]
+    fn crlf_test_module_is_not_shipped() {
+        let content = "pub fn fetch() {}\r\n\r\n#[cfg(test)]\r\nmod tests {\r\n    fn t() { UserAction::clicked(); }\r\n}\r\n";
+        assert!(check_user_action("crates/x/src/lib.rs", content).is_ok());
+    }
+
+    /// ...and CRLF never hides a click in shipped code.
+    #[test]
+    fn crlf_does_not_hide_a_shipped_click() {
+        let content = "fn sneak() { UserAction::clicked(); }\r\n#[cfg(test)]\r\nmod tests {}\r\n";
+        assert!(check_user_action("crates/x/src/lib.rs", content).is_err());
+    }
 
     #[test]
     fn rejects_http_crate_outside_extensions() {
