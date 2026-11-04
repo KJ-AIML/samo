@@ -4,7 +4,6 @@
 use serde_json::{Map, Value};
 use std::fs;
 use std::io::ErrorKind;
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 /// Where the backup goes, beside the settings file.
@@ -78,7 +77,8 @@ pub fn write_if_unchanged(path: &Path, value: &Value, seen: &Fingerprint) -> Res
     let tmp = dir.join(format!(".settings.json.samo-{}", std::process::id()));
     fs::write(&tmp, text).map_err(|e| format!("couldn't write {}: {e}", tmp.display()))?;
     if let Ok(meta) = fs::metadata(&target) {
-        let _ = fs::set_permissions(&tmp, fs::Permissions::from_mode(meta.permissions().mode()));
+        // The same permissions as before: the same mode on the Mac, the read-only flag on Windows.
+        let _ = fs::set_permissions(&tmp, meta.permissions());
     }
     fs::rename(&tmp, &target).map_err(|e| {
         let _ = fs::remove_file(&tmp);
@@ -115,8 +115,7 @@ pub fn backup_once(path: &Path) -> Result<bool, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::settings::{connect, disconnect, is_connected};
-    use std::os::unix::fs::symlink;
+    use crate::settings::{connect, disconnect};
 
     #[test]
     fn write_refused_if_changed_since_read() -> Result<(), String> {
@@ -138,7 +137,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn symlinked_settings_stay_a_symlink() -> Result<(), String> {
+        use crate::settings::is_connected;
+        use std::os::unix::fs::symlink;
         let dir = tempfile::tempdir().map_err(|e| e.to_string())?;
         let dotfiles = dir.path().join("dotfiles");
         fs::create_dir_all(&dotfiles).map_err(|e| e.to_string())?;

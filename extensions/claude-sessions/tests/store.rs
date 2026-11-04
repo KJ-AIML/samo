@@ -1,3 +1,6 @@
+//! These run real hooks and helpers: `/bin/sh` and unix permission bits. Their Windows forms come with #9 (ADR-006).
+#![cfg(unix)]
+
 //! Claude Sessions from the store (ADR-003 M3, RF1): replacing a dev build keeps it connected and keeps its data,
 //! and uninstalling undoes Claude Code's settings before deleting anything. The real `samo-claude` runs in a
 //! temporary home folder; the real `~/.claude` is never touched.

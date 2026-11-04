@@ -1,3 +1,6 @@
+//! These run real hooks and helpers: `/bin/sh` and unix permission bits. Their Windows forms come with #9 (ADR-006).
+#![cfg(unix)]
+
 //! ADR-003 Phase 2's demo, end to end and automated: a store signed with a test key, served on this Mac, and
 //! Samo's real store worker and extension host, running the real `samo-claude` and a stand-in for Hello.
 //! Everything happens in a temporary home folder; the real `~/.claude` and caches are never touched.
