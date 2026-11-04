@@ -1,0 +1,42 @@
+[package]
+name = "samo-clips"
+version = "0.1.1"
+edition.workspace = true
+license.workspace = true
+publish = false
+
+# Clips for Windows (#11, ADR-005, ADR-006): the Mac's Clips is Swift (extensions/clips); this is its Rust
+# counterpart, the same history, rules and page. Its core is pure and tested on every OS; the clipboard, the list
+# and pasting are Windows-only.
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "samo-clips"
+path = "src/main.rs"
+
+[dependencies]
+samo-ext-protocol.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+ring.workspace = true
+uuid = { version = "1.29.0", features = ["v4"] }
+unicode-normalization = "0.1.26"
+# An image kept as PNG goes back with a DIB beside it, which older Windows apps read (MIT/Apache-2.0, already in the
+# lockfile through gpui).
+png = "0.18.1"
+
+[dev-dependencies]
+tempfile.workspace = true
+
+# Windows' clipboard, the app in front, and (PR F) the shortcut, the list and pasting (ADR-006 R29: safe crates only).
+# `clipboard-win` (BSL-1.0, by DoumanAsh, maintained since 2015) is a safe API over the Win32 clipboard: its sequence
+# number, formats, registered formats, text, bytes and file lists. `winsafe` (MIT) is already Samo's for R15.
+[target.'cfg(windows)'.dependencies]
+clipboard-win = { version = "5.4.3", features = ["monitor"] }
+winsafe = { version = "0.0.29", features = ["user", "kernel"] }
+
+[target.'cfg(windows)'.dev-dependencies]
+samo-extensions.workspace = true

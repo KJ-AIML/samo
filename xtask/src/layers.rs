@@ -10,7 +10,8 @@ fn layer_rank(crate_name: &str) -> Option<u8> {
         "samo-engine" => Some(4),
         "samo-macos" | "samo-windows" | "samo-extensions" => Some(5),
         "samo-testkit" => Some(6),
-        "samo-server" | "samo-cli" | "samo-gpui" | "samo-claude" | "samo-ext-hello" => Some(7),
+        "samo-server" | "samo-cli" | "samo-gpui" | "samo-claude" | "samo-clips"
+        | "samo-ext-hello" => Some(7),
         _ => None,
     }
 }
@@ -85,7 +86,7 @@ pub fn check_cargo_toml_edges(crate_name: &str, cargo_toml_content: &str) -> Res
 }
 
 /// Every crate in the workspace and its manifest. A crate missing here goes unchecked by `layers` and `network`.
-pub const MANIFESTS: [(&str, &str); 15] = [
+pub const MANIFESTS: [(&str, &str); 16] = [
     ("samo-primitives", "crates/samo-primitives/Cargo.toml"),
     ("samo-blueprint", "crates/samo-blueprint/Cargo.toml"),
     ("samo-ext-protocol", "crates/samo-ext-protocol/Cargo.toml"),
@@ -100,6 +101,7 @@ pub const MANIFESTS: [(&str, &str); 15] = [
     ("samo-cli", "apps/samo-cli/Cargo.toml"),
     ("samo-gpui", "apps/samo-gpui/Cargo.toml"),
     ("samo-claude", "extensions/claude-sessions/Cargo.toml"),
+    ("samo-clips", "extensions/clips-windows/Cargo.toml"),
     ("samo-ext-hello", "extensions/hello/Cargo.toml"),
 ];
 
@@ -116,6 +118,30 @@ pub fn check_layers(root: &Path) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every crate of the workspace but xtask is checked by `layers` and `network`: a new one can't be missed.
+    #[test]
+    fn every_workspace_crate_is_checked() -> Result<(), String> {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let cargo = fs::read_to_string(root.join("Cargo.toml")).map_err(|e| e.to_string())?;
+        let members = cargo
+            .split_once("members = [")
+            .and_then(|(_, rest)| rest.split_once(']'))
+            .map(|(list, _)| list)
+            .ok_or("no members in the workspace's Cargo.toml")?;
+        for member in members
+            .split(',')
+            .map(|m| m.trim().trim_matches('"'))
+            .filter(|m| !m.is_empty() && *m != "xtask")
+        {
+            let manifest = format!("{member}/Cargo.toml");
+            assert!(
+                MANIFESTS.iter().any(|(_, path)| *path == manifest),
+                "{member} isn't in MANIFESTS"
+            );
+        }
+        Ok(())
+    }
 
     /// The repo writes `samo-store.workspace = true`: the name is before the first dot, and it is checked.
     #[test]
