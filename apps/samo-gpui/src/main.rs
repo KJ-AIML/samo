@@ -296,6 +296,14 @@ fn finish_samo_update(cx: &mut App) {
     let bundle = env::current_exe()
         .map_err(|e| e.to_string())
         .and_then(|exe| samo_extensions::update::can_update(&exe).map_err(|e| e.to_string()));
+    // On Windows the old Samo's folder goes to the Recycle Bin: whether it will take it is checked now, while this
+    // Samo still runs to say so, not after it quits (R14).
+    #[cfg(windows)]
+    let bundle = bundle.and_then(|b| {
+        samo_windows::can_recycle(&b.path)
+            .map(|()| b)
+            .map_err(|why| format!("Samo can't replace itself: {why}"))
+    });
     let started = bundle.and_then(|b| finish_update::launch(&prepared, &b.path));
     match started {
         Ok(()) => {

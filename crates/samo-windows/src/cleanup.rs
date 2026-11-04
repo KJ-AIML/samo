@@ -215,6 +215,22 @@ fn on_own_thread<T: Send + 'static>(
 /// the scan, then checks its drive's Recycle Bin can take it, and only then moves it there. Samo doesn't delete for
 /// good: what the Recycle Bin can't take is refused before anything moves, and the moved item is found again by its
 /// identity, so Undo brings back this item and no other. `_trash_dir` is the Mac's; Windows has a bin per drive.
+/// Whether `move_to_trash` would take `target_path` now, checked without moving anything: it is there, R2 allows it
+/// (R27), and its drive's Recycle Bin is on and can hold it. Samo asks this before it quits to update itself, so a
+/// refusal is said while Samo still runs (R14).
+pub fn can_recycle(target_path: &Path) -> Result<(), String> {
+    let canonical = canonical_path(target_path)
+        .ok_or_else(|| format!("`{}` isn't there", target_path.display()))?;
+    let target = PathBuf::from(&canonical);
+    let identity =
+        inspect_node_identity(&target).ok_or_else(|| format!("`{canonical}` can't be read"))?;
+    validate_trash_target(&canonical, identity, Some(identity)).map_err(|e| e.to_string())?;
+    bin_verdict(
+        &bin_facts(&canonical),
+        compute_path_allocated_bytes(&target),
+    )
+}
+
 pub fn move_to_trash(
     target_path: &Path,
     scanned_identity: FileNodeIdentity,
@@ -346,6 +362,14 @@ mod tests {
     use super::*;
     use std::fs;
     use std::process::Command;
+
+    #[test]
+    fn what_samo_wont_recycle_is_known_before_anything_moves() {
+        // Windows' own folder (R27), and a path that isn't there, are refused without touching the Recycle Bin.
+        let windows = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into());
+        assert!(can_recycle(Path::new(&windows)).is_err());
+        assert!(can_recycle(Path::new(r"C:\no\such\folder\for\samo")).is_err());
+    }
 
     /// Hygiene for tests on the real Recycle Bin: puts back anything that came from under `dir`, so a failed lookup
     /// can never leave a test's files in KJ's bin.
