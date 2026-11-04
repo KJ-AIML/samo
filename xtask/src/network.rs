@@ -171,11 +171,17 @@ pub fn check_clips_source(rel_path: &str, content: &str) -> Result<(), String> {
     check_offline_source("Clips", rel_path, content)
 }
 
+/// Shots for Windows never goes online (ADR-004 R16).
+pub fn check_shots_source(rel_path: &str, content: &str) -> Result<(), String> {
+    check_offline_source("Shots", rel_path, content)
+}
+
 /// The Rust extensions that never go online, by folder, with their check.
 type SourceCheck = fn(&str, &str) -> Result<(), String>;
-const OFFLINE_EXTENSIONS: [(&str, SourceCheck); 2] = [
+const OFFLINE_EXTENSIONS: [(&str, SourceCheck); 3] = [
     ("extensions/claude-sessions", check_claude_source),
     ("extensions/clips-windows", check_clips_source),
+    ("extensions/shots-windows", check_shots_source),
 ];
 
 fn check_offline_source(name: &str, rel_path: &str, content: &str) -> Result<(), String> {
@@ -389,6 +395,18 @@ ureq = { version = "3", default-features = false }
             OFFLINE_EXTENSIONS
                 .iter()
                 .any(|(dir, _)| *dir == "extensions/clips-windows")
+        );
+    }
+
+    /// Shots never goes online (R16): no sockets in its Rust either.
+    #[test]
+    fn rejects_std_net_in_shots_for_windows() {
+        let path = "extensions/shots-windows/src/serve.rs";
+        assert!(check_shots_source(path, "use std::net::TcpStream;").is_err());
+        assert!(
+            OFFLINE_EXTENSIONS
+                .iter()
+                .any(|(dir, _)| *dir == "extensions/shots-windows")
         );
     }
 }

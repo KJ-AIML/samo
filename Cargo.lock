@@ -4662,6 +4662,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "samo-shots"
+version = "0.4.0"
+dependencies = [
+ "chrono",
+ "samo-ext-protocol",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "samo-store"
 version = "0.4.1"
 dependencies = [
