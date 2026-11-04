@@ -131,7 +131,7 @@ pub fn run(
             }
             Err(e) => outcome.problems.push(format!(
                 "Couldn't save the shot to {}: {e}",
-                settings.folder
+                folder.display()
             )),
         }
     }
@@ -377,7 +377,10 @@ pub(crate) mod tests {
         assert_eq!(outcome.note(), "Couldn't copy the shot");
         let second = outcome.problems.get(1).cloned().unwrap_or_default();
         assert!(
-            second.starts_with("Couldn't save the shot to ~/Pictures/Shots"),
+            second.starts_with(&format!(
+                "Couldn't save the shot to {}",
+                Path::new(HOME).join("Pictures").join("Shots").display()
+            )),
             "{second}"
         );
     }

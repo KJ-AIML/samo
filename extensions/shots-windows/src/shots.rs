@@ -196,7 +196,7 @@ mod tests {
         let pinned_only = store.show(Shot::new(plain(8, 8), 2.0, taken));
         let mut saved = Shot::new(plain(8, 8), 2.0, chrono::Local::now());
         saved.saved_to = Some(PathBuf::from("/tmp/already.png"));
-        let saved = store.show(saved);
+        store.show(saved);
         let mut disk = disk();
         let written = store.save_unsaved(&Settings::default(), Path::new("/h"), &mut disk);
         assert_eq!(written.len(), 1, "only the shot never saved");

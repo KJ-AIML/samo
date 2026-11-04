@@ -3,8 +3,9 @@
 //! the Mac's `Encoding.swift` (which counts from 72 dpi).
 
 use crate::settings::Format;
+use image::buffer::ConvertBuffer;
 use image::codecs::jpeg::{JpegEncoder, PixelDensity};
-use image::{DynamicImage, ImageReader, RgbaImage, imageops};
+use image::{ImageReader, RgbaImage, imageops};
 use std::io::Cursor;
 
 /// Windows' pixels per inch at 100 %.
@@ -33,7 +34,8 @@ pub fn data(image: &RgbaImage, format: Format, scale: f64) -> Option<Vec<u8>> {
         Format::Jpeg => {
             let mut encoder = JpegEncoder::new_with_quality(&mut out, 90);
             encoder.set_pixel_density(PixelDensity::dpi(dpi.round() as u16));
-            let rgb = DynamicImage::ImageRgba8(image.clone()).to_rgb8();
+            // Converted straight from the RGBA pixels, without another copy of them (R17 at the scroll cap).
+            let rgb: image::RgbImage = image.convert();
             encoder.encode_image(&rgb).ok()?;
         }
     }

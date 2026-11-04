@@ -18,6 +18,8 @@ pub struct PageState {
     /// Capture modes whose shortcut may clash, with the words why.
     pub clashes: BTreeMap<String, String>,
     /// The folder is inside OneDrive: shots saved there are uploaded.
+    /// Where shots are saved, as a path (`~` already your profile folder).
+    pub folder: PathBuf,
     pub folder_in_onedrive: bool,
     pub now: DateTime<Utc>,
 }
@@ -31,15 +33,20 @@ fn today_start(now: DateTime<Utc>) -> DateTime<Utc> {
         .map_or(now, |m| m.with_timezone(&Utc))
 }
 
-/// A file's size as Explorer would say it: `834 KB`, `2.1 MB`.
+/// A file's size in Explorer's units (1,024 bytes a KB): `814 KB`, `2.0 MB`.
 pub fn file_size(bytes: u64) -> String {
+    const KB: f64 = 1024.0;
     let b = bytes as f64;
-    match bytes {
-        0..1_000 => format!("{bytes} bytes"),
-        1_000..1_000_000 => format!("{:.0} KB", b / 1e3),
-        1_000_000..10_000_000 => format!("{:.1} MB", b / 1e6),
-        10_000_000..1_000_000_000 => format!("{:.0} MB", b / 1e6),
-        _ => format!("{:.1} GB", b / 1e9),
+    if b < KB {
+        format!("{bytes} bytes")
+    } else if b < KB * KB {
+        format!("{:.0} KB", b / KB)
+    } else if b < 10.0 * KB * KB {
+        format!("{:.1} MB", b / (KB * KB))
+    } else if b < KB * KB * KB {
+        format!("{:.0} MB", b / (KB * KB))
+    } else {
+        format!("{:.1} GB", b / (KB * KB * KB))
     }
 }
 
@@ -219,7 +226,7 @@ pub fn build(s: &PageState) -> Vec<Widget> {
         note: None,
     });
     page.push(note(
-        format!("Saved to {}", s.settings.folder),
+        format!("Saved to {}", s.folder.display()),
         NoteKind::Plain,
     ));
     if s.folder_in_onedrive {
@@ -245,7 +252,14 @@ pub fn badge(recent: &Recent, now: DateTime<Utc>) -> (u32, String) {
 
 /// Whether `folder` is inside one of OneDrive's folders (Pictures is often moved there).
 pub fn in_onedrive(folder: &Path, roots: &[PathBuf]) -> bool {
-    roots.iter().any(|root| folder.starts_with(root))
+    // Windows' paths aren't case-sensitive, and a missed warning would upload shots unannounced.
+    let parts = |p: &Path| -> Vec<String> {
+        p.components()
+            .map(|c| c.as_os_str().to_string_lossy().to_lowercase())
+            .collect()
+    };
+    let folder = parts(folder);
+    roots.iter().any(|root| folder.starts_with(&parts(root)))
 }
 
 impl Settings {
@@ -281,6 +295,7 @@ mod tests {
             recent,
             refused: BTreeSet::new(),
             clashes: BTreeMap::new(),
+            folder: PathBuf::from("/h/Pictures/Shots"),
             folder_in_onedrive: false,
             now: Utc::now(),
         }
@@ -348,7 +363,7 @@ mod tests {
             row.actions.get(1).map(|a| a.label.as_str()),
             Some("Show folder")
         );
-        assert!(row.detail.starts_with("2.1 MB · "), "{}", row.detail);
+        assert!(row.detail.starts_with("2.0 MB · "), "{}", row.detail);
         assert!(page.contains(&Widget::Section {
             title: "RECENT".into(),
             about: Some("1 today".into())
@@ -481,8 +496,31 @@ mod tests {
     #[test]
     fn sizes_read_as_files_do() {
         assert_eq!(file_size(512), "512 bytes");
-        assert_eq!(file_size(834_000), "834 KB");
-        assert_eq!(file_size(2_100_000), "2.1 MB");
-        assert_eq!(file_size(12_000_000), "12 MB");
+        // Explorer's units: 1,024 bytes a KB.
+        assert_eq!(file_size(834_000), "814 KB");
+        assert_eq!(file_size(999_999), "977 KB");
+        assert_eq!(file_size(2_100_000), "2.0 MB");
+        assert_eq!(file_size(12_000_000), "11 MB");
+    }
+
+    #[test]
+    fn the_save_folder_reads_as_a_windows_path() {
+        let mut s = state(Settings::default(), Recent::default());
+        s.folder = PathBuf::from("C:/Users/kj/Pictures/Shots");
+        let shown = format!("Saved to {}", s.folder.display());
+        assert!(
+            build(&s)
+                .iter()
+                .any(|w| matches!(w, Widget::Note { text, .. } if *text == shown))
+        );
+    }
+
+    #[test]
+    fn onedrive_is_found_whatever_the_case() {
+        let roots = [PathBuf::from("C:/Users/kj/OneDrive")];
+        assert!(in_onedrive(
+            Path::new("c:/users/KJ/onedrive/Pictures"),
+            &roots
+        ));
     }
 }
