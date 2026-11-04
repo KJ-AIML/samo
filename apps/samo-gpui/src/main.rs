@@ -9,6 +9,7 @@ mod extensions_page;
 mod finish_update;
 mod hub;
 mod instance;
+mod keys;
 mod layout;
 mod live;
 mod locations;
@@ -1033,7 +1034,7 @@ impl SamoWorkspaceApp {
             cx.notify();
             return;
         }
-        if !keystroke.modifiers.platform {
+        if !keystroke.modifiers.secondary() {
             return;
         }
         match keystroke.key.as_str() {
@@ -1131,8 +1132,8 @@ fn main() {
         cx.on_action(|_: &Quit, cx| quit(cx));
         cx.on_action(|_: &ShowWindow, cx| open_main(cx, None));
         cx.bind_keys([
-            KeyBinding::new("cmd-q", Quit, None),
-            KeyBinding::new("cmd-0", ShowWindow, None),
+            KeyBinding::new("secondary-q", Quit, None),
+            KeyBinding::new("secondary-0", ShowWindow, None),
         ]);
         cx.set_menus(vec![Menu {
             name: "Samo".into(),

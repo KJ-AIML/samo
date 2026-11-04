@@ -912,7 +912,16 @@ impl SamoWorkspaceApp {
                     Variant::Primary,
                     false,
                 )
-                .tooltip(|_, cx| tip("Measure this folder again (⌘R)".into(), cx))
+                .tooltip(|_, cx| {
+                    tip(
+                        format!(
+                            "Measure this folder again ({})",
+                            crate::keys::shortcut_label('R')
+                        )
+                        .into(),
+                        cx,
+                    )
+                })
                 .on_click(cx.listener(|this, _, _, cx| this.rescan(cx)))
                 .into_any_element()
             },
