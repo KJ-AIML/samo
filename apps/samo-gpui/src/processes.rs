@@ -318,13 +318,7 @@ impl SamoWorkspaceApp {
                                     Variant::Danger,
                                     true,
                                 )
-                                .tooltip(|_, cx| {
-                                    tip(
-                                        "Send SIGTERM, after checking it is still the same process"
-                                            .into(),
-                                        cx,
-                                    )
-                                })
+                                .tooltip(|_, cx| tip(crate::words::QUIT_TIP.into(), cx))
                                 .on_click(cx.listener(
                                     move |this, _, _, cx| {
                                         this.quit_process(identity, name.clone(), "SIGTERM", cx)

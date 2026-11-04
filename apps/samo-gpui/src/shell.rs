@@ -1253,7 +1253,8 @@ pub(crate) fn samo_status(frame: &Frame) -> String {
 fn titlebar_band() -> Stateful<Div> {
     div()
         .id("titlebar-band")
-        .h(px(36.0))
+        // The Mac's traffic lights sit in this band; Windows has its own titlebar above, so only a little air.
+        .h(px(if cfg!(windows) { 8.0 } else { 36.0 }))
         .w_full()
         .flex_shrink_0()
         .on_click(|event: &ClickEvent, window: &mut Window, _| {

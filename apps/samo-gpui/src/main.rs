@@ -316,6 +316,11 @@ fn quit(cx: &mut App) {
     if let Some(host) = cx.global::<AppState>().hub.ext.get() {
         host.shutdown_all();
     }
+    // The tray item goes when it is dropped; on Windows it would otherwise linger until hovered.
+    #[cfg(windows)]
+    {
+        cx.global_mut::<AppState>().menubar = None;
+    }
     cx.quit();
 }
 
@@ -747,6 +752,14 @@ impl SamoWorkspaceApp {
     fn spawn_scan(hub: &Hub, root_path: String, fresh: bool) {
         // In the shape the scanner reports, so the finished scan matches this root (ADR-006 R26).
         let root_path = places::scan_root(&root_path);
+        // On Windows a network share is said, not scanned: nothing on it could be cleaned.
+        if let Err(why) = places::measurable_on(&root_path, cfg!(windows)) {
+            if let Ok(mut guard) = hub.shared.lock() {
+                guard.notice = Notice::new(NoticeKind::Error, why);
+            }
+            hub.wake_ui();
+            return;
+        }
         let generation = match hub.shared.lock() {
             Ok(mut guard) => {
                 let cached = (!fresh)
@@ -832,7 +845,7 @@ impl SamoWorkspaceApp {
             .hub
             .shared
             .lock()
-            .map(|g| g.is_scanning && g.scan_root == path)
+            .map(|g| g.is_scanning && g.scan_root == places::scan_root(&path))
             .unwrap_or(false);
         if already_running {
             return;
@@ -1018,7 +1031,12 @@ impl SamoWorkspaceApp {
         let notice = match terminate_verified_process(identity, signal) {
             Ok(()) => Notice::new(
                 NoticeKind::Success,
-                format!("Sent {signal} to {name} (PID {})", identity.pid),
+                // Windows has no signals: Quit asked the app to close (ADR-006 §3).
+                if cfg!(windows) {
+                    format!("Asked {name} to close (PID {})", identity.pid)
+                } else {
+                    format!("Sent {signal} to {name} (PID {})", identity.pid)
+                },
             ),
             Err(err) => Notice::new(NoticeKind::Error, err.message),
         };

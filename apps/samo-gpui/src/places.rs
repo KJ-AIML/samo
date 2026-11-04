@@ -29,11 +29,31 @@ fn drive_of(path: &str) -> Option<&str> {
         .flatten()
 }
 
-/// A root's name: a Windows drive by its letter (`C:`), the Mac's `/` as Macintosh HD.
+/// A root's name: a Windows drive by its letter (`C:`), the Mac's `/` as Macintosh HD. On Windows anything else is
+/// named as it is, never as a Mac's disk.
 pub fn root_name(root: &str) -> String {
     drive_of(root)
         .map(str::to_ascii_uppercase)
-        .unwrap_or_else(|| "Macintosh HD".to_string())
+        .unwrap_or_else(|| {
+            if cfg!(windows) {
+                root.to_string()
+            } else {
+                "Macintosh HD".to_string()
+            }
+        })
+}
+
+/// Whether Samo measures `root` on this OS (`windows`). On Windows only a folder on a local drive, in the one
+/// shape (ADR-006 R26): a network share (`\\server\share`, or a mapped drive that resolves to one) is said, not
+/// scanned, since nothing on it could be cleaned. On the Mac any folder.
+pub fn measurable_on(root: &str, windows: bool) -> Result<(), String> {
+    if !windows || samo_domain::scan_root_on(root, true).is_some() {
+        Ok(())
+    } else {
+        Err(format!(
+            "Samo on Windows measures folders on a local drive for now, and {root} isn't on one."
+        ))
+    }
 }
 
 /// Breadcrumb segments for `root`: `(label, absolute path)`, with `home` shown as `~` and a drive by its letter.
@@ -142,7 +162,18 @@ mod tests {
             ]
         );
         assert_eq!(root_name("C:/"), "C:");
-        assert_eq!(root_name("/"), "Macintosh HD");
+        if !cfg!(windows) {
+            assert_eq!(root_name("/"), "Macintosh HD");
+        }
+    }
+
+    /// On Windows Samo measures folders on a local drive (ADR-006 R26); a network path is said, not scanned.
+    #[test]
+    fn windows_measures_local_drives_only() {
+        assert!(measurable_on("D:/KJ/repo", true).is_ok());
+        assert!(measurable_on(r"\\?\UNC\server\share\x", true).is_err());
+        assert!(measurable_on("//server/share/x", true).is_err());
+        assert!(measurable_on("/Users/kj", false).is_ok());
     }
 
     #[test]

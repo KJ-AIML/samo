@@ -22,9 +22,13 @@ jobs:
       - name: Run xtask verify (layers, purity, rls, commands-complete, tests)
         run: cargo run -p xtask -- verify
 
-  # ADR-006 R30: the crates that build on Windows so far, their tests, and the static gates. The list is in the script.
+  # ADR-006 R30: the whole workspace, its tests and the static gates, on Windows. Debug info and incremental builds
+  # are off here: with GPUI in the workspace a debug build with them reached about 18 GB.
   windows:
     runs-on: windows-latest
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_INCREMENTAL: "0"
     steps:
       - uses: actions/checkout@v4
       - name: Check formatting, clippy, the static gates and tests on Windows

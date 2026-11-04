@@ -17,6 +17,12 @@ pub const REVEAL: &str = if cfg!(windows) {
 pub const THIS_COMPUTER: &str = if cfg!(windows) { "This PC" } else { "This Mac" };
 /// The computer, in a sentence ("on this Mac", "Mac up 2 d").
 pub const COMPUTER: &str = if cfg!(windows) { "PC" } else { "Mac" };
+/// What Quit does, for its tooltip: a signal on the Mac; on Windows, which has none, a request that the app close.
+pub const QUIT_TIP: &str = if cfg!(windows) {
+    "Ask it to close, after checking it is still the same process"
+} else {
+    "Send SIGTERM, after checking it is still the same process"
+};
 /// Where a removed item can be put back by hand.
 pub const RESTORE_FROM: &str = if cfg!(windows) {
     "the Recycle Bin"
@@ -39,7 +45,13 @@ mod tests {
                 );
             }
             assert_eq!(TRASH, "Recycle Bin");
+            // Windows has no signals: Quit asks the app to close.
+            assert!(!QUIT_TIP.contains("SIG"), "{QUIT_TIP}");
         } else {
+            assert_eq!(
+                QUIT_TIP,
+                "Send SIGTERM, after checking it is still the same process"
+            );
             assert_eq!(
                 (TRASH, REVEAL, THIS_COMPUTER, COMPUTER, RESTORE_FROM),
                 (

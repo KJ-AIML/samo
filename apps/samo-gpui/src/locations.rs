@@ -171,6 +171,9 @@ mod tests {
         let list = standard("/Users/a", |_| true);
         assert_eq!(name_for(&list, "/Users/a"), "Home");
         assert_eq!(name_for(&list, "/Users/a/Developer/samo"), "samo");
-        assert_eq!(name_for(&list, "/"), "Macintosh HD");
+        // The Mac's own disk name; Windows never calls anything that (ADR-006).
+        if !cfg!(windows) {
+            assert_eq!(name_for(&list, "/"), "Macintosh HD");
+        }
     }
 }
