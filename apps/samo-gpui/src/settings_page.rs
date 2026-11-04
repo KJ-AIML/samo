@@ -121,10 +121,89 @@ fn updates_come_later() -> Page {
     }
 }
 
+/// What Settings says about where Samo is, on Windows: installed for this user, or run from `folder` (where its
+/// zip was unpacked), and why to install it.
+#[cfg(any(windows, test))]
+fn install_words(installed: bool, folder: &str) -> String {
+    if installed {
+        format!("Installed for this user in {folder}.")
+    } else {
+        format!(
+            "Samo runs from {folder}. Install it for this user to update it from here, start it at sign-in and \
+             find it in the Start menu. No administrator rights are needed."
+        )
+    }
+}
+
 /// What opening Settings asks of the store: the catalog, for Samo's own update, where Samo updates itself; nothing
 /// elsewhere, where the page says nothing is fetched (ADR-006 R28).
 fn refresh_on_open(updates_here: bool) -> Option<StoreJob> {
     updates_here.then_some(StoreJob::Refresh { force: false })
+}
+
+#[cfg(windows)]
+impl SamoWorkspaceApp {
+    /// On Windows: where Samo runs, **Install for this user** until it is installed, then **Start at sign-in**.
+    fn install_card(&mut self, cx: &mut Context<Self>) -> Div {
+        let pal = p();
+        let installed = crate::install::is_installed();
+        let folder = std::env::current_exe()
+            .ok()
+            .and_then(|exe| exe.parent().map(|p| p.display().to_string()))
+            .unwrap_or_default();
+        let words = div()
+            .font(body(FontWeight::NORMAL))
+            .text_size(px(T_BODY))
+            .text_color(pal.text_2)
+            .child(install_words(installed, &folder));
+        let action = if installed {
+            let on = crate::install::starts_at_sign_in();
+            button(
+                "settings-sign-in",
+                if on {
+                    "Start at sign-in: on"
+                } else {
+                    "Start at sign-in: off"
+                },
+                None,
+                Variant::Default,
+                false,
+            )
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.install_note = crate::install::set_start_at_sign_in(!on)
+                    .err()
+                    .map(|e| format!("Windows didn't take that: {e}"));
+                cx.notify();
+            }))
+        } else {
+            button(
+                "settings-install",
+                "Install for this user",
+                Some("download"),
+                Variant::Primary,
+                false,
+            )
+            .on_click(cx.listener(|this, _, _, cx| {
+                match crate::install::install()
+                    .and_then(|(exe, _)| crate::install::start_installed(&exe))
+                {
+                    // The installed Samo waits for this one to quit, then takes over.
+                    Ok(()) => crate::quit(cx),
+                    Err(e) => {
+                        this.install_note = Some(format!("Samo couldn't be installed: {e}"));
+                        cx.notify();
+                    }
+                }
+            }))
+        };
+        let mut content = card()
+            .child(words)
+            .child(div().flex().flex_row().child(action));
+        if let Some(note) = &self.install_note {
+            content = content.child(error_line(note));
+        }
+        content
+    }
 }
 
 impl SamoWorkspaceApp {
@@ -171,10 +250,12 @@ impl SamoWorkspaceApp {
             .filter(|w| !w.trim().is_empty());
         let updates = update_count(view.catalog.as_deref(), &frame.ext, Here::now());
 
-        let body = div()
-            .flex()
-            .flex_col()
-            .gap(px(S4))
+        let body = div().flex().flex_col().gap(px(S4));
+        #[cfg(windows)]
+        let body = body
+            .child(section_rule("This PC", None))
+            .child(self.install_card(cx));
+        let body = body
             .child(section_rule("Updates", None))
             .child(self.updates_card(&words, whats_new, view.refreshing, exe, cx))
             .when(updates > 0, |el| {
@@ -332,6 +413,20 @@ impl SamoWorkspaceApp {
 mod tests {
     use super::*;
     use samo_domain::store::FileRef;
+
+    #[test]
+    fn install_words_say_where_samo_runs_and_why_to_install() {
+        let words = install_words(false, r"C:\Users\Jo\Downloads\Samo");
+        assert!(words.contains(r"C:\Users\Jo\Downloads\Samo"), "{words}");
+        assert!(
+            words.contains("update") && words.contains("Start menu"),
+            "{words}"
+        );
+        assert_eq!(
+            install_words(true, r"C:\Users\Jo\AppData\Local\Programs\Samo"),
+            r"Installed for this user in C:\Users\Jo\AppData\Local\Programs\Samo."
+        );
+    }
 
     #[test]
     fn opening_settings_fetches_only_where_updates_run() {

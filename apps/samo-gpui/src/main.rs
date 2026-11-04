@@ -7,6 +7,7 @@ mod ext_view;
 mod extensions_page;
 mod finish_update;
 mod hub;
+mod install;
 mod instance;
 mod keys;
 mod layout;
@@ -624,6 +625,8 @@ struct SamoWorkspaceApp {
     live_hover: [live::ChartHover; 3],
     /// The store's list and detail page.
     store_ui: extensions_page::StoreUi,
+    /// What installing Samo for this user or Start at sign-in last said, on Windows (Settings).
+    install_note: Option<String>,
 }
 
 fn resolve_default_root() -> String {
@@ -733,6 +736,7 @@ impl SamoWorkspaceApp {
             live_span: live::Span::TwoMin,
             live_hover: Default::default(),
             store_ui: extensions_page::StoreUi::new(cx),
+            install_note: None,
         }
     }
 
@@ -1134,6 +1138,9 @@ fn main() {
     if let Some(code) = finish_update::from_args(&env::args().collect::<Vec<_>>()) {
         std::process::exit(code);
     }
+    // Just installed for this user: wait for the Samo that installed this one to quit, so this one is the Samo.
+    #[cfg(windows)]
+    install::wait_after(&env::args().collect::<Vec<_>>());
     // One Samo at a time on Windows: a second launch asks the first to show its window, and stops here.
     #[cfg(windows)]
     let instance = match instance::dir().map(|dir| instance::Instance::claim(&dir)) {
