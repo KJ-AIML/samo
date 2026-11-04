@@ -82,7 +82,12 @@ pub fn entries_on(windows: bool, helper: &Path, home: &Path) -> Entries {
         .and_then(|_| slashed.get(home.len()..))
         .and_then(|rest| rest.strip_prefix('/'))
         .map(|rest| format!("~/{rest}"));
-    let runnable = |path: &str| !path.chars().any(char::is_whitespace);
+    // Only what Git Bash and PowerShell both take as it is, unquoted: letters and digits (any script), and
+    // `. _ - / : ~ +`. A space, `'`, `&`, `(`, `$`, `;` or a backtick, all legal in a profile path, would break one.
+    let runnable = |path: &str| {
+        path.chars()
+            .all(|c| c.is_alphanumeric() || matches!(c, '.' | '_' | '-' | '/' | ':' | '~' | '+'))
+    };
     let path = if runnable(&slashed) {
         Some(slashed.clone())
     } else {
@@ -474,6 +479,38 @@ mod tests {
             Some(json!({
                 "type": "command",
                 "command": "~/AppData/Local/Samo/Extensions/claude-sessions/current/bin/samo-claude.exe statusline"
+            }))
+        );
+    }
+
+    #[test]
+    fn windows_statusline_only_from_a_path_both_shells_run_as_it_is() {
+        // `'`, `&`, `(`, `$` … are legal in a Windows profile path, and break the line in Git Bash or PowerShell.
+        for user in ["O'Brien", "R&D", "Jo(1)", "Jo$x", "Jo`x", "Jo;x"] {
+            let home = format!(r"C:\Users\{user}");
+            let e = windows(&helper_under(&home), &home);
+            assert_eq!(
+                e.statusline,
+                Some(json!({
+                    "type": "command",
+                    "command": "~/AppData/Local/Samo/Extensions/claude-sessions/current/bin/samo-claude.exe statusline"
+                })),
+                "{user}"
+            );
+        }
+        // Outside the home folder, nothing both shells run: refused, with words.
+        let e = windows(
+            r"D:\R&D\Samo\Extensions\claude-sessions\current\bin\samo-claude.exe",
+            r"C:\Users\Jo",
+        );
+        assert_eq!(e.statusline, None);
+        // Letters beyond ASCII run in both.
+        let e = windows(&helper_under(r"C:\Users\Jürgen"), r"C:\Users\Jürgen");
+        assert_eq!(
+            e.statusline,
+            Some(json!({
+                "type": "command",
+                "command": "C:/Users/Jürgen/AppData/Local/Samo/Extensions/claude-sessions/current/bin/samo-claude.exe statusline"
             }))
         );
     }
