@@ -230,6 +230,10 @@ impl std::fmt::Display for SwapFailed {
                 f,
                 "the new Samo couldn't be put in place ({why}); the old one is back"
             ),
+            Self::Lost { why, trashed } if trashed.as_os_str().is_empty() => write!(
+                f,
+                "the new Samo couldn't be put in place ({why}), and the old one is in the Trash or the Recycle Bin"
+            ),
             Self::Lost { why, trashed } => write!(
                 f,
                 "the new Samo couldn't be put in place ({why}), and the old one couldn't come back from {}",
@@ -252,7 +256,13 @@ pub fn swap(
             "the new Samo isn't there".into(),
         ));
     }
-    let trashed = trash(old).map_err(SwapFailed::NothingChanged)?;
+    // The Recycle Bin can move the folder and then fail to find it there: the old Samo is gone either way, so the
+    // new one goes in, or no Samo would start.
+    let trashed = match trash(old) {
+        Ok(path) => Some(path),
+        Err(why) if old.exists() => return Err(SwapFailed::NothingChanged(why)),
+        Err(_) => None,
+    };
     match place(new, old) {
         Ok(()) => Ok(()),
         Err(why) => {
@@ -260,9 +270,12 @@ pub fn swap(
             if old.exists() {
                 let _ = trash(old);
             }
-            match restore(&trashed, old) {
-                Ok(()) => Err(SwapFailed::Restored(why)),
-                Err(_) => Err(SwapFailed::Lost { why, trashed }),
+            match &trashed {
+                Some(path) if restore(path, old).is_ok() => Err(SwapFailed::Restored(why)),
+                _ => Err(SwapFailed::Lost {
+                    why,
+                    trashed: trashed.unwrap_or_default(),
+                }),
             }
         }
     }
@@ -375,6 +388,22 @@ mod tests {
         let result = swap(&p.old, &gone, fake_trash(&p), fake_restore, place_app);
         assert!(matches!(result, Err(SwapFailed::NothingChanged(_))));
         assert_eq!(marker(&p.old), "old");
+        Ok(())
+    }
+
+    #[test]
+    fn the_new_samo_goes_in_even_if_the_bin_says_no_after_moving() -> Result<(), String> {
+        // The Recycle Bin can move the folder and then fail to find it there. The old Samo is gone either way, so
+        // the new one must take its place, or no Samo would start.
+        let p = place()?;
+        let moved_then_failed = |path: &Path| -> Result<PathBuf, String> {
+            let to = p.trash_dir.join("moved");
+            fs::rename(path, &to).map_err(|e| e.to_string())?;
+            Err("moved, but can't be found in the Recycle Bin".to_string())
+        };
+        swap(&p.old, &p.new, moved_then_failed, fake_restore, place_app)
+            .map_err(|e| e.to_string())?;
+        assert_eq!(marker(&p.old), "new");
         Ok(())
     }
 
