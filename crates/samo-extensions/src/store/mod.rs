@@ -10,7 +10,8 @@ use crate::net::{Net, NetError, UserAction};
 use cache::Cache;
 use samo_domain::store::{
     CACHE_CAP, CATALOG_CAP, Catalog, FileRef, ICON_CAP, ICON_MAX, SHOT_CAP, SHOT_MAX, StoreError,
-    check_replay, is_fresh, resolve, unhex, verify_catalog, verify_file, verify_image,
+    check_replay, is_fresh, resolve, this_platform, unhex, verify_catalog, verify_file,
+    verify_image,
 };
 use state::Floors;
 use std::env;
@@ -159,7 +160,8 @@ impl Store {
         }
         let catalog = verify_catalog(bytes, sig, &self.key)?;
         check_replay(&catalog.published_at, self.floors.get(&self.url).as_deref())?;
-        Ok(catalog)
+        // Everything after sees this platform's listings: what it shows, and what a package must match (R11).
+        Ok(catalog.on(this_platform()))
     }
 
     /// The last catalog fetched, from memory or the cache, verified again. Never goes online.

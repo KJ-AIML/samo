@@ -6,7 +6,9 @@
 mod v041;
 
 use ring::signature::{Ed25519KeyPair, KeyPair};
-use samo_domain::store::{Catalog, FileRef, Listing, SamoRelease, WINDOWS, hex, verify_catalog};
+use samo_domain::store::{
+    Capabilities, Catalog, FileRef, Listing, SamoRelease, WINDOWS, hex, verify_catalog,
+};
 use samo_ext_protocol::Change;
 use std::collections::BTreeMap;
 
@@ -50,7 +52,28 @@ fn listing(id: &str) -> Listing {
         permissions: Vec::new(),
         min_macos: None,
         limits: None,
+        overrides: BTreeMap::new(),
     }
+}
+
+/// A listing with a Windows build that declares other capabilities, as Clips does.
+fn clips_like() -> Listing {
+    let mut l = listing("hello");
+    l.overrides.insert(
+        WINDOWS.to_string(),
+        Capabilities {
+            summary: Some("Win+Alt+V finds it".into()),
+            changes: vec![Change {
+                what: "Presses Ctrl+V for you".into(),
+                place: "The app you were in".into(),
+                undo: "Nothing to undo".into(),
+            }],
+            windows: Some("The list at its shortcut".into()),
+            watches: Some("Windows tells it of each new copy".into()),
+            ..Capabilities::default()
+        },
+    );
+    l
 }
 
 #[test]
@@ -68,7 +91,7 @@ fn old_samo_reads_the_new_catalog() -> Result<(), String> {
                 file("Samo-0.5.0-windows-x86_64.zip"),
             )]),
         }),
-        extensions: vec![listing("claude-sessions"), listing("hello")],
+        extensions: vec![listing("claude-sessions"), clips_like()],
     };
     let bytes = serde_json::to_vec(&catalog).map_err(|e| e.to_string())?;
     let key = Ed25519KeyPair::from_seed_unchecked(&[7u8; 32]).map_err(|e| e.to_string())?;
@@ -92,6 +115,11 @@ fn old_samo_reads_the_new_catalog() -> Result<(), String> {
         assert_eq!(o.package.file, n.package.file);
         assert_eq!(o.package.sha256, n.package.sha256);
     }
+    // The Windows build's own capabilities don't change what 0.4.1 sees.
+    let mac = old.extensions.get(1).ok_or("0.4.1 lost a listing")?;
+    assert_eq!(mac.summary, "Sessions");
+    assert_eq!(mac.changes.len(), 1);
+    assert_eq!(mac.changes.first().map(|c| c.what.as_str()), Some("Hooks"));
     let samo = old.samo.ok_or("0.4.1 lost the Samo release")?;
     assert_eq!(samo.package.file, "Samo-0.5.0-macos-arm64.zip");
     Ok(())

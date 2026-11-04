@@ -11,9 +11,10 @@ use flate2::write::GzEncoder;
 use ring::rand::SystemRandom;
 use ring::signature::{Ed25519KeyPair, KeyPair};
 use samo_domain::store::{
-    Catalog, FileRef, ICON_CAP, ICON_MAX, Listing, MAC, MAX_SHOTS, PACKAGE_CAP, SAMO_CAP, SHOT_CAP,
-    SHOT_MAX, SamoRelease, Screenshot, WINDOWS, hex, image_size, manifest_matches, sha256_hex,
-    this_platform, verify_catalog, verify_file, verify_image,
+    Capabilities, Catalog, FileRef, ICON_CAP, ICON_MAX, Listing, MAC, MAX_SHOTS, PACKAGE_CAP,
+    SAMO_CAP, SHOT_CAP, SHOT_MAX, SamoRelease, Screenshot, WINDOWS, hex, image_size,
+    manifest_matches, manifest_matches_on, sha256_hex, this_platform, verify_catalog, verify_file,
+    verify_image,
 };
 use samo_ext_protocol::Manifest;
 use serde::Deserialize;
@@ -277,6 +278,7 @@ pub fn merge(
         permissions: manifest.permissions.clone(),
         min_macos: manifest.min_macos.clone(),
         limits: manifest.limits,
+        overrides: Default::default(),
     })
 }
 
@@ -494,8 +496,24 @@ pub fn publish(args: &PublishArgs) -> Result<(), String> {
         };
         let mut entry = merge(manifest, &listing, pin(path)?)?;
         if let Some((windows, path, _)) = pick(WINDOWS) {
-            // One listing for both: Windows' manifest must say what the Mac's says (R11).
-            manifest_matches(windows, &entry)
+            // One listing for both. What Windows' build says differently (its summary, changes and capabilities) goes in
+            // the listing's overrides, shown and checked on Windows; the rest must be the Mac's (R11).
+            if windows.summary != manifest.summary || manifest_matches(windows, &entry).is_err() {
+                entry.overrides.insert(
+                    WINDOWS.to_string(),
+                    Capabilities {
+                        summary: (windows.summary != manifest.summary)
+                            .then(|| windows.summary.clone()),
+                        changes: windows.changes.clone(),
+                        windows: windows.windows.clone(),
+                        watches: windows.watches.clone(),
+                        permissions: windows.permissions.clone(),
+                        min_macos: windows.min_macos.clone(),
+                        limits: windows.limits,
+                    },
+                );
+            }
+            manifest_matches_on(windows, &entry, WINDOWS)
                 .map_err(|e| format!("{id}'s Windows package doesn't match its listing: {e}"))?;
             entry.platforms.insert(WINDOWS.to_string(), pin(path)?);
         }
@@ -864,6 +882,15 @@ mod tests {
         names: &[&str],
         samo_windows: Option<&[u8]>,
     ) -> Result<(tempfile::TempDir, Result<Catalog, String>), String> {
+        publish_pair(names, samo_windows, None)
+    }
+
+    /// `publish_with`, with the Windows packages packed from `windows_manifest` when given.
+    fn publish_pair(
+        names: &[&str],
+        samo_windows: Option<&[u8]>,
+        windows_manifest: Option<&str>,
+    ) -> Result<(tempfile::TempDir, Result<Catalog, String>), String> {
         let dir = tempfile::tempdir().map_err(|e| e.to_string())?;
         let store = dir.path().join("store/extensions/hello");
         fs::create_dir_all(&store).map_err(|e| e.to_string())?;
@@ -880,8 +907,22 @@ mod tests {
         let packages = dir.path().join("packages");
         fs::create_dir_all(&packages).map_err(|e| e.to_string())?;
         let tar = tar_gz(&dir.path().join("stage"), "hello")?;
+        let windows_tar = match windows_manifest {
+            Some(text) => {
+                let stage = dir.path().join("stage-windows/hello");
+                fs::create_dir_all(&stage).map_err(|e| e.to_string())?;
+                fs::write(stage.join("extension.toml"), text).map_err(|e| e.to_string())?;
+                tar_gz(&dir.path().join("stage-windows"), "hello")?
+            }
+            None => tar.clone(),
+        };
         for name in names {
-            fs::write(packages.join(name), &tar).map_err(|e| e.to_string())?;
+            let packed = if name.contains(WINDOWS) {
+                &windows_tar
+            } else {
+                &tar
+            };
+            fs::write(packages.join(name), packed).map_err(|e| e.to_string())?;
         }
         let key = Ed25519KeyPair::generate_pkcs8(&SystemRandom::new()).map_err(|_| "key")?;
         fs::write(dir.path().join("test-key.pk8"), key.as_ref()).map_err(|e| e.to_string())?;
@@ -932,6 +973,50 @@ mod tests {
         // A Mac package alone is a Mac-only listing, as before.
         let (_dir, catalog) = publish_with(&["hello-0.2.0-macos-arm64.tar.gz"], None)?;
         assert!(catalog?.extensions[0].platforms.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn publish_writes_windows_own_capabilities() -> Result<(), String> {
+        let names = [
+            "hello-0.2.0-macos-arm64.tar.gz",
+            "hello-0.2.0-windows-x86_64.tar.gz",
+        ];
+        let windows = "id = \"hello\"
+name = \"Hello\"
+version = \"0.2.0\"
+protocol = 1
+min_samo = \"0.2.0\"
+\n             helper = \"bin/samo-ext-hello\"
+summary = \"Every widget, on Windows\"
+\n             watches = \"Windows tells it of each copy\"
+
+[[changes]]
+what = \"Presses Ctrl+V\"
+\n             where = \"the app you were in\"
+undo = \"nothing\"
+";
+        let (_dir, catalog) = publish_pair(&names, None, Some(windows))?;
+        let catalog = catalog?;
+        let l = &catalog.extensions[0];
+        let caps = l.overrides.get(WINDOWS).ok_or("no Windows capabilities")?;
+        assert_eq!(caps.summary.as_deref(), Some("Every widget, on Windows"));
+        assert_eq!(
+            caps.watches.as_deref(),
+            Some("Windows tells it of each copy")
+        );
+        assert_eq!(
+            caps.changes.first().map(|c| c.what.as_str()),
+            Some("Presses Ctrl+V")
+        );
+        // The Mac's stay where 0.4.1 reads them.
+        assert_eq!(
+            (l.summary.as_str(), l.watches.clone()),
+            ("Every widget", None)
+        );
+        // The same manifest on both adds nothing.
+        let (_dir, catalog) = publish_with(&names, None)?;
+        assert!(catalog?.extensions[0].overrides.is_empty());
         Ok(())
     }
 

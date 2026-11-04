@@ -188,6 +188,7 @@ pub fn rows(catalog: Option<&Catalog>, ext: &ExtSnapshot, here: Here) -> Vec<Row
                 permissions: e.permissions.clone(),
                 min_macos: None,
                 limits: e.limits,
+                overrides: Default::default(),
             });
             Row {
                 listing,
@@ -392,6 +393,7 @@ mod tests {
             permissions: Vec::new(),
             min_macos: None,
             limits: None,
+            overrides: Default::default(),
         }
     }
 
