@@ -1,25 +1,22 @@
-//! These run real helpers: `#!/bin/sh` stand-ins, Swift or codesign. Their Windows forms come with #9 (ADR-006).
-#![cfg(unix)]
-
 //! ADR-004 in the host: windows only when declared (R15), whole process trees, declared limits (R17), and macOS
-//! versions. Helpers are shell scripts; the window server is a fake, so a test can say who "owns windows".
+//! versions. Helpers are the `samo-fake-helper` stand-in, on every OS; the window server is a fake, so a test can
+//! say who "owns windows".
 
 use samo_domain::extensions::BackoffConfig;
 use samo_extensions::windows::{WindowCheck, WindowOwners};
 use samo_extensions::{ExtRoot, ExtSlot, ExtSnapshot, Host, HostConfig, Status};
 use std::fs;
-use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
+use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
 
 type Fallible<T> = Result<T, String>;
 
 const SLOT: ExtSlot = ExtSlot(0);
-const HELLO: &str = r#"echo '{"type":"hello","protocol":1}'"#;
-const WAIT_FOR_SHUTDOWN: &str =
-    r#"while read -r line; do case "$line" in *shutdown*) exit 0;; esac; done"#;
+const HELLO: &str = "hello";
+const WAIT_FOR_SHUTDOWN: &str = "wait-shutdown";
 
 /// A window server that says what the test wants.
 struct Fake(fn(&[u32]) -> Option<usize>);
@@ -50,7 +47,13 @@ fn fixture(extra: &str, tables: &str, script: &str) -> Fallible<Fixture> {
         ),
     )
     .map_err(|e| e.to_string())?;
-    samo_testkit::fake_helper(&dev.join("bin"), "helper", script).map_err(|e| e.to_string())?;
+    samo_testkit::fake_helper(
+        Path::new(env!("CARGO_BIN_EXE_samo-fake-helper")),
+        &dev.join("bin"),
+        "helper",
+        script,
+    )
+    .map_err(|e| e.to_string())?;
     Ok(Fixture {
         root: ExtRoot::at(dir.path().join("Extensions")),
         _dir: dir,
@@ -113,12 +116,19 @@ fn stopped_because(snap: &ExtSnapshot) -> Option<String> {
     }
 }
 
+/// Whether the process whose pid is written in `pid` is running.
 fn alive(pid: &str) -> bool {
-    Command::new("/bin/kill")
-        .args(["-0", pid.trim()])
-        .stderr(Stdio::null())
-        .status()
-        .is_ok_and(|s| s.success())
+    let Ok(pid) = pid.trim().parse::<u32>() else {
+        return false;
+    };
+    let mut sys = System::new();
+    let pid = Pid::from_u32(pid);
+    sys.refresh_processes_specifics(
+        ProcessesToUpdate::Some(&[pid]),
+        true,
+        ProcessRefreshKind::nothing(),
+    );
+    sys.process(pid).is_some()
 }
 
 #[test]
@@ -155,11 +165,25 @@ fn declared_windows_are_allowed() -> Fallible<()> {
     Ok(())
 }
 
+/// The fake window server: windows exist only once the helper has started a copy of itself (its `spawn-sleeper`
+/// child). On Windows a console program also has its console host in its family, which doesn't count.
+fn has_child(pids: &[u32]) -> Option<usize> {
+    let pids: Vec<Pid> = pids.iter().map(|p| Pid::from_u32(*p)).collect();
+    let mut sys = System::new();
+    sys.refresh_processes_specifics(
+        ProcessesToUpdate::Some(&pids),
+        true,
+        ProcessRefreshKind::nothing().with_cmd(UpdateKind::Always),
+    );
+    let sleeping = pids.iter().any(|pid| {
+        sys.process(*pid)
+            .is_some_and(|p| p.cmd().iter().any(|arg| arg == "__sleep"))
+    });
+    Some(usize::from(sleeping))
+}
+
 #[test]
 fn descendants_windows_are_counted() -> Fallible<()> {
-    // The fake says windows exist only once the helper has started another process.
-    let has_child = |pids: &[u32]| Some(usize::from(pids.len() > 1));
-
     let alone = fixture("", "", &format!("{HELLO}\n{WAIT_FOR_SHUTDOWN}"))?;
     let host = start(&alone, has_child);
     wait_for(&host, "it to run", |s| status(s) == Some(Status::Running))?;
@@ -171,7 +195,11 @@ fn descendants_windows_are_counted() -> Fallible<()> {
     );
     host.shutdown_all();
 
-    let parent = fixture("", "", &format!("sleep 30 &\n{HELLO}\n{WAIT_FOR_SHUTDOWN}"))?;
+    let parent = fixture(
+        "",
+        "",
+        &format!("spawn-sleeper 30\n{HELLO}\n{WAIT_FOR_SHUTDOWN}"),
+    )?;
     let host = start(&parent, has_child);
     let snap = wait_for(&host, "R15 to stop it", |s| stopped_because(s).is_some())?;
     assert_eq!(
@@ -184,12 +212,7 @@ fn descendants_windows_are_counted() -> Fallible<()> {
 
 #[test]
 fn stop_kills_descendants() -> Fallible<()> {
-    let script = format!(
-        r#"sleep 300 &
-echo $! > "$SAMO_EXT_DATA_DIR/child"
-{HELLO}
-{WAIT_FOR_SHUTDOWN}"#
-    );
+    let script = format!("spawn-sleeper 300 $DATA/child\n{HELLO}\n{WAIT_FOR_SHUTDOWN}");
     let f = fixture("", "", &script)?;
     let host = start(&f, |_| Some(0));
     wait_for(&host, "it to run", |s| status(s) == Some(Status::Running))?;
@@ -230,7 +253,7 @@ fn declared_limits_enforced() -> Fallible<()> {
 }
 
 /// About 20% of one core: busy for 20 ms, then asleep for 80 ms.
-const LIGHT: &str = r#"exec /usr/bin/perl -e 'use Time::HiRes qw(time sleep); while (1) { my $t = time; 1 while time - $t < 0.02; sleep 0.08 }'"#;
+const LIGHT: &str = "light";
 
 #[test]
 fn cpu_is_measured_truly_beside_tree_checks() -> Fallible<()> {
@@ -253,8 +276,7 @@ fn cpu_is_measured_truly_beside_tree_checks() -> Fallible<()> {
 #[test]
 fn over_its_limit_it_rests_and_starts_again_then_stays_stopped() -> Fallible<()> {
     // R8: going over a limit stops the helper, which starts again after a rest; the third time it stays stopped.
-    let script =
-        format!("echo $$ > \"$SAMO_EXT_DATA_DIR/pid\"\n{HELLO}\nexec /usr/bin/perl -e '1 while 1'");
+    let script = format!("write $DATA/pid $PID\n{HELLO}\nburn");
     let f = fixture("", "", &script)?;
     let mut c = config(&f, |_| Some(0));
     c.resource_every = Duration::from_millis(300);
