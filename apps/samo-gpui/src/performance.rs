@@ -204,7 +204,10 @@ impl SamoWorkspaceApp {
                 None,
                 Some(mono_label("load, %", pal.text_2).into_any_element()),
             ))
-            .child(if p_cores.is_empty() && e_cores.is_empty() {
+            .child(if p_cores.is_empty() && e_cores.is_empty() && cfg!(windows) {
+                // Windows doesn't say which cores are which, so this never fills in (ADR-006 R28).
+                empty("Windows doesn't say which cores are for performance and which for efficiency; the CPU chart above covers all of them.")
+            } else if p_cores.is_empty() && e_cores.is_empty() {
                 loading("Waiting for this Mac to report load per core…")
             } else {
                 div()

@@ -16,6 +16,7 @@ mod locations;
 mod menubar;
 mod overview;
 mod performance;
+mod places;
 mod popup;
 mod processes;
 mod projects;
@@ -25,6 +26,7 @@ mod storage;
 mod store_view;
 mod text_input;
 mod theme;
+mod words;
 
 use disk_view::DiskView;
 use futures::StreamExt;
@@ -624,16 +626,17 @@ struct SamoWorkspaceApp {
 
 fn resolve_default_root() -> String {
     if let Ok(custom) = env::var("SAMO_DEFAULT_SCAN_ROOT") {
-        return custom;
+        return places::scan_root(&custom);
     }
-    if let Ok(home) = env::var("HOME") {
+    let home = places::home_dir();
+    if !home.is_empty() {
         let dev = PathBuf::from(&home).join("Developer");
         if dev.is_dir() {
-            return dev.to_string_lossy().into_owned();
+            return places::scan_root(&dev.to_string_lossy());
         }
-        return home;
+        return places::scan_root(&home);
     }
-    "/".to_string()
+    if cfg!(windows) { "C:/" } else { "/" }.to_string()
 }
 
 /// `SAMO_START_PAGE=projects|storage|processes|performance|extensions` opens on that page; an installed
@@ -738,6 +741,8 @@ impl SamoWorkspaceApp {
     /// Measures `root_path` on its own thread. Unless `fresh`, a recent scan of the same folder is shown at once
     /// instead (it says when it was measured; Rescan measures again).
     fn spawn_scan(hub: &Hub, root_path: String, fresh: bool) {
+        // In the shape the scanner reports, so the finished scan matches this root (ADR-006 R26).
+        let root_path = places::scan_root(&root_path);
         let generation = match hub.shared.lock() {
             Ok(mut guard) => {
                 let cached = (!fresh)
@@ -919,9 +924,10 @@ impl SamoWorkspaceApp {
                     guard.notice = Notice::new(
                         NoticeKind::Success,
                         format!(
-                            "Moved “{}” ({}) to the Trash.",
+                            "Moved “{}” ({}) to the {}.",
                             confirm.label,
-                            format_bytes(outcome.reclaimed_bytes)
+                            format_bytes(outcome.reclaimed_bytes),
+                            words::TRASH
                         ),
                     );
                     guard.disk = guard.disk.as_deref().map(|view| {
@@ -976,8 +982,9 @@ impl SamoWorkspaceApp {
                     guard.notice = Notice::new(
                         NoticeKind::Success,
                         format!(
-                            "Put {} back from the Trash.",
-                            display_path(&outcome.original_path)
+                            "Put {} back from the {}.",
+                            display_path(&outcome.original_path),
+                            words::TRASH
                         ),
                     );
                 }
@@ -991,11 +998,9 @@ impl SamoWorkspaceApp {
         cx.notify();
     }
 
+    /// Shows the folder in Finder (the Mac) or Explorer (Windows), selected.
     fn reveal_in_finder(&mut self, path: String, cx: &mut Context<Self>) {
-        let _ = std::process::Command::new("/usr/bin/open")
-            .arg("-R")
-            .arg(&path)
-            .status();
+        places::reveal(&path);
         cx.notify();
     }
 

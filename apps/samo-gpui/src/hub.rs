@@ -276,7 +276,7 @@ pub fn placeholder_telemetry() -> TelemetrySnapshot {
         system: SystemSummary {
             hostname: String::new(),
             os_version: String::new(),
-            chip_brand: "This Mac".to_string(),
+            chip_brand: crate::words::THIS_COMPUTER.to_string(),
             physical_cores: 0,
             logical_cores: 0,
             perf_cores: not_yet(),

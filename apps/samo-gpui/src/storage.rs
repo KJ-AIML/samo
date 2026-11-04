@@ -512,7 +512,7 @@ impl SamoWorkspaceApp {
                         icon_button(
                             "ball-reveal",
                             "reveal",
-                            "Reveal in Finder",
+                            crate::words::REVEAL,
                             Variant::Default,
                             true,
                         )
@@ -523,7 +523,7 @@ impl SamoWorkspaceApp {
                     .child(
                         button(
                             "ball-trash",
-                            "Move to Trash…",
+                            format!("Move to {}…", crate::words::TRASH),
                             Some("trash"),
                             Variant::Default,
                             true,
@@ -622,7 +622,7 @@ impl SamoWorkspaceApp {
                                             icon_button(
                                                 SharedString::from(format!("file-reveal-{i}")),
                                                 "reveal",
-                                                "Reveal in Finder",
+                                                crate::words::REVEAL,
                                                 Variant::Link,
                                                 true,
                                             )
@@ -636,7 +636,7 @@ impl SamoWorkspaceApp {
                                             icon_button(
                                                 SharedString::from(format!("file-trash-{i}")),
                                                 "trash",
-                                                "Move to Trash…",
+                                                &format!("Move to {}…", crate::words::TRASH),
                                                 Variant::Link,
                                                 true,
                                             )

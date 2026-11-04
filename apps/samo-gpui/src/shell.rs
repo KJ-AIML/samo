@@ -40,26 +40,7 @@ pub struct Page {
 
 /// Breadcrumb segments for a path: `(label, absolute path)`, home shown as `~`.
 pub fn path_segments(root: &str) -> Vec<(String, String)> {
-    let home = home_dir();
-    let under_home = !home.is_empty() && (root == home || root.starts_with(&format!("{home}/")));
-    let (mut acc, mut out, rest) = if under_home {
-        (
-            home.clone(),
-            vec![("~".to_string(), home.clone())],
-            root[home.len()..].to_string(),
-        )
-    } else {
-        (
-            String::new(),
-            vec![("Macintosh HD".to_string(), "/".to_string())],
-            root.to_string(),
-        )
-    };
-    for part in rest.split('/').filter(|p| !p.is_empty()) {
-        acc = format!("{acc}/{part}");
-        out.push((part.to_string(), acc.clone()));
-    }
-    out
+    crate::places::path_segments_from(root, &home_dir())
 }
 
 /// The standard line under a disk page's title.
@@ -121,7 +102,7 @@ impl SamoWorkspaceApp {
         let project_count = frame.view().map(|v| v.snap.projects.len());
         let process_count = frame.telemetry.total_processes;
         let sub = if frame.telemetry.system.hostname.is_empty() {
-            "Mac instrument".to_string()
+            format!("{} instrument", crate::words::COMPUTER)
         } else {
             frame.telemetry.system.hostname.clone()
         };
@@ -354,12 +335,12 @@ impl SamoWorkspaceApp {
         let volume_name = volume
             .map(|d| {
                 if d.volume_name.is_empty() {
-                    "Macintosh HD".to_string()
+                    crate::places::root_name(&frame.scan_root)
                 } else {
                     d.volume_name.clone()
                 }
             })
-            .unwrap_or_else(|| "Macintosh HD".to_string());
+            .unwrap_or_else(|| crate::places::root_name(&frame.scan_root));
         let volume_words = volume
             .map(|d| {
                 format!(
@@ -369,7 +350,7 @@ impl SamoWorkspaceApp {
                 )
             })
             .unwrap_or_else(|| "Not measured yet".to_string());
-        let user = std::env::var("USER").unwrap_or_else(|_| "you".to_string());
+        let user = crate::places::user_name();
         let uptime = frame.telemetry.system.uptime_secs;
 
         let row = |who: Who, mood: Mood, title: String, words: String| {
@@ -433,9 +414,9 @@ impl SamoWorkspaceApp {
                 Mood::Idle,
                 user,
                 if uptime > 0 {
-                    format!("Mac up {}", format_uptime(uptime))
+                    format!("{} up {}", crate::words::COMPUTER, format_uptime(uptime))
                 } else {
-                    "This Mac".to_string()
+                    crate::words::THIS_COMPUTER.to_string()
                 },
             )))
     }
@@ -894,7 +875,7 @@ impl SamoWorkspaceApp {
             icon_button(
                 "head-reveal",
                 "reveal",
-                "Reveal in Finder",
+                crate::words::REVEAL,
                 Variant::Default,
                 false,
             )
@@ -936,7 +917,7 @@ impl SamoWorkspaceApp {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let pal = p();
-        let user = std::env::var("USER").unwrap_or_else(|_| "you".to_string());
+        let user = crate::places::user_name();
         div()
             .id("confirm-backdrop")
             .absolute()
@@ -982,7 +963,7 @@ impl SamoWorkspaceApp {
                                     .flex()
                                     .flex_col()
                                     .gap(px(6.0))
-                                    .child(h2(format!("Move “{}” to the Trash?", conf.label)))
+                                    .child(h2(format!("Move “{}” to the {}?", conf.label, crate::words::TRASH)))
                                     .child(
                                         div()
                                             .font(body(FontWeight::NORMAL))
@@ -990,8 +971,9 @@ impl SamoWorkspaceApp {
                                             .line_height(px(20.0))
                                             .text_color(pal.text_2)
                                             .child(format!(
-                                                "Samo suggested it; the decision is yours. It frees about {}, and you can undo it here or restore it from the Trash in Finder.",
-                                                format_bytes(conf.bytes)
+                                                "Samo suggested it; the decision is yours. It frees about {}, and you can undo it here or restore it from {}.",
+                                                format_bytes(conf.bytes),
+                                                crate::words::RESTORE_FROM
                                             )),
                                     ),
                             ),
@@ -1036,7 +1018,7 @@ impl SamoWorkspaceApp {
                                 }),
                             ))
                             .child(
-                                button("confirm-trash", "Move to Trash", Some("trash"), Variant::Primary, false)
+                                button("confirm-trash", format!("Move to {}", crate::words::TRASH), Some("trash"), Variant::Primary, false)
                                     .on_click(cx.listener(|this, _, _, cx| this.execute_confirmed_trash(cx))),
                             ),
                     ),

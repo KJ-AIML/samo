@@ -864,9 +864,15 @@ fn thermal_card(frame: &Frame) -> Div {
     let pal = p();
     let (c_first, _) = series_pair();
     let Some(thermal) = frame.thermal else {
-        return card()
-            .child(card_head("Thermal", None, None))
-            .child(loading("Asking macOS how warm this Mac is…"));
+        let head = card().child(card_head("Thermal", None, None));
+        // Windows tells apps no thermal state, so there is never a reading to wait for (R3, ADR-006 R28).
+        return if cfg!(windows) {
+            head.child(empty(
+                "Windows doesn't tell apps how warm this PC is, so Samo shows no guess.",
+            ))
+        } else {
+            head.child(loading("Asking macOS how warm this Mac is…"))
+        };
     };
     let (word, sentence, lit, wrong) = heat_words(thermal.heat);
     let on = if wrong { pal.signal } else { c_first };

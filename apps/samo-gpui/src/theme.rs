@@ -506,24 +506,33 @@ pub fn init_fonts(cx: &mut App) {
     let names = cx.text_system().all_font_names();
     let has = |n: &str| names.iter().any(|x| x == n);
     let pick = |want: &'static str, fallback: &'static str| if has(want) { want } else { fallback };
+    // Menlo is the Mac's; Windows has Cascadia Mono (Windows 11) or Consolas.
+    let mono_fallback = if cfg!(windows) && has("Cascadia Mono") {
+        "Cascadia Mono"
+    } else {
+        MONO_FALLBACK
+    };
     let _ = FACES.set(Faces {
         display: pick("Cabinet Grotesk", ".SystemUIFont"),
         body: pick("Switzer", ".SystemUIFont"),
-        mono: pick("IBM Plex Mono", "Menlo"),
+        mono: pick("IBM Plex Mono", mono_fallback),
         mono_medium: if has("IBM Plex Mono Medium") {
             "IBM Plex Mono Medium"
         } else {
-            pick("IBM Plex Mono", "Menlo")
+            pick("IBM Plex Mono", mono_fallback)
         },
     });
 }
+
+/// The OS's own monospace face, for when IBM Plex Mono isn't there.
+const MONO_FALLBACK: &str = if cfg!(windows) { "Consolas" } else { "Menlo" };
 
 fn faces() -> &'static Faces {
     FACES.get_or_init(|| Faces {
         display: ".SystemUIFont",
         body: ".SystemUIFont",
-        mono: "Menlo",
-        mono_medium: "Menlo",
+        mono: MONO_FALLBACK,
+        mono_medium: MONO_FALLBACK,
     })
 }
 
@@ -641,21 +650,12 @@ pub fn format_ago(then_ms: i64) -> String {
 }
 
 pub fn home_dir() -> String {
-    std::env::var("HOME").unwrap_or_default()
+    crate::places::home_dir()
 }
 
 /// Shortens `$HOME/...` to `~/...` for display.
 pub fn display_path(path: &str) -> String {
-    let home = home_dir();
-    if !home.is_empty() {
-        if path == home {
-            return "~".to_string();
-        }
-        if let Some(rest) = path.strip_prefix(&format!("{home}/")) {
-            return format!("~/{rest}");
-        }
-    }
-    path.to_string()
+    crate::places::display_path_from(path, &home_dir())
 }
 
 pub fn ratio(part: u64, whole: u64) -> f32 {

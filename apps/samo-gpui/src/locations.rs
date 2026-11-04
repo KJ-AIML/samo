@@ -15,6 +15,11 @@ pub struct Location {
 }
 
 fn store() -> Option<PathBuf> {
+    // Windows keeps an app's settings in %APPDATA% (ADR-006 §3).
+    if cfg!(windows) {
+        return std::env::var_os("APPDATA")
+            .map(|dir| PathBuf::from(dir).join("Samo").join("locations.txt"));
+    }
     let home = home_dir();
     (!home.is_empty())
         .then(|| PathBuf::from(home).join("Library/Application Support/Samo/locations.txt"))
@@ -39,6 +44,10 @@ fn standard(home: &str, exists: impl Fn(&str) -> bool) -> Vec<Location> {
         add("Documents", "document", format!("{home}/Documents"));
         add("Downloads", "download", format!("{home}/Downloads"));
         add("Developer", "folder", format!("{home}/Developer"));
+        // Visual Studio's own place for code on Windows (ADR-006).
+        if cfg!(windows) {
+            add("Repos", "folder", format!("{home}/source/repos"));
+        }
     }
     add("Applications", "apps", "/Applications".to_string());
     out
@@ -93,6 +102,9 @@ fn save(list: &[Location]) -> std::io::Result<()> {
 
 /// Adds a folder you picked (if it isn't there already) and keeps it.
 pub fn add(list: &mut Vec<Location>, path: &str) -> std::io::Result<()> {
+    // In the shape the scanner reports it, so a chosen folder matches its scan (ADR-006 R26).
+    let canonical = crate::places::scan_root(path);
+    let path = canonical.as_str();
     if list.iter().any(|l| l.path == path) {
         return Ok(());
     }
@@ -115,7 +127,7 @@ pub fn name_for(list: &[Location], path: &str) -> String {
             Path::new(path)
                 .file_name()
                 .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_else(|| "Macintosh HD".to_string())
+                .unwrap_or_else(|| crate::places::root_name(path))
         })
 }
 
@@ -127,10 +139,20 @@ mod tests {
     fn standard_folders_are_offered_only_when_they_exist() {
         let list = standard("/Users/a", |p| p != "/Users/a/Developer");
         let names: Vec<&str> = list.iter().map(|l| l.name.as_str()).collect();
-        assert_eq!(
-            names,
+        // Windows also offers Visual Studio's `source/repos` (ADR-006).
+        let expected = if cfg!(windows) {
+            vec![
+                "Home",
+                "Desktop",
+                "Documents",
+                "Downloads",
+                "Repos",
+                "Applications",
+            ]
+        } else {
             vec!["Home", "Desktop", "Documents", "Downloads", "Applications"]
-        );
+        };
+        assert_eq!(names, expected);
         assert!(list.iter().all(|l| !l.custom));
     }
 

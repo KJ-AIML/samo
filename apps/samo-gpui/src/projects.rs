@@ -171,7 +171,7 @@ impl SamoWorkspaceApp {
                                 icon_button(
                                     SharedString::from(format!("proj-reveal-{i}")),
                                     "reveal",
-                                    "Reveal in Finder",
+                                    crate::words::REVEAL,
                                     Variant::Link,
                                     true,
                                 )
@@ -215,8 +215,9 @@ impl SamoWorkspaceApp {
                         let bytes = art.bytes;
                         let identity = art.identity;
                         let tooltip_text = SharedString::from(format!(
-                            "Move {} to the Trash…",
-                            display_path(&art.path)
+                            "Move {} to the {}…",
+                            display_path(&art.path),
+                            crate::words::TRASH
                         ));
                         // a suggestion: the chip wears the dither until you act on it
                         div()
