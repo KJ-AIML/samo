@@ -100,6 +100,37 @@ fn clock(ms: i64) -> String {
     }
 }
 
+/// The Extensions page's subtitle. Where the store doesn't run yet (`store_here` false: Windows, #10) it says
+/// nothing about the store (ADR-006 R28).
+fn page_sub_on(installed: usize, on: usize, store_here: bool) -> String {
+    let signed = if store_here {
+        " Every one in the store is signed."
+    } else {
+        ""
+    };
+    match installed {
+        0 => format!("Extensions add to what Samo watches.{signed}"),
+        n => format!("{n} installed, {on} on.{signed}"),
+    }
+}
+
+/// What an empty list says. Without the store there is nothing to pick, refresh or check for updates; the store
+/// note above says why (ADR-006 R28).
+fn empty_words_on(picked: Segment, query: &str, store_here: bool) -> String {
+    match (picked, query.trim().is_empty(), store_here) {
+        (_, false, _) => format!("No extensions match “{}”.", query.trim()),
+        (Segment::Updates, true, true) => "Everything installed is up to date.".to_string(),
+        (Segment::Installed, true, true) => {
+            "Nothing installed yet. Pick one from All to install it.".to_string()
+        }
+        (Segment::All, true, true) => {
+            "No extensions to show. Refresh to load the store.".to_string()
+        }
+        (Segment::Updates, true, false) => "Updates come with the store, later.".to_string(),
+        (_, true, false) => "No extensions yet.".to_string(),
+    }
+}
+
 /// What the store says about where its list came from, if anything. `store_here` is false where the store doesn't
 /// run yet (Windows, until #10): the page says so, and nothing is fetched (ADR-006 R28).
 fn store_note_on(view: &StoreView, store_here: bool) -> Option<(String, bool)> {
@@ -233,12 +264,7 @@ impl SamoWorkspaceApp {
         let pal = p();
         let installed = frame.ext.extensions.len();
         let on = frame.ext.extensions.iter().filter(|e| e.on).count();
-        let sub = match installed {
-            0 => {
-                "Extensions add to what Samo watches. Every one in the store is signed.".to_string()
-            }
-            n => format!("{n} installed, {on} on. Every one in the store is signed."),
-        };
+        let sub = page_sub_on(installed, on, samo_extensions::STORE_ON_THIS_OS);
         let query = self.store_ui.search.read(cx).text().to_string();
         let picked = self.store_ui.segment;
         let shown = visible(all, picked, &query);
@@ -300,19 +326,7 @@ impl SamoWorkspaceApp {
         );
 
         if shown.is_empty() {
-            let store = samo_extensions::STORE_ON_THIS_OS;
-            let words = match (picked, query.trim().is_empty()) {
-                (_, false) => format!("No extensions match “{}”.", query.trim()),
-                (Segment::Updates, true) => "Everything installed is up to date.".to_string(),
-                (Segment::Installed, true) if store => {
-                    "Nothing installed yet. Pick one from All to install it.".to_string()
-                }
-                (Segment::All, true) if store => {
-                    "No extensions to show. Refresh to load the store.".to_string()
-                }
-                // Without the store there's nothing to pick or refresh (the note above says why).
-                (_, true) => "No extensions yet.".to_string(),
-            };
+            let words = empty_words_on(picked, &query, samo_extensions::STORE_ON_THIS_OS);
             content = content.child(empty(&words));
         } else {
             let mut list = card().p(px(0.0)).gap(px(0.0));
@@ -1243,6 +1257,44 @@ mod tests {
         assert!(
             store_note_on(&v, true)
                 .is_some_and(|(w, failed)| w.contains("installed extensions only") && failed)
+        );
+    }
+
+    #[test]
+    fn without_the_store_nothing_is_claimed_about_it() {
+        // The Mac's words, unchanged.
+        assert_eq!(
+            page_sub_on(0, 0, true),
+            "Extensions add to what Samo watches. Every one in the store is signed."
+        );
+        assert_eq!(
+            page_sub_on(2, 1, true),
+            "2 installed, 1 on. Every one in the store is signed."
+        );
+        assert_eq!(
+            empty_words_on(Segment::Updates, "", true),
+            "Everything installed is up to date."
+        );
+        // Without a store (Windows, #10): no store to vouch for, no update check that ran (ADR-006 R28).
+        assert_eq!(
+            page_sub_on(0, 0, false),
+            "Extensions add to what Samo watches."
+        );
+        assert_eq!(page_sub_on(2, 1, false), "2 installed, 1 on.");
+        for segment in [Segment::All, Segment::Installed, Segment::Updates] {
+            let words = empty_words_on(segment, "", false);
+            assert!(
+                !words.contains("up to date") && !words.contains("Refresh"),
+                "{words}"
+            );
+        }
+        assert_eq!(
+            empty_words_on(Segment::Updates, "", false),
+            "Updates come with the store, later."
+        );
+        assert_eq!(
+            empty_words_on(Segment::All, " x ", false),
+            "No extensions match “x”."
         );
     }
 
