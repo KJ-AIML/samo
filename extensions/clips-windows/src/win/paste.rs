@@ -26,6 +26,9 @@ pub fn elevated(pid: u32) -> Option<bool> {
 fn key(vk: co::VK, up: bool) -> w::HwKbMouse {
     let mut input = w::KEYBDINPUT {
         wVk: vk,
+        // The scan code too: some remote and virtual-machine consoles read only that.
+        wScan: u16::try_from(w::MapVirtualKey(u32::from(vk.raw()), co::MAPVK::VK_TO_VSC))
+            .unwrap_or(0),
         ..Default::default()
     };
     if up {
@@ -53,13 +56,21 @@ impl Windows for WinWindows {
         elevated(pid).unwrap_or(true)
     }
 
-    fn press_paste(&self) {
-        let _ = w::SendInput(&[
+    fn keys_held(&self) -> bool {
+        [co::VK::MENU, co::VK::SHIFT, co::VK::LWIN, co::VK::RWIN]
+            .into_iter()
+            .any(w::GetAsyncKeyState)
+    }
+
+    fn press_paste(&self) -> bool {
+        let keys = [
             key(co::VK::CONTROL, false),
             key(co::VK::CHAR_V, false),
             key(co::VK::CHAR_V, true),
             key(co::VK::CONTROL, true),
-        ]);
+        ];
+        // Windows says how many it took; none means it blocked them (a higher-integrity window, the secure desktop).
+        w::SendInput(&keys).is_ok_and(|taken| taken == 4)
     }
 
     fn sleep(&self, time: Duration) {
