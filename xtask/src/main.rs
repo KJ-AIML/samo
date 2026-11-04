@@ -1,6 +1,7 @@
 mod codesign;
 mod commands_complete;
 mod ext_dev;
+mod icon;
 mod layers;
 mod network;
 mod purity;
@@ -59,6 +60,7 @@ fn run() -> Result<(), String> {
             store::package(&root, &root.join(dir)).map(|_| ())
         }
         "ext-publish" => store::publish(&publish_args(&root, &args[1..])?),
+        "windows-icon" => icon::run(&root).map(|_| ()),
         "ext-dev" => {
             let dir = args
                 .get(1)
@@ -66,7 +68,7 @@ fn run() -> Result<(), String> {
             ext_dev::run(&root, &root.join(dir)).map(|_| ())
         }
         other => Err(format!(
-            "unknown xtask command `{other}`; expected `verify`, `ext-dev`, `ext-keygen`, `ext-codesign-setup`, `ext-package` or `ext-publish`"
+            "unknown xtask command `{other}`; expected `verify`, `ext-dev`, `windows-icon`, `ext-keygen`, `ext-codesign-setup`, `ext-package` or `ext-publish`"
         )),
     }
 }

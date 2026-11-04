@@ -1,0 +1,2 @@
+// Samo's icon (ADR-006): made from Samo.icns by `cargo run -p xtask -- windows-icon`.
+1 ICON "assets/Samo.ico"
