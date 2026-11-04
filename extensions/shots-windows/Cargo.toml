@@ -21,6 +21,10 @@ samo-ext-protocol.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 chrono.workspace = true
+# Shots' images: PNG with its density (the `png` crate), JPEG and scaling (`image`); both already in the lockfile
+# through gpui (MIT/Apache-2.0).
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+png = "0.18.1"
 
 [dev-dependencies]
 tempfile.workspace = true

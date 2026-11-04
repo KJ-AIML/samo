@@ -4666,6 +4666,8 @@ name = "samo-shots"
 version = "0.4.0"
 dependencies = [
  "chrono",
+ "image",
+ "png 0.18.1",
  "samo-ext-protocol",
  "serde",
  "serde_json",
