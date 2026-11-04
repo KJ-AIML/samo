@@ -23,7 +23,7 @@ pub(crate) mod real {
     impl Drop for RealClipboard {
         fn drop(&mut self) {
             if let Some(text) = self.before.take() {
-                WinBoard.put(&Put {
+                WinBoard::default().put(&Put {
                     text: Some(text),
                     ..Put::default()
                 });
@@ -42,7 +42,7 @@ pub(crate) mod real {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         Some(RealClipboard {
-            before: WinBoard.text(),
+            before: WinBoard::default().text(),
             _one: one,
         })
     }

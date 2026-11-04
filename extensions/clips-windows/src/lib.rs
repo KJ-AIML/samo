@@ -2,6 +2,7 @@
 //! OS (ADR-006 R25).
 
 pub mod clips;
+pub mod dib;
 #[cfg(test)]
 mod fake;
 pub mod filters;

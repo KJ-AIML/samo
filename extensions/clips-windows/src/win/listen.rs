@@ -44,7 +44,7 @@ mod tests {
         };
         let (tx, rx) = mpsc::channel();
         assert!(listen(tx), "the listener didn't start");
-        WinBoard.put(&Put {
+        WinBoard::default().put(&Put {
             text: Some("listen test".into()),
             ..Put::default()
         });

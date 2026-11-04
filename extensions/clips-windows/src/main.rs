@@ -18,7 +18,7 @@ fn main() -> ExitCode {
 fn serve() -> ExitCode {
     use samo_clips::win::board::{WinBoard, front_app};
     samo_clips::serve::run(
-        WinBoard,
+        WinBoard::default(),
         Box::new(front_app),
         samo_clips::win::listen::listen,
     )

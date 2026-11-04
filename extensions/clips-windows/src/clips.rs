@@ -2,11 +2,12 @@
 //! messages and each look at the clipboard come through here. `serve` does the talking, and Windows' clipboard,
 //! shortcut and list plug in through `Board` (ADR-005 C1–C4). Ported from the Mac's `ClipsApp.swift`.
 
+use crate::dib;
 use crate::history::{History, Kind};
 use crate::page::{self, PageState, ShortcutState, shortcut_choices};
 use crate::settings::Settings;
 use crate::store::Store;
-use crate::watcher::{Board, Put, Watcher, clip};
+use crate::watcher::{Board, MAX_COPY, Put, Watcher, clip};
 use chrono::{DateTime, Local, Utc};
 use samo_ext_protocol::{HelperMsg, HostMsg, PopupKind, Widget};
 use std::fs;
@@ -27,6 +28,8 @@ pub struct Clips<B: Board> {
     confirming_clear: bool,
     /// Why the last save failed, if it did.
     problem: Option<String>,
+    /// Pop-ups not yet sent.
+    said: Vec<HelperMsg>,
     sent_view: Option<Vec<Widget>>,
     sent_badge: Option<(u32, String)>,
     sent_problem: Option<String>,
@@ -47,6 +50,7 @@ impl<B: Board> Clips<B> {
             shortcut: ShortcutState::Ready,
             confirming_clear: false,
             problem: None,
+            said: Vec::new(),
             sent_view: None,
             sent_badge: None,
             sent_problem: None,
@@ -163,18 +167,28 @@ impl<B: Board> Clips<B> {
             Kind::Image | Kind::Files => None,
             Kind::Text | Kind::Rich => Some(self.store.full_text(item)),
         };
-        let data = if plain && item.kind == Kind::Rich {
-            None
-        } else {
+        let mut data = Vec::new();
+        if !(plain && item.kind == Kind::Rich) {
             let format = item.data_type.as_deref().and_then(clip::of);
             let bytes = item.data_file.as_deref().and_then(|f| self.store.read(f));
-            format.zip(bytes).map(|(f, b)| (f.to_string(), b))
-        };
+            if let Some((format, bytes)) = format.zip(bytes) {
+                // A PNG goes back with a DIB beside it: many Windows apps read only DIBs.
+                let dib = (format == clip::PNG)
+                    .then(|| dib::from_png(&bytes, MAX_COPY))
+                    .flatten();
+                data.push((format.to_string(), bytes));
+                data.extend(dib.map(|d| (clip::DIB.to_string(), d)));
+            }
+        }
         let put = Put {
             text,
             data,
             files: item.files.clone(),
         };
+        if put.is_empty() || (item.kind == Kind::Image && put.data.is_empty()) {
+            // Nothing left to put back (its file is gone): the clipboard stays as it is.
+            return false;
+        }
         match self.watcher.board_mut().put(&put) {
             Some(sequence) => {
                 self.watcher.own(sequence);
@@ -196,7 +210,19 @@ impl<B: Board> Clips<B> {
         if !self.settings.watching {
             return false;
         }
-        let Some(capture) = self.watcher.tick(now) else {
+        let capture = self.watcher.tick(now);
+        if let Some(size) = self.watcher.take_too_big() {
+            self.said.push(HelperMsg::Popup {
+                key: "too-large".into(),
+                kind: PopupKind::Info,
+                title: format!(
+                    "Clips left out a copy too large to keep ({} MB)",
+                    size.div_ceil(1024 * 1024)
+                ),
+                body: format!("It keeps copies up to {} MB.", MAX_COPY / (1024 * 1024)),
+            });
+        }
+        let Some(capture) = capture else {
             return false;
         };
         let added = self.history.add(&capture, now);
@@ -240,7 +266,7 @@ impl<B: Board> Clips<B> {
 
     /// What Samo hasn't been told yet: the page, the badge, and whether saving works; all of it when `force`.
     pub fn updates(&mut self, now: DateTime<Utc>, force: bool) -> Vec<HelperMsg> {
-        let mut out = Vec::new();
+        let mut out = std::mem::take(&mut self.said);
         if self.problem != self.sent_problem || (force && self.problem.is_some()) {
             out.push(HelperMsg::Health {
                 ok: self.problem.is_none(),
@@ -459,8 +485,8 @@ mod tests {
         let id = id_of(&c, "bold");
         assert!(c.put(&id, false));
         assert_eq!(
-            c.board_mut().puts.last().and_then(|p| p.data.clone()),
-            Some((clip::RTF.to_string(), b"{\\rtf1 bold}".to_vec()))
+            c.board_mut().puts.last().map(|p| p.data.clone()),
+            Some(vec![(clip::RTF.to_string(), b"{\\rtf1 bold}".to_vec())])
         );
         assert!(c.put(&id, true));
         assert_eq!(
@@ -468,7 +494,78 @@ mod tests {
                 .puts
                 .last()
                 .map(|p| (p.text.clone(), p.data.clone())),
-            Some((Some("bold".into()), None))
+            Some((Some("bold".into()), Vec::new()))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn an_image_goes_back_as_png_and_dib() -> Result<(), String> {
+        let tmp = tempfile::tempdir().map_err(|e| e.to_string())?;
+        let now = Utc::now();
+        let mut c = open(tmp.path());
+        let png = crate::dib::tests::png_of(1, 1, &[255, 0, 0, 255]);
+        let b = c.board_mut();
+        b.sequence += 1;
+        b.formats = vec![clip::PNG.into()];
+        b.data = vec![(clip::PNG.into(), png.clone())];
+        assert!(c.tick(now));
+        let id = c
+            .history()
+            .items()
+            .first()
+            .map(|i| i.id.clone())
+            .unwrap_or_default();
+        assert!(c.put(&id, false));
+        let formats: Vec<String> = c
+            .board_mut()
+            .puts
+            .last()
+            .map(|p| p.data.iter().map(|(f, _)| f.clone()).collect())
+            .unwrap_or_default();
+        assert_eq!(formats, [clip::PNG, clip::DIB]);
+        Ok(())
+    }
+
+    #[test]
+    fn a_pick_with_nothing_to_put_leaves_the_clipboard() -> Result<(), String> {
+        let tmp = tempfile::tempdir().map_err(|e| e.to_string())?;
+        let now = Utc::now();
+        let mut c = open(tmp.path());
+        let b = c.board_mut();
+        b.sequence += 1;
+        b.formats = vec![clip::PNG.into()];
+        b.data = vec![(clip::PNG.into(), vec![137, 80, 78, 71])];
+        assert!(c.tick(now));
+        let item = c.history().items().first().cloned().ok_or("not kept")?;
+        // Its picture is gone from the disk.
+        let file = item.data_file.clone().ok_or("no file")?;
+        std::fs::remove_file(tmp.path().join("items").join(file)).map_err(|e| e.to_string())?;
+        assert!(!c.put(&item.id, false));
+        assert!(
+            c.board_mut().puts.is_empty(),
+            "the clipboard was emptied for nothing"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_copy_too_large_is_left_out_and_said() -> Result<(), String> {
+        let tmp = tempfile::tempdir().map_err(|e| e.to_string())?;
+        let now = Utc::now();
+        let mut c = open(tmp.path());
+        c.updates(now, false);
+        c.board_mut().copy_text("huge");
+        c.board_mut().declared_size = Some(crate::watcher::MAX_COPY + 1);
+        assert!(!c.tick(now));
+        let said = c.updates(now, false);
+        assert!(said.iter().any(|m| matches!(m,
+            HelperMsg::Popup { title, .. } if title.contains("too large"))));
+        assert!(
+            !c.updates(now, false)
+                .iter()
+                .any(|m| matches!(m, HelperMsg::Popup { .. })),
+            "said twice"
         );
         Ok(())
     }

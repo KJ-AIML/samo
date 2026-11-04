@@ -1,10 +1,11 @@
-//! Windows' clipboard as Clips reads it (ADR-005 C1, R21): the sequence number alone when nothing changed; the
-//! formats' names and the secret markers next; the contents last. Each read opens the clipboard briefly and
-//! closes it, retrying for up to 50 ms while another app has it open.
+//! Windows' clipboard as Clips reads it (ADR-005 C1, R21): the sequence number alone when nothing changed; then, in
+//! one open of the clipboard (`begin` … `end`), the formats' names, the secret markers and the contents. Opening
+//! retries for up to 50 ms while another app has the clipboard open.
 
 use crate::history::file_name;
 use crate::watcher::{Board, Put};
 use clipboard_win::{Clipboard, EnumFormats, options::NoClear, raw};
+use std::cell::RefCell;
 use winsafe::{self as w, co};
 
 /// Retries (5 ms apart) while another app has the clipboard open.
@@ -15,8 +16,11 @@ const CF_UNICODETEXT: u32 = 13;
 const CF_HDROP: u32 = 15;
 
 /// The clipboard of this Windows session.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct WinBoard;
+#[derive(Default)]
+pub struct WinBoard {
+    /// Open for a look, between `begin` and `end`.
+    open: RefCell<Option<Clipboard>>,
+}
 
 /// A format's number, standard or registered by name.
 fn format_id(name: &str) -> Option<u32> {
@@ -32,55 +36,86 @@ fn open() -> Option<Clipboard> {
     Clipboard::new_attempts(ATTEMPTS).ok()
 }
 
+impl WinBoard {
+    /// Runs `read` with the clipboard open: the look's open, or one of its own.
+    fn reading<T>(&self, read: impl FnOnce() -> Option<T>) -> Option<T> {
+        if self.open.borrow().is_some() {
+            return read();
+        }
+        let _open = open()?;
+        read()
+    }
+}
+
 impl Board for WinBoard {
     fn sequence(&self) -> u32 {
         raw::seq_num().map_or(0, std::num::NonZeroU32::get)
     }
 
+    fn begin(&self) -> bool {
+        let opened = open();
+        let ok = opened.is_some();
+        *self.open.borrow_mut() = opened;
+        ok
+    }
+
+    fn end(&self) {
+        // Closing is dropping it.
+        self.open.borrow_mut().take();
+    }
+
     fn formats(&self) -> Vec<String> {
-        let Some(_open) = open() else {
-            return Vec::new();
-        };
-        EnumFormats::new()
-            .filter_map(raw::format_name_big)
-            .collect()
+        self.reading(|| {
+            Some(
+                EnumFormats::new()
+                    .filter_map(raw::format_name_big)
+                    .collect(),
+            )
+        })
+        .unwrap_or_default()
     }
 
     fn marker(&self, name: &str) -> Option<u32> {
         let format = format_id(name)?;
-        let _open = open()?;
-        if !raw::is_format_avail(format) {
-            return None;
-        }
-        let mut value = [0u8; 4];
-        let read = raw::get(format, &mut value).ok()?;
-        (read == value.len()).then(|| u32::from_le_bytes(value))
+        self.reading(|| {
+            if !raw::is_format_avail(format) {
+                return None;
+            }
+            let mut value = [0u8; 4];
+            let read = raw::get(format, &mut value).ok()?;
+            (read == value.len()).then(|| u32::from_le_bytes(value))
+        })
+    }
+
+    fn size(&self, format: &str) -> Option<usize> {
+        let format = format_id(format)?;
+        self.reading(|| raw::size(format).map(std::num::NonZeroUsize::get))
     }
 
     fn text(&self) -> Option<String> {
-        let _open = open()?;
-        let mut out = Vec::new();
-        raw::get_string(&mut out).ok()?;
-        String::from_utf8(out).ok()
+        self.reading(|| {
+            let mut out = Vec::new();
+            raw::get_string(&mut out).ok()?;
+            String::from_utf8(out).ok()
+        })
     }
 
     fn data(&self, format: &str) -> Option<Vec<u8>> {
         let format = format_id(format)?;
-        let _open = open()?;
-        let mut out = Vec::new();
-        raw::get_vec(format, &mut out).ok()?;
-        Some(out)
+        self.reading(|| {
+            let mut out = Vec::new();
+            raw::get_vec(format, &mut out).ok()?;
+            Some(out)
+        })
     }
 
     fn files(&self) -> Vec<String> {
-        let Some(_open) = open() else {
-            return Vec::new();
-        };
-        let mut out = Vec::new();
-        match raw::get_file_list(&mut out) {
-            Ok(_) => out,
-            Err(_) => Vec::new(),
-        }
+        self.reading(|| {
+            let mut out = Vec::new();
+            raw::get_file_list(&mut out).ok()?;
+            Some(out)
+        })
+        .unwrap_or_default()
     }
 
     fn put(&mut self, put: &Put) -> Option<u32> {
@@ -89,7 +124,7 @@ impl Board for WinBoard {
         if let Some(text) = &put.text {
             raw::set_string_with(text, NoClear).ok()?;
         }
-        if let Some((name, bytes)) = &put.data {
+        for (name, bytes) in &put.data {
             raw::set_without_clear(format_id(name)?, bytes).ok()?;
         }
         if !put.files.is_empty() {
@@ -100,8 +135,7 @@ impl Board for WinBoard {
     }
 }
 
-/// The program in front, by its file's name (`notepad.exe`); `None` when there is none or Windows won't say (an
-/// elevated one).
+/// The program in front, by its file's name (`notepad.exe`); `None` when there is none or Windows won't say.
 pub fn front_app() -> Option<String> {
     let window = w::HWND::GetForegroundWindow()?;
     let (_, pid) = window.GetWindowThreadProcessId();
@@ -126,7 +160,7 @@ mod tests {
         let Some(_board) = real_clipboard() else {
             return;
         };
-        let mut board = WinBoard;
+        let mut board = WinBoard::default();
         let text = "Samo ทดสอบ é 🙂\r\nline two";
         let put = board.put(&Put {
             text: Some(text.into()),
@@ -143,11 +177,11 @@ mod tests {
         let Some(_board) = real_clipboard() else {
             return;
         };
-        let mut board = WinBoard;
+        let mut board = WinBoard::default();
         let rtf = b"{\\rtf1\\ansi bold}".to_vec();
         board.put(&Put {
             text: Some("bold".into()),
-            data: Some((clip::RTF.into(), rtf.clone())),
+            data: vec![(clip::RTF.into(), rtf.clone())],
             files: Vec::new(),
         });
         assert_eq!(board.text().as_deref(), Some("bold"));
@@ -171,20 +205,21 @@ mod tests {
         let Some(_board) = real_clipboard() else {
             return;
         };
-        let mut watcher = Watcher::new(WinBoard, Box::new(|| Some("notepad.exe".into())));
+        let mut watcher =
+            Watcher::new(WinBoard::default(), Box::new(|| Some("notepad.exe".into())));
         watcher.board_mut().put(&Put {
             text: Some("hunter2".into()),
-            data: Some((clip::EXCLUDE_FROM_MONITORING.into(), vec![0])),
+            data: vec![(clip::EXCLUDE_FROM_MONITORING.into(), vec![0])],
             files: Vec::new(),
         });
         assert_eq!(watcher.tick(Utc::now()), None, "an Exclude… copy was kept");
 
         watcher.board_mut().put(&Put {
             text: Some("hunter3".into()),
-            data: Some((
+            data: vec![(
                 clip::CAN_INCLUDE_IN_HISTORY.into(),
                 0u32.to_le_bytes().to_vec(),
-            )),
+            )],
             files: Vec::new(),
         });
         assert_eq!(
@@ -216,11 +251,11 @@ mod tests {
         let tmp = tempfile::tempdir().map_err(|e| e.to_string())?;
         let mut clips = Clips::open(
             tmp.path(),
-            WinBoard,
+            WinBoard::default(),
             Box::new(|| Some("notepad.exe".into())),
         );
         // Another app copies.
-        WinBoard.put(&Put {
+        WinBoard::default().put(&Put {
             text: Some("from notepad".into()),
             ..Put::default()
         });
@@ -231,14 +266,14 @@ mod tests {
             .first()
             .map(|i| i.id.clone())
             .unwrap_or_default();
-        WinBoard.put(&Put {
+        WinBoard::default().put(&Put {
             text: Some("something else".into()),
             ..Put::default()
         });
         assert!(clips.tick(Utc::now()));
         // Clips puts the first back, to paste it.
         assert!(clips.put(&id, false));
-        assert_eq!(WinBoard.text().as_deref(), Some("from notepad"));
+        assert_eq!(WinBoard::default().text().as_deref(), Some("from notepad"));
         assert!(!clips.tick(Utc::now()), "Clips' own put was kept");
         assert_eq!(clips.history().items().len(), 2);
         Ok(())

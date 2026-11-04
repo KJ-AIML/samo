@@ -16,6 +16,12 @@ pub struct FakeBoard {
     pub puts: Vec<Put>,
     /// Another app has the clipboard open: puts fail.
     pub busy: bool,
+    /// Another app has the clipboard open: looks fail.
+    pub locked: bool,
+    /// A marker is listed but its value can't be read.
+    pub unreadable_marker: bool,
+    /// What `size` says, in place of the contents' own size.
+    pub declared_size: Option<usize>,
     pub sequence_reads: Rc<Cell<u32>>,
     pub format_reads: Rc<Cell<u32>>,
     pub content_reads: Rc<Cell<u32>>,
@@ -38,12 +44,39 @@ impl Board for FakeBoard {
         self.sequence_reads.set(self.sequence_reads.get() + 1);
         self.sequence
     }
+    fn begin(&self) -> bool {
+        !self.locked
+    }
+    fn end(&self) {}
     fn formats(&self) -> Vec<String> {
         self.format_reads.set(self.format_reads.get() + 1);
-        self.formats.clone()
+        let mut names = self.formats.clone();
+        if self.no_history {
+            names.push(clip::CAN_INCLUDE_IN_HISTORY.into());
+        }
+        names
     }
     fn marker(&self, name: &str) -> Option<u32> {
-        (name == clip::CAN_INCLUDE_IN_HISTORY && self.no_history).then_some(0)
+        if self.unreadable_marker {
+            return None;
+        }
+        if !self.formats().iter().any(|f| f == name) {
+            return None;
+        }
+        Some(u32::from(
+            !(name == clip::CAN_INCLUDE_IN_HISTORY && self.no_history),
+        ))
+    }
+    fn size(&self, format: &str) -> Option<usize> {
+        let own = if format == clip::TEXT {
+            self.text.as_ref().map(|t| t.len() * 2)
+        } else {
+            self.data
+                .iter()
+                .find(|(f, _)| f == format)
+                .map(|(_, d)| d.len())
+        };
+        self.declared_size.or(own)
     }
     fn text(&self) -> Option<String> {
         self.content_reads.set(self.content_reads.get() + 1);
@@ -70,7 +103,7 @@ impl Board for FakeBoard {
             self.formats.push(clip::TEXT.into());
         }
         self.text.clone_from(&put.text);
-        self.data = put.data.iter().cloned().collect();
+        self.data.clone_from(&put.data);
         self.formats
             .extend(self.data.iter().map(|(f, _)| f.clone()));
         self.files.clone_from(&put.files);

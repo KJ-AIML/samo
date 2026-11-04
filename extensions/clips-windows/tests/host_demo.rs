@@ -71,9 +71,12 @@ fn listed(snap: &ExtSnapshot, text: &str) -> Option<RowItem> {
 }
 
 fn copy(text: &str, secret: bool) {
-    WinBoard.put(&Put {
+    WinBoard::default().put(&Put {
         text: Some(text.into()),
-        data: secret.then(|| (clip::EXCLUDE_FROM_MONITORING.to_string(), vec![0])),
+        data: secret
+            .then(|| (clip::EXCLUDE_FROM_MONITORING.to_string(), vec![0]))
+            .into_iter()
+            .collect(),
         files: Vec::new(),
     });
 }
@@ -112,7 +115,7 @@ fn clips_on_windows_under_samos_host() -> Fallible<()> {
         eprintln!("skipped: the real clipboard demo runs on CI, or with SAMO_TEST_CLIPBOARD=1");
         return Ok(());
     }
-    let _give_back = GiveBack(WinBoard.text());
+    let _give_back = GiveBack(WinBoard::default().text());
     let dir = tempfile::tempdir().map_err(io)?;
     let dev = dir.path().join("dev");
     lay_out(&dev)?;

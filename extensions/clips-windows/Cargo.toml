@@ -24,6 +24,9 @@ chrono.workspace = true
 ring.workspace = true
 uuid = { version = "1.29.0", features = ["v4"] }
 unicode-normalization = "0.1.26"
+# An image kept as PNG goes back with a DIB beside it, which older Windows apps read (MIT/Apache-2.0, already in the
+# lockfile through gpui).
+png = "0.18.1"
 
 [dev-dependencies]
 tempfile.workspace = true
