@@ -6,6 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
+use std::path::Path;
 
 /// Samo's hooks and status line are recognised by this in their command.
 pub const OWN_MARK: &str = "/Samo/Extensions/claude-sessions/";
@@ -42,12 +43,67 @@ pub fn hook_entry() -> Value {
     })
 }
 
+/// What Samo writes into Claude Code's settings on this OS: its hook entry, and its status line (`None` where no
+/// command would run in Windows' shells).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Entries {
+    pub hook: Value,
+    pub statusline: Option<Value>,
+}
+
+/// Samo's entries for the given OS (ADR-006 R25). `helper` is the helper program through `current`, and `home`
+/// the user's home folder; the Mac's entries use neither and are unchanged.
+///
+/// On Windows Claude Code runs a hook's `command` with no shell when it has `args` (its exec form, CLI 2.1.139+).
+/// The status line has no such form: it runs through Git Bash, or PowerShell without Git Bash. Both run an
+/// unquoted path with forward slashes, so that is used; if it has a space (a user name with one), the path from
+/// the home folder, `~/…`, which both shells expand.
+pub fn entries_on(windows: bool, helper: &Path, home: &Path) -> Entries {
+    if !windows {
+        return Entries {
+            hook: hook_entry(),
+            statusline: Some(json!({ "type": "command", "command": helper_command("statusline") })),
+        };
+    }
+    let exe = helper.to_string_lossy().into_owned();
+    let hook = json!({
+        "type": "command",
+        "command": exe,
+        "args": ["hook"],
+        "async": true,
+        "timeout": 5
+    });
+    let slashed = exe.replace('\\', "/");
+    let home = home.to_string_lossy().replace('\\', "/");
+    let home = home.trim_end_matches('/');
+    let from_home = slashed
+        .get(..home.len())
+        .filter(|start| !home.is_empty() && start.eq_ignore_ascii_case(home))
+        .and_then(|_| slashed.get(home.len()..))
+        .and_then(|rest| rest.strip_prefix('/'))
+        .map(|rest| format!("~/{rest}"));
+    let runnable = |path: &str| !path.chars().any(char::is_whitespace);
+    let path = if runnable(&slashed) {
+        Some(slashed.clone())
+    } else {
+        from_home.filter(|p| runnable(p))
+    };
+    Entries {
+        hook,
+        statusline: path
+            .map(|p| json!({ "type": "command", "command": format!("{p} statusline") })),
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Refused {
     /// The file, or a part Samo must change, isn't the shape Claude Code documents.
     NotAnObject(&'static str),
     /// A status line that isn't Samo's is set; Samo never replaces it.
     OtherStatusLine,
+    /// On Windows, the helper's path has a space and isn't under the home folder: no status line command would run in
+    /// both of Windows' shells.
+    StatusLinePath,
 }
 
 impl std::fmt::Display for Refused {
@@ -59,6 +115,11 @@ impl std::fmt::Display for Refused {
             Self::OtherStatusLine => write!(
                 f,
                 "you already use a status line, and Samo never replaces it"
+            ),
+            Self::StatusLinePath => write!(
+                f,
+                "Samo is in a folder whose path has a space, and Windows' shells can't run a status line from \
+                 there"
             ),
         }
     }
@@ -78,10 +139,18 @@ pub struct Created {
     pub events: Vec<String>,
 }
 
+/// The helper as every Samo command runs it. On Windows a command is the helper's real path, which has no `OWN_MARK`
+/// when `SAMO_EXT_ROOT` keeps extensions elsewhere.
+const HELPER_MARK: &str = "/claude-sessions/current/bin/samo-claude";
+
+/// Samo's own entry: its command runs Samo's helper. On Windows the hook's command is a path with backslashes.
 fn is_ours(hook: &Value) -> bool {
     hook.get("command")
         .and_then(Value::as_str)
-        .is_some_and(|c| c.contains(OWN_MARK))
+        .is_some_and(|c| {
+            let c = c.replace('\\', "/");
+            c.contains(OWN_MARK) || c.contains(HELPER_MARK)
+        })
 }
 
 fn group_has_ours(group: &Value) -> bool {
@@ -111,7 +180,11 @@ pub fn is_connected(v: &Value) -> bool {
 }
 
 /// Adds Samo's hook to each event in `HOOK_EVENTS`, once. `file_existed` says whether the file was there.
-pub fn connect(mut v: Value, file_existed: bool) -> Result<(Value, Created), Refused> {
+pub fn connect(
+    mut v: Value,
+    file_existed: bool,
+    entries: &Entries,
+) -> Result<(Value, Created), Refused> {
     let mut created = Created {
         file: !file_existed,
         ..Created::default()
@@ -135,7 +208,7 @@ pub fn connect(mut v: Value, file_existed: bool) -> Result<(Value, Created), Ref
             .and_then(Value::as_array_mut)
             .ok_or(Refused::NotAnObject("A hook event"))?;
         if !groups.iter().any(group_has_ours) {
-            groups.push(json!({ "hooks": [hook_entry()] }));
+            groups.push(json!({ "hooks": [entries.hook.clone()] }));
         }
     }
     Ok((v, created))
@@ -199,15 +272,13 @@ pub fn statusline_owner(v: &Value) -> Option<bool> {
 }
 
 /// Sets Samo's status line, unless one that isn't Samo's is set.
-pub fn set_statusline(mut v: Value) -> Result<Value, Refused> {
+pub fn set_statusline(mut v: Value, entries: &Entries) -> Result<Value, Refused> {
     match statusline_owner(&v) {
         Some(false) => Err(Refused::OtherStatusLine),
         Some(true) => Ok(v),
         None => {
-            object_mut(&mut v, "The file")?.insert(
-                "statusLine".into(),
-                json!({ "type": "command", "command": helper_command("statusline") }),
-            );
+            let line = entries.statusline.clone().ok_or(Refused::StatusLinePath)?;
+            object_mut(&mut v, "The file")?.insert("statusLine".into(), line);
             Ok(v)
         }
     }
@@ -248,19 +319,28 @@ mod tests {
         "permissions": { "allow": ["Bash(ls:*)"] }
     }"#;
 
+    /// The Mac's entries.
+    fn mac() -> Entries {
+        entries_on(false, Path::new("/x"), Path::new("/Users/a"))
+    }
+
     #[test]
     fn connect_then_disconnect_is_equal_json() -> Result<(), String> {
-        for (text, existed) in [
+        let win = windows(&helper_under(r"C:\Users\Jo"), r"C:\Users\Jo");
+        for ((text, existed), entries) in [
             (USER, true),
             ("{}", true),
             (r#"{"model":"opus"}"#, true),
             (r#"{"hooks":{}}"#, true),
             (r#"{"hooks":{"Stop":[]}}"#, true),
             ("{}", false),
-        ] {
+        ]
+        .into_iter()
+        .flat_map(|case| [(case, mac()), (case, win.clone())])
+        {
             let original = parse(text);
             let (connected, created) =
-                connect(original.clone(), existed).map_err(|e| e.to_string())?;
+                connect(original.clone(), existed, &entries).map_err(|e| e.to_string())?;
             for event in HOOK_EVENTS {
                 assert_eq!(ours_in(&connected, event), 1, "{event} in {text}");
             }
@@ -278,7 +358,7 @@ mod tests {
 
     #[test]
     fn disconnect_keeps_user_hooks() -> Result<(), String> {
-        let (connected, _) = connect(parse(USER), true).map_err(|e| e.to_string())?;
+        let (connected, _) = connect(parse(USER), true, &mac()).map_err(|e| e.to_string())?;
         // Without the record (say the data folder was lost), the user's things still survive.
         let (back, _) = disconnect(connected, None);
         assert_eq!(back["hooks"]["Stop"][0]["hooks"][0]["command"], "say done");
@@ -295,8 +375,8 @@ mod tests {
 
     #[test]
     fn connect_twice_adds_once() -> Result<(), String> {
-        let (once, _) = connect(parse(USER), true).map_err(|e| e.to_string())?;
-        let (twice, created) = connect(once.clone(), true).map_err(|e| e.to_string())?;
+        let (once, _) = connect(parse(USER), true, &mac()).map_err(|e| e.to_string())?;
+        let (twice, created) = connect(once.clone(), true, &mac()).map_err(|e| e.to_string())?;
         assert_eq!(once, twice);
         assert_eq!(created, Created::default());
         assert!(is_connected(&twice));
@@ -305,7 +385,7 @@ mod tests {
 
     #[test]
     fn hook_entries_are_async_and_guarded() -> Result<(), String> {
-        let (connected, _) = connect(parse("{}"), true).map_err(|e| e.to_string())?;
+        let (connected, _) = connect(parse("{}"), true, &mac()).map_err(|e| e.to_string())?;
         for event in HOOK_EVENTS {
             let entry = &connected["hooks"][event][0]["hooks"][0];
             assert_eq!(entry["async"], true);
@@ -321,15 +401,16 @@ mod tests {
     fn never_replaces_statusline() -> Result<(), String> {
         let theirs = parse(r#"{"statusLine":{"type":"command","command":"~/bin/line.sh"}}"#);
         assert_eq!(
-            set_statusline(theirs.clone()),
+            set_statusline(theirs.clone(), &mac()),
             Err(Refused::OtherStatusLine)
         );
         assert_eq!(clear_statusline(theirs.clone()), theirs);
 
-        let ours = set_statusline(parse(r#"{"model":"opus"}"#)).map_err(|e| e.to_string())?;
+        let ours =
+            set_statusline(parse(r#"{"model":"opus"}"#), &mac()).map_err(|e| e.to_string())?;
         assert_eq!(statusline_owner(&ours), Some(true));
         assert_eq!(
-            set_statusline(ours.clone()).map_err(|e| e.to_string())?,
+            set_statusline(ours.clone(), &mac()).map_err(|e| e.to_string())?,
             ours
         );
         assert_eq!(clear_statusline(ours), parse(r#"{"model":"opus"}"#));
@@ -338,9 +419,103 @@ mod tests {
 
     #[test]
     fn refuses_settings_of_the_wrong_shape() {
-        assert!(connect(parse("[]"), true).is_err());
-        assert!(connect(parse(r#"{"hooks":[]}"#), true).is_err());
-        assert!(connect(parse(r#"{"hooks":{"Stop":{}}}"#), true).is_err());
-        assert!(set_statusline(parse("[]")).is_err());
+        assert!(connect(parse("[]"), true, &mac()).is_err());
+        assert!(connect(parse(r#"{"hooks":[]}"#), true, &mac()).is_err());
+        assert!(connect(parse(r#"{"hooks":{"Stop":{}}}"#), true, &mac()).is_err());
+        assert!(set_statusline(parse("[]"), &mac()).is_err());
+    }
+
+    /// Where Samo keeps the helper on Windows, for a user `home`.
+    fn helper_under(home: &str) -> String {
+        format!(r"{home}\AppData\Local\Samo\Extensions\claude-sessions\current\bin\samo-claude.exe")
+    }
+
+    fn windows(helper: &str, home: &str) -> Entries {
+        entries_on(true, Path::new(helper), Path::new(home))
+    }
+
+    #[test]
+    fn mac_entries_are_unchanged() {
+        // The Mac's hook and status line, byte for byte (ADR-006 R25).
+        let e = entries_on(false, Path::new("/anything"), Path::new("/Users/a"));
+        assert_eq!(e.hook, hook_entry());
+        assert_eq!(
+            e.statusline,
+            Some(json!({ "type": "command", "command": helper_command("statusline") }))
+        );
+    }
+
+    #[test]
+    fn windows_hooks_run_the_exe_without_a_shell() {
+        let helper = helper_under(r"C:\Users\Jo");
+        let e = windows(&helper, r"C:\Users\Jo");
+        // Claude Code's exec form: no shell, so Git Bash or PowerShell make no difference (CLI 2.1.139+).
+        assert_eq!(
+            e.hook,
+            json!({ "type": "command", "command": helper, "args": ["hook"], "async": true, "timeout": 5 })
+        );
+    }
+
+    #[test]
+    fn windows_statusline_runs_in_git_bash_and_powershell() {
+        // Forward slashes, no quotes: the one form both of Windows' shells run as it is.
+        let e = windows(&helper_under(r"C:\Users\Jo"), r"C:\Users\Jo");
+        assert_eq!(
+            e.statusline,
+            Some(json!({
+                "type": "command",
+                "command": "C:/Users/Jo/AppData/Local/Samo/Extensions/claude-sessions/current/bin/samo-claude.exe statusline"
+            }))
+        );
+        // A user name with a space: the path is given from the home folder, `~`, which both shells expand.
+        let e = windows(&helper_under(r"C:\Users\Jo Smith"), r"C:\Users\Jo Smith");
+        assert_eq!(
+            e.statusline,
+            Some(json!({
+                "type": "command",
+                "command": "~/AppData/Local/Samo/Extensions/claude-sessions/current/bin/samo-claude.exe statusline"
+            }))
+        );
+    }
+
+    #[test]
+    fn windows_statusline_refused_for_a_path_with_a_space() {
+        // Outside the home folder, with a space: no form both shells run, so Samo says so and sets nothing.
+        let helper = r"D:\Local Data\Samo\Extensions\claude-sessions\current\bin\samo-claude.exe";
+        let e = windows(helper, r"C:\Users\Jo");
+        assert_eq!(e.statusline, None);
+        assert_eq!(
+            set_statusline(parse("{}"), &e),
+            Err(Refused::StatusLinePath)
+        );
+    }
+
+    #[test]
+    fn windows_entries_are_ours_wherever_extensions_are_kept() -> Result<(), String> {
+        // SAMO_EXT_ROOT can put the Extensions folder anywhere; the hook's command is the helper's real path.
+        let helper = r"D:\Work\Ext\claude-sessions\current\bin\samo-claude.exe";
+        let e = windows(helper, r"C:\Users\Jo");
+        let (connected, created) = connect(parse(USER), true, &e).map_err(|e| e.to_string())?;
+        assert!(is_connected(&connected));
+        let lined = set_statusline(connected, &e).map_err(|e| e.to_string())?;
+        assert_eq!(statusline_owner(&lined), Some(true));
+        let (back, _) = disconnect(clear_statusline(lined), Some(&created));
+        assert_eq!(back, parse(USER));
+        Ok(())
+    }
+
+    #[test]
+    fn windows_entries_are_ours() -> Result<(), String> {
+        let e = windows(&helper_under(r"C:\Users\Jo"), r"C:\Users\Jo");
+        let (connected, created) = connect(parse(USER), true, &e).map_err(|e| e.to_string())?;
+        for event in HOOK_EVENTS {
+            assert_eq!(ours_in(&connected, event), 1, "{event}");
+        }
+        assert!(is_connected(&connected));
+        let lined = set_statusline(connected, &e).map_err(|e| e.to_string())?;
+        assert_eq!(statusline_owner(&lined), Some(true));
+        let (back, _) = disconnect(clear_statusline(lined), Some(&created));
+        assert_eq!(back, parse(USER));
+        Ok(())
     }
 }

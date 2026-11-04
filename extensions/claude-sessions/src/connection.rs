@@ -2,7 +2,7 @@
 //! What Samo created is recorded in `data/connect.json`; what was active when the extension was turned off is
 //! recorded in `data/was.json`, so turning it on restores exactly that.
 
-use crate::settings::{self, Created, Refused};
+use crate::settings::{self, Created, Entries, Refused};
 use crate::settings_io::{backup_once, read, remove, settings_path, write_if_unchanged};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -19,6 +19,18 @@ pub struct Places {
 impl Places {
     pub fn settings(&self) -> PathBuf {
         settings_path(&self.home)
+    }
+    /// The helper Claude Code runs, through `current` beside the data folder, so it survives updates.
+    pub fn helper(&self) -> PathBuf {
+        let extension = self.data.parent().unwrap_or(&self.data);
+        extension
+            .join("current")
+            .join("bin")
+            .join(format!("samo-claude{}", std::env::consts::EXE_SUFFIX))
+    }
+    /// What Samo writes into Claude Code's settings on this OS.
+    fn entries(&self) -> Entries {
+        settings::entries_on(cfg!(windows), &self.helper(), &self.home)
     }
     fn created_file(&self) -> PathBuf {
         self.data.join("connect.json")
@@ -75,13 +87,15 @@ fn load_created(places: &Places) -> Option<Created> {
 
 pub fn connect(places: &Places) -> Result<(), String> {
     let path = places.settings();
+    let entries = places.entries();
     backup_once(&path)?;
     let mut made = None;
     edit(&path, |v, existed| {
         if settings::is_connected(&v) {
             return Ok(None);
         }
-        let (next, created) = settings::connect(v, existed).map_err(|e: Refused| e.to_string())?;
+        let (next, created) =
+            settings::connect(v, existed, &entries).map_err(|e: Refused| e.to_string())?;
         made = Some(created);
         Ok(Some(next))
     })?;
@@ -114,12 +128,13 @@ pub fn disconnect(places: &Places) -> Result<(), String> {
 
 pub fn plan_limits_on(places: &Places) -> Result<(), String> {
     let path = places.settings();
+    let entries = places.entries();
     backup_once(&path)?;
     edit(&path, |v, _| {
         if settings::statusline_owner(&v) == Some(true) {
             return Ok(None);
         }
-        settings::set_statusline(v)
+        settings::set_statusline(v, &entries)
             .map(Some)
             .map_err(|e| e.to_string())
     })
@@ -181,9 +196,14 @@ mod tests {
 
     fn places() -> Result<(tempfile::TempDir, Places), String> {
         let dir = tempfile::tempdir().map_err(|e| e.to_string())?;
+        // Laid out as Samo lays it out: `<Extensions>/claude-sessions/data`, the helper in `current/bin` beside it.
         let places = Places {
             home: dir.path().join("home"),
-            data: dir.path().join("data"),
+            data: dir
+                .path()
+                .join("Extensions")
+                .join("claude-sessions")
+                .join("data"),
         };
         fs::create_dir_all(places.home.join(".claude")).map_err(|e| e.to_string())?;
         Ok((dir, places))
