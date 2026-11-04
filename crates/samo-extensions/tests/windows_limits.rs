@@ -389,16 +389,18 @@ fn needs_newer_macos_is_blocked() -> Fallible<()> {
         &format!("{HELLO}\n{WAIT_FOR_SHUTDOWN}"),
     )?;
     let host = start(&f, |_| Some(0));
-    let snap = wait_for(&host, "it to be blocked", |s| {
-        matches!(status(s), Some(Status::Blocked(_)))
-    })?;
-    // On Windows a manifest naming a macOS is a Mac build's (ADR-006).
-    let why = if cfg!(windows) {
-        "Made for the Mac: this is its Mac version"
+    if cfg!(windows) {
+        // On Windows `min_macos` is about the Mac's package: a Windows build that names one runs (ADR-006).
+        wait_for(&host, "it to run", |s| status(s) == Some(Status::Running))?;
     } else {
-        "Needs macOS 99.0 or newer"
-    };
-    assert_eq!(status(&snap), Some(Status::Blocked(why.into())));
+        let snap = wait_for(&host, "it to be blocked", |s| {
+            matches!(status(s), Some(Status::Blocked(_)))
+        })?;
+        assert_eq!(
+            status(&snap),
+            Some(Status::Blocked("Needs macOS 99.0 or newer".into()))
+        );
+    }
     host.shutdown_all();
 
     // And the store won't install it.

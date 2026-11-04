@@ -163,8 +163,11 @@ pub fn package(root: &Path, dir: &Path) -> Result<PathBuf, String> {
         fs::set_permissions(&helper_dest, fs::Permissions::from_mode(0o755))
             .map_err(io("making the helper executable"))?;
     }
-    // A helper that asks macOS for a permission keeps one identity across updates (ADR-004).
-    crate::codesign::sign_if_needed(&manifest, &helper_dest)?;
+    // A helper that asks macOS for a permission keeps one identity across updates (ADR-004). Windows asks for no
+    // permission, so nothing is signed there.
+    if cfg!(target_os = "macos") {
+        crate::codesign::sign_if_needed(&manifest, &helper_dest)?;
+    }
     let out = root.join("target").join("ext-dist").join(format!(
         "{}-{}-{}.tar.gz",
         manifest.id,

@@ -145,12 +145,11 @@ impl Inner {
 }
 
 /// Why an installed extension whose manifest names `min_macos` can't run here, if it can't, for the given OS
-/// (ADR-006 R25). On Windows such a manifest is a Mac build's: it is made for the Mac.
+/// (ADR-006 R25). On Windows `min_macos` is about the Mac's package, so it never blocks: a Mac build never gets
+/// installed there, as it has no `<helper>.exe` (refused as having no helper).
 fn min_macos_block_on(min_macos: Option<&str>, macos: &str, windows: bool) -> Option<String> {
     let min = min_macos?;
-    if windows {
-        Some("Made for the Mac: this is its Mac version".into())
-    } else if macos_satisfies(Some(min), macos) {
+    if windows || macos_satisfies(Some(min), macos) {
         None
     } else {
         Some(format!("Needs macOS {min} or newer"))
@@ -613,17 +612,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_mac_build_is_made_for_the_mac_on_windows() {
+    fn min_macos_blocks_only_on_the_mac() {
         assert_eq!(min_macos_block_on(None, "", true), None);
         assert_eq!(min_macos_block_on(Some("14.0"), "15.1", false), None);
         assert_eq!(
             min_macos_block_on(Some("14.0"), "13.6", false).as_deref(),
             Some("Needs macOS 14.0 or newer")
         );
-        assert!(
-            min_macos_block_on(Some("14.0"), "11 (26200)", true)
-                .is_some_and(|why| why.starts_with("Made for the Mac"))
-        );
+        // On Windows it is about the Mac's package. A Mac build has no <helper>.exe, so it never installs there.
+        assert_eq!(min_macos_block_on(Some("14.0"), "11 (26200)", true), None);
     }
 
     #[test]
