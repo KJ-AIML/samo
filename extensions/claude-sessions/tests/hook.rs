@@ -1,3 +1,6 @@
+//! These run real hooks and helpers: `/bin/sh` and unix permission bits. Their Windows forms come with #9 (ADR-006).
+#![cfg(unix)]
+
 //! The hook as Claude Code runs it (R9): silent, always exit 0, quick, whatever it is given.
 
 use std::fs;

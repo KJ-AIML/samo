@@ -167,7 +167,10 @@ impl SamoWorkspaceApp {
                 .flex_col()
                 .gap(px(S6))
                 .child(section(
-                    section_rule("This Mac · live", Some(live_about)),
+                    section_rule(
+                        &format!("{} · live", crate::words::THIS_COMPUTER),
+                        Some(live_about),
+                    ),
                     self.render_live(frame, cx),
                 ))
                 .child(section(
@@ -354,7 +357,7 @@ impl SamoWorkspaceApp {
                                         icon_button(
                                             SharedString::from(format!("folder-reveal-{i}")),
                                             "reveal",
-                                            "Reveal in Finder",
+                                            crate::words::REVEAL,
                                             Variant::Link,
                                             true,
                                         )
@@ -369,7 +372,7 @@ impl SamoWorkspaceApp {
                                         icon_button(
                                             SharedString::from(format!("folder-trash-{i}")),
                                             "trash",
-                                            "Move to Trash…",
+                                            &format!("Move to {}…", crate::words::TRASH),
                                             Variant::Link,
                                             true,
                                         )
@@ -461,7 +464,11 @@ fn disk_card(frame: &Frame) -> Div {
                 parts,
                 legend,
                 Some(bytes_parts(v.volume_free_bytes)),
-                format!("{} on this Mac", format_bytes(v.volume_total_bytes)),
+                format!(
+                    "{} on this {}",
+                    format_bytes(v.volume_total_bytes),
+                    crate::words::COMPUTER
+                ),
             )
         }
     };

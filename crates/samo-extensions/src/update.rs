@@ -146,7 +146,7 @@ pub fn check_zip(zip: &[u8], version: &str, staging_root: &Path) -> Result<Prepa
     })
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
 

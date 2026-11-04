@@ -1,3 +1,6 @@
+//! These run real helpers: `#!/bin/sh` stand-ins, Swift or codesign. Their Windows forms come with #9 (ADR-006).
+#![cfg(unix)]
+
 //! ADR-005 Phase 1's demo, the parts a machine can check: the real `samo-clips`, installed from a store signed with a
 //! test key, under Samo's real host. Watching the clipboard needs Paste from Other Apps and pasting needs
 //! Accessibility, both granted by a person, so those are KJ's checks by hand (M1–M6). Clips' own tests drive the

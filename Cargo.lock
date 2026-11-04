@@ -4522,8 +4522,10 @@ dependencies = [
  "samo-macos",
  "samo-primitives",
  "samo-testkit",
+ "samo-windows",
  "tempfile",
  "tray-icon",
+ "windows-registry 0.5.3",
 ]
 
 [[package]]

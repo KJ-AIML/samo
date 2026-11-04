@@ -1,3 +1,6 @@
+//! These run real helpers: `#!/bin/sh` stand-ins, Swift or codesign. Their Windows forms come with #9 (ADR-006).
+#![cfg(unix)]
+
 //! ADR-004 in the host: windows only when declared (R15), whole process trees, declared limits (R17), and macOS
 //! versions. Helpers are shell scripts; the window server is a fake, so a test can say who "owns windows".
 

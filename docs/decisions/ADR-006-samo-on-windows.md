@@ -135,7 +135,14 @@ These continue R1–R24.
   - keeps running after its window closes, as one instance
   - the native titlebar
   - Ctrl shortcuts, fonts, Windows wording
-  - the icon and DPI manifest
+  - the DPI manifest
+  - **Built:**
+    - A window that is never shown keeps Samo running in the tray, because GPUI quits on the last window close.
+    - A lock file and a show request keep it to one Samo.
+    - Roots take the scanner's shape, so scans finish.
+    - Extensions, the store and updates say they come later (R28).
+    - The whole workspace builds and tests on Windows.
+  - The window and taskbar icon moves to the installer (#10). The tray already shows Samo's own probe.
 - **Done when** on this PC:
   1. `cargo build --release -p samo-gpui` builds.
   2. Samo opens, scans a folder and shows live telemetry.

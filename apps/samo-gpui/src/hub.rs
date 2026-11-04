@@ -5,11 +5,12 @@
 //! Scan threads wake it the same way when they finish. The UI never polls and never blocks on a sensor.
 
 use crate::disk_view::DiskView;
+use crate::platform::{SystemCollector, TrashOutcome};
 use crate::{Notice, NoticeKind, ProcessSort};
 use futures::channel::mpsc::UnboundedSender;
+#[cfg(target_os = "macos")]
 use objc2_foundation::{NSProcessInfo, NSProcessInfoThermalState};
 use samo_blueprint::DEFAULT_SAMPLE_INTERVAL_MS;
-use samo_macos::{SystemCollector, TrashOutcome};
 use samo_primitives::{
     Reading, SystemSummary, TelemetryPoint, TelemetrySnapshot, UnsupportedReason,
 };
@@ -46,6 +47,7 @@ pub struct SharedState {
 
 /// macOS's own thermal state: how far it is holding the Mac back to cool it down.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))] // Used only on the Mac until #9 and #10 (ADR-006).
 pub enum Heat {
     Nominal,
     Fair,
@@ -60,7 +62,8 @@ pub struct Thermal {
 }
 
 /// One cheap call to `NSProcessInfo` (no sensors, no privileges), safe from any thread.
-fn read_thermal() -> Thermal {
+#[cfg(target_os = "macos")]
+fn read_thermal() -> Option<Thermal> {
     objc2::rc::autoreleasepool(|_| {
         let info = NSProcessInfo::processInfo();
         let heat = match info.thermalState() {
@@ -69,11 +72,17 @@ fn read_thermal() -> Thermal {
             NSProcessInfoThermalState::Critical => Heat::Critical,
             _ => Heat::Nominal,
         };
-        Thermal {
+        Some(Thermal {
             heat,
             low_power: info.isLowPowerModeEnabled(),
-        }
+        })
     })
+}
+
+/// Windows has no public thermal state an app can read, so it is never made up (R3, ADR-006 R28); the card says so.
+#[cfg(not(target_os = "macos"))]
+fn read_thermal() -> Option<Thermal> {
+    None
 }
 
 struct Control {
@@ -251,7 +260,7 @@ impl Hub {
         if let Ok(mut g) = self.shared.lock() {
             g.telemetry = snap;
             g.busiest = busiest;
-            g.thermal = Some(thermal);
+            g.thermal = thermal;
             g.telemetry_view = (sort, include_self);
             g.telemetry_ready = true;
         }
@@ -267,7 +276,7 @@ pub fn placeholder_telemetry() -> TelemetrySnapshot {
         system: SystemSummary {
             hostname: String::new(),
             os_version: String::new(),
-            chip_brand: "This Mac".to_string(),
+            chip_brand: crate::words::THIS_COMPUTER.to_string(),
             physical_cores: 0,
             logical_cores: 0,
             perf_cores: not_yet(),

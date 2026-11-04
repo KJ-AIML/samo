@@ -1,3 +1,6 @@
+//! These run real hooks and helpers: `/bin/sh` and unix permission bits. Their Windows forms come with #9 (ADR-006).
+#![cfg(unix)]
+
 //! ADR-002 Phase 2's demo, end to end and automated: Samo's real extension host runs the real `samo-claude`,
 //! installed from a dev folder, and two stand-ins for Claude Code run the exact hook commands Samo put in
 //! `settings.json`. Everything happens in a temporary home folder; the real `~/.claude` is never touched.

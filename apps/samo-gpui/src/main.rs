@@ -5,14 +5,18 @@ mod components;
 mod disk_view;
 mod ext_view;
 mod extensions_page;
+#[cfg(target_os = "macos")]
 mod finish_update;
 mod hub;
+mod instance;
+mod keys;
 mod layout;
 mod live;
 mod locations;
 mod menubar;
 mod overview;
 mod performance;
+mod places;
 mod popup;
 mod processes;
 mod projects;
@@ -22,6 +26,7 @@ mod storage;
 mod store_view;
 mod text_input;
 mod theme;
+mod words;
 
 use disk_view::DiskView;
 use futures::StreamExt;
@@ -34,7 +39,13 @@ use gpui::{
 use hub::Hub;
 use layout::Layout;
 use samo_blueprint::ScanConfig;
-use samo_macos::{
+// ADR-006: the platform crate of the OS this is built for, with the same functions on each.
+#[cfg(target_os = "macos")]
+pub(crate) use samo_macos as platform;
+#[cfg(windows)]
+pub(crate) use samo_windows as platform;
+
+use platform::{
     default_user_trash_dir, move_to_trash, restore_from_trash, scan_directory,
     terminate_verified_process,
 };
@@ -60,13 +71,18 @@ struct AppState {
     popup: Option<WindowHandle<popup::PopupView>>,
     popup_gen: u64,
     /// A new Samo has been started to finish an update; this one is quitting.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    // Used only on the Mac until #9 and #10 (ADR-006).
     updating: bool,
     /// Whether Samo is hidden while an extension captures the screen (ADR-004).
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    // Used only on the Mac until #9 and #10 (ADR-006).
     capture_hide: CaptureHide,
 }
 
 /// Samo out of the way while an extension captures the screen, so its windows aren't in the shot.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))] // Used only on the Mac until #9 and #10 (ADR-006).
 enum CaptureHide {
     Idle,
     /// Hidden since then; `by_us` is false if Samo was already hidden (then it isn't unhidden either).
@@ -79,9 +95,11 @@ enum CaptureHide {
 }
 
 /// How long Samo stays hidden for one capture at most.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))] // Used only on the Mac until #9 and #10 (ADR-006).
 const CAPTURE_HIDE_LIMIT: std::time::Duration = std::time::Duration::from_secs(60);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))] // Used only on the Mac until #9 and #10 (ADR-006).
 enum HideStep {
     Hide,
     Show,
@@ -89,6 +107,7 @@ enum HideStep {
 }
 
 /// The next state, and what to do, given whether any extension is capturing.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))] // Used only on the Mac until #9 and #10 (ADR-006).
 fn capture_step(state: CaptureHide, capturing: bool, now: Instant) -> (CaptureHide, HideStep) {
     match (state, capturing) {
         (CaptureHide::Idle, true) => (
@@ -111,6 +130,7 @@ fn capture_step(state: CaptureHide, capturing: bool, now: Instant) -> (CaptureHi
 
 /// Hides Samo (main window and quick panel) while an extension captures, and shows it again after, without
 /// taking focus. A timer brings it back if a capture never ends.
+#[cfg(target_os = "macos")]
 fn follow_captures(cx: &mut App) {
     let state = cx.global::<AppState>();
     let capturing = state
@@ -186,6 +206,10 @@ fn snapshot(hub: &Hub, layout: Layout) -> Option<Frame> {
 
 /// Starts installed extensions' helpers (ADR-002). Without a home folder there is nowhere to keep them.
 fn start_extensions(hub: &Hub) {
+    // Not on Windows yet (#9, #10): the pages say so rather than a host that can't run anything (ADR-006 R28).
+    if !samo_extensions::RUNS_ON_THIS_OS {
+        return;
+    }
     let Some(root) = samo_extensions::ExtRoot::resolve() else {
         return;
     };
@@ -250,8 +274,17 @@ fn show_extension_popups(cx: &mut App) {
     );
 }
 
+/// On Windows no extension runs yet (#9), so none captures and there is nothing to hide for.
+#[cfg(not(target_os = "macos"))]
+fn follow_captures(_cx: &mut App) {}
+
+/// On Windows the store and updates come with #10, so no update is ever prepared.
+#[cfg(not(target_os = "macos"))]
+fn finish_samo_update(_cx: &mut App) {}
+
 /// Quits Samo, stopping extensions' helpers first (each gets 2 s to finish).
 /// Once the worker has a new Samo downloaded and checked, starts its `--finish-update` and quits (R14).
+#[cfg(target_os = "macos")]
 fn finish_samo_update(cx: &mut App) {
     let state = cx.global::<AppState>();
     if state.updating {
@@ -283,6 +316,11 @@ fn quit(cx: &mut App) {
     if let Some(host) = cx.global::<AppState>().hub.ext.get() {
         host.shutdown_all();
     }
+    // The tray item goes when it is dropped; on Windows it would otherwise linger until hovered.
+    #[cfg(windows)]
+    {
+        cx.global_mut::<AppState>().menubar = None;
+    }
     cx.quit();
 }
 
@@ -299,6 +337,58 @@ fn open_main(cx: &mut App, nav: Option<NavSection>) {
         let _ = cx.update(|cx| open_main_now(cx, nav));
     })
     .detach();
+}
+
+/// The Mac's titlebar is see-through, with the traffic lights inside Samo's sidebar. Windows keeps its own, with its
+/// minimize, maximize and close buttons: a see-through one there has none and can't be dragged (ADR-006 §3).
+fn main_titlebar() -> TitlebarOptions {
+    if cfg!(windows) {
+        TitlebarOptions {
+            title: Some(SharedString::from("Samo")),
+            appears_transparent: false,
+            traffic_light_position: None,
+        }
+    } else {
+        TitlebarOptions {
+            title: Some(SharedString::from("Samo")),
+            appears_transparent: true,
+            traffic_light_position: Some(point(px(20.0), px(20.0))),
+        }
+    }
+}
+
+/// GPUI quits a Windows app when its last window closes. Samo keeps running in the tray, as it does in the Mac's
+/// menu bar, so on Windows it keeps one window that is never shown (ADR-006 §3).
+#[cfg(windows)]
+fn keep_running_in_tray(cx: &mut App) {
+    let _ = cx.open_window(
+        WindowOptions {
+            window_bounds: Some(WindowBounds::Windowed(Bounds {
+                origin: point(px(0.0), px(0.0)),
+                size: size(px(1.0), px(1.0)),
+            })),
+            titlebar: None,
+            focus: false,
+            show: false,
+            kind: gpui::WindowKind::PopUp,
+            is_movable: false,
+            is_resizable: false,
+            is_minimizable: false,
+            ..Default::default()
+        },
+        |_, cx| cx.new(|_| Keeper),
+    );
+}
+
+/// The window that is never shown.
+#[cfg(windows)]
+struct Keeper;
+
+#[cfg(windows)]
+impl Render for Keeper {
+    fn render(&mut self, _: &mut Window, _: &mut gpui::Context<Self>) -> impl IntoElement {
+        div()
+    }
 }
 
 fn open_main_now(cx: &mut App, nav: Option<NavSection>) {
@@ -322,11 +412,7 @@ fn open_main_now(cx: &mut App, nav: Option<NavSection>) {
         WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(bounds)),
             window_min_size: Some(size(px(640.0), px(520.0))),
-            titlebar: Some(TitlebarOptions {
-                title: Some(SharedString::from("Samo")),
-                appears_transparent: true,
-                traffic_light_position: Some(point(px(20.0), px(20.0))),
-            }),
+            titlebar: Some(main_titlebar()),
             ..Default::default()
         },
         |window, cx| {
@@ -549,16 +635,17 @@ struct SamoWorkspaceApp {
 
 fn resolve_default_root() -> String {
     if let Ok(custom) = env::var("SAMO_DEFAULT_SCAN_ROOT") {
-        return custom;
+        return places::scan_root(&custom);
     }
-    if let Ok(home) = env::var("HOME") {
+    let home = places::home_dir();
+    if !home.is_empty() {
         let dev = PathBuf::from(&home).join("Developer");
         if dev.is_dir() {
-            return dev.to_string_lossy().into_owned();
+            return places::scan_root(&dev.to_string_lossy());
         }
-        return home;
+        return places::scan_root(&home);
     }
-    "/".to_string()
+    if cfg!(windows) { "C:/" } else { "/" }.to_string()
 }
 
 /// `SAMO_START_PAGE=projects|storage|processes|performance|extensions` opens on that page; an installed
@@ -663,6 +750,16 @@ impl SamoWorkspaceApp {
     /// Measures `root_path` on its own thread. Unless `fresh`, a recent scan of the same folder is shown at once
     /// instead (it says when it was measured; Rescan measures again).
     fn spawn_scan(hub: &Hub, root_path: String, fresh: bool) {
+        // In the shape the scanner reports, so the finished scan matches this root (ADR-006 R26).
+        let root_path = places::scan_root(&root_path);
+        // On Windows a network share is said, not scanned: nothing on it could be cleaned.
+        if let Err(why) = places::measurable_on(&root_path, cfg!(windows)) {
+            if let Ok(mut guard) = hub.shared.lock() {
+                guard.notice = Notice::new(NoticeKind::Error, why);
+            }
+            hub.wake_ui();
+            return;
+        }
         let generation = match hub.shared.lock() {
             Ok(mut guard) => {
                 let cached = (!fresh)
@@ -748,7 +845,7 @@ impl SamoWorkspaceApp {
             .hub
             .shared
             .lock()
-            .map(|g| g.is_scanning && g.scan_root == path)
+            .map(|g| g.is_scanning && g.scan_root == places::scan_root(&path))
             .unwrap_or(false);
         if already_running {
             return;
@@ -844,9 +941,10 @@ impl SamoWorkspaceApp {
                     guard.notice = Notice::new(
                         NoticeKind::Success,
                         format!(
-                            "Moved “{}” ({}) to the Trash.",
+                            "Moved “{}” ({}) to the {}.",
                             confirm.label,
-                            format_bytes(outcome.reclaimed_bytes)
+                            format_bytes(outcome.reclaimed_bytes),
+                            words::TRASH
                         ),
                     );
                     guard.disk = guard.disk.as_deref().map(|view| {
@@ -901,8 +999,9 @@ impl SamoWorkspaceApp {
                     guard.notice = Notice::new(
                         NoticeKind::Success,
                         format!(
-                            "Put {} back from the Trash.",
-                            display_path(&outcome.original_path)
+                            "Put {} back from the {}.",
+                            display_path(&outcome.original_path),
+                            words::TRASH
                         ),
                     );
                 }
@@ -916,11 +1015,9 @@ impl SamoWorkspaceApp {
         cx.notify();
     }
 
+    /// Shows the folder in Finder (the Mac) or Explorer (Windows), selected.
     fn reveal_in_finder(&mut self, path: String, cx: &mut Context<Self>) {
-        let _ = std::process::Command::new("/usr/bin/open")
-            .arg("-R")
-            .arg(&path)
-            .status();
+        places::reveal(&path);
         cx.notify();
     }
 
@@ -934,7 +1031,12 @@ impl SamoWorkspaceApp {
         let notice = match terminate_verified_process(identity, signal) {
             Ok(()) => Notice::new(
                 NoticeKind::Success,
-                format!("Sent {signal} to {name} (PID {})", identity.pid),
+                // Windows has no signals: Quit asked the app to close (ADR-006 §3).
+                if cfg!(windows) {
+                    format!("Asked {name} to close (PID {})", identity.pid)
+                } else {
+                    format!("Sent {signal} to {name} (PID {})", identity.pid)
+                },
             ),
             Err(err) => Notice::new(NoticeKind::Error, err.message),
         };
@@ -959,7 +1061,7 @@ impl SamoWorkspaceApp {
             cx.notify();
             return;
         }
-        if !keystroke.modifiers.platform {
+        if !keystroke.modifiers.secondary() {
             return;
         }
         match keystroke.key.as_str() {
@@ -1036,9 +1138,18 @@ impl Render for SamoWorkspaceApp {
 
 fn main() {
     // The new Samo, finishing an update the old one prepared: no window, just the swap.
+    #[cfg(target_os = "macos")]
     if let Some(code) = finish_update::from_args(&env::args().collect::<Vec<_>>()) {
         std::process::exit(code);
     }
+    // One Samo at a time on Windows: a second launch asks the first to show its window, and stops here.
+    #[cfg(windows)]
+    let instance = match instance::dir().map(|dir| instance::Instance::claim(&dir)) {
+        Some(Ok(instance::Claim::AlreadyRunning)) => return,
+        Some(Ok(instance::Claim::Claimed(instance))) => Some(instance),
+        // Can't tell (no app-data folder, or the lock can't be made): run, as the Mac always does.
+        _ => None,
+    };
     let app = Application::new().with_assets(assets::Assets);
     // Closing the window leaves Samo in the menu bar; the Dock icon brings the window back.
     app.on_reopen(|cx| open_main(cx, None));
@@ -1048,8 +1159,8 @@ fn main() {
         cx.on_action(|_: &Quit, cx| quit(cx));
         cx.on_action(|_: &ShowWindow, cx| open_main(cx, None));
         cx.bind_keys([
-            KeyBinding::new("cmd-q", Quit, None),
-            KeyBinding::new("cmd-0", ShowWindow, None),
+            KeyBinding::new("secondary-q", Quit, None),
+            KeyBinding::new("secondary-0", ShowWindow, None),
         ]);
         cx.set_menus(vec![Menu {
             name: "Samo".into(),
@@ -1084,12 +1195,19 @@ fn main() {
         });
         let menubar = menubar::MenuBar::install(cx);
         cx.global_mut::<AppState>().menubar = menubar;
+        #[cfg(windows)]
+        keep_running_in_tray(cx);
 
         // Draw when there is news, and only then: a burst of wakes becomes one frame.
         cx.spawn(async move |cx| {
             while wake_rx.next().await.is_some() {
                 while wake_rx.try_recv().is_ok() {}
                 let drawn = cx.update(|cx| {
+                    // Another launch asked for the window (Windows; the Dock does this on the Mac).
+                    #[cfg(windows)]
+                    if instance.as_ref().is_some_and(|i| i.take_show_request()) {
+                        open_main(cx, None);
+                    }
                     cx.refresh_windows();
                     menubar::refresh(cx);
                     show_extension_popups(cx);

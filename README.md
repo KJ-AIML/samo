@@ -243,16 +243,21 @@ python3 scripts/make-icon.py     # redraw the app icon (needs Pillow)
 
 ### Windows (in progress)
 
-Samo is coming to Windows 10/11 ([ADR-006](docs/decisions/ADR-006-samo-on-windows.md), tracked in #13). The app
-itself comes with #1. What works on Windows so far:
-- **`samo-windows`:**
-  - the scanner, which never follows a link
-  - the Recycle Bin, with Undo
-  - Quit, after checking the process
-  - live telemetry
-- **`samo-cli`**, with the same commands: `cargo run -p samo-cli -- scan C:\Users\you\source` and
-  `cargo run -p samo-cli -- top`.
-- **The web console**, `samo-server`.
+Samo is coming to Windows 10/11 ([ADR-006](docs/decisions/ADR-006-samo-on-windows.md), tracked in #13).
+
+**The app runs on Windows:** `cargo run --release -p samo-gpui`.
+- **Pages:** Overview, Projects, Storage, Processes and Performance, with live readings. What Windows doesn't report
+  (thermal state, performance and efficiency cores, wired memory) is said, not guessed.
+- **Cleanup** goes to the Recycle Bin, with Undo. Samo refuses before anything moves when the bin can't take an item:
+  the bin is off on that drive, the item is bigger than the bin holds, or the drive isn't a fixed NTFS one.
+- **Quit** ends a process only after checking it is the same one.
+- **The tray:** closing the window leaves Samo running there, and the CPU figure is in the tray icon's tooltip.
+  Launching Samo again shows its window.
+- **Windows conventions:** the Windows titlebar, Ctrl shortcuts, Show in Explorer and the Recycle Bin, with your
+  folders kept in `%APPDATA%\Samo`.
+- **Coming later on Windows:** extensions, the store and updates (#9, #10). Their pages say so.
+
+`samo-cli` (`cargo run -p samo-cli -- scan C:\Users\you\source`, `-- top`) and the web console run on Windows too.
 
 - Use the MSVC toolchain and the Visual Studio Build Tools. If rustup's default host is GNU, set
   `RUSTUP_TOOLCHAIN=1.99.0-x86_64-pc-windows-msvc`.

@@ -37,5 +37,10 @@ Every crate obeys strict layering (`cargo run -p xtask -- verify`):
   - **No `unsafe` (R29).** Windows APIs go only through safe crates; a need with no safe wrapper goes to KJ.
   - **Gates on Windows (R30).**
     - Before finishing on Windows, run `scripts/ci-windows.sh` (with `RUSTUP_TOOLCHAIN=1.99.0-x86_64-pc-windows-msvc` if rustup's default host is GNU).
-    - It runs fmt, clippy, the static gates and the tests of the crates that build on Windows so far.
-    - The macOS jobs still run everything.
+    - It runs fmt, clippy, the static gates and the tests of the whole workspace.
+    - The macOS jobs still run everything, Swift included.
+  - **The app on Windows (`samo-gpui`).**
+    - A window that is never shown keeps Samo in the tray (GPUI quits on the last window close), and `instance.rs` keeps it to one Samo.
+    - What each OS calls things lives in `words.rs`, and where things are lives in `places.rs`. Keep the Mac's strings byte-identical.
+    - Roots go through `places::scan_root`, so a scan matches its root.
+    - Shortcuts are `secondary-…` (⌘ on the Mac, Ctrl on Windows).

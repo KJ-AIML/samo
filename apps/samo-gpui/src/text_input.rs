@@ -44,15 +44,20 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("right", Right, Some(CONTEXT)),
         KeyBinding::new("shift-left", SelectLeft, Some(CONTEXT)),
         KeyBinding::new("shift-right", SelectRight, Some(CONTEXT)),
-        KeyBinding::new("cmd-a", SelectAll, Some(CONTEXT)),
-        KeyBinding::new("cmd-v", Paste, Some(CONTEXT)),
-        KeyBinding::new("cmd-c", Copy, Some(CONTEXT)),
-        KeyBinding::new("cmd-x", Cut, Some(CONTEXT)),
+        KeyBinding::new("secondary-a", SelectAll, Some(CONTEXT)),
+        KeyBinding::new("secondary-v", Paste, Some(CONTEXT)),
+        KeyBinding::new("secondary-c", Copy, Some(CONTEXT)),
+        KeyBinding::new("secondary-x", Cut, Some(CONTEXT)),
         KeyBinding::new("home", Home, Some(CONTEXT)),
-        KeyBinding::new("cmd-left", Home, Some(CONTEXT)),
         KeyBinding::new("end", End, Some(CONTEXT)),
-        KeyBinding::new("cmd-right", End, Some(CONTEXT)),
         KeyBinding::new("escape", Clear, Some(CONTEXT)),
+    ]);
+    // The Mac's own: ⌘← and ⌘→ go to the ends of the line, and ⌃⌘Space opens the character palette. On Windows
+    // Ctrl+← moves by a word and Win+. opens emoji, so these aren't bound there (ADR-006 §3).
+    #[cfg(target_os = "macos")]
+    cx.bind_keys([
+        KeyBinding::new("cmd-left", Home, Some(CONTEXT)),
+        KeyBinding::new("cmd-right", End, Some(CONTEXT)),
         KeyBinding::new("ctrl-cmd-space", ShowCharacterPalette, Some(CONTEXT)),
     ]);
 }

@@ -1,3 +1,6 @@
+//! These run real helpers: `#!/bin/sh` stand-ins, Swift or codesign. Their Windows forms come with #9 (ADR-006).
+#![cfg(unix)]
+
 //! ADR-004 Phase 4's demo, the parts a machine can check: the real `samo-shots` 0.4.0, installed from a store signed
 //! with a test key, under Samo's real host. Stitching is covered by Shots' own tests on a synthetic page three
 //! screens long (`StitcherTests`); watching a real scroll needs Screen Recording, so a person checks it (M19).

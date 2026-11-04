@@ -1,3 +1,6 @@
+//! These run real helpers: `#!/bin/sh` stand-ins, Swift or codesign. Their Windows forms come with #9 (ADR-006).
+#![cfg(unix)]
+
 //! The host against real (shell-script) helpers: R8's limits, crashes, shutdown, and turning off and on.
 
 use samo_domain::extensions::BackoffConfig;

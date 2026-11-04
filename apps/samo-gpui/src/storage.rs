@@ -512,7 +512,7 @@ impl SamoWorkspaceApp {
                         icon_button(
                             "ball-reveal",
                             "reveal",
-                            "Reveal in Finder",
+                            crate::words::REVEAL,
                             Variant::Default,
                             true,
                         )
@@ -523,7 +523,7 @@ impl SamoWorkspaceApp {
                     .child(
                         button(
                             "ball-trash",
-                            "Move to Trash…",
+                            format!("Move to {}…", crate::words::TRASH),
                             Some("trash"),
                             Variant::Default,
                             true,
@@ -622,7 +622,7 @@ impl SamoWorkspaceApp {
                                             icon_button(
                                                 SharedString::from(format!("file-reveal-{i}")),
                                                 "reveal",
-                                                "Reveal in Finder",
+                                                crate::words::REVEAL,
                                                 Variant::Link,
                                                 true,
                                             )
@@ -636,7 +636,7 @@ impl SamoWorkspaceApp {
                                             icon_button(
                                                 SharedString::from(format!("file-trash-{i}")),
                                                 "trash",
-                                                "Move to Trash…",
+                                                &format!("Move to {}…", crate::words::TRASH),
                                                 Variant::Link,
                                                 true,
                                             )
@@ -676,6 +676,14 @@ fn kind_words(cat: FileCategory) -> &'static str {
 mod tests {
     use super::*;
     use samo_primitives::FileNodeIdentity;
+
+    /// Up goes to the drive's root and no further (ADR-006).
+    #[cfg(windows)]
+    #[test]
+    fn up_stops_at_the_drive_root() {
+        assert_eq!(parent_of("C:/Users").as_deref(), Some("C:/"));
+        assert_eq!(parent_of("C:/"), None);
+    }
 
     #[test]
     fn a_circles_size_shortens_to_fit_and_is_never_cut() {

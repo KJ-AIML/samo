@@ -49,8 +49,7 @@ impl MenuBar {
         TrayIconEvent::set_event_handler(Some(move |event| {
             let _ = tx.unbounded_send(event);
         }));
-        let tray = TrayIconBuilder::new()
-            .with_icon_templated(probe_icon(Mood::Asleep, 0)?)
+        let tray = with_probe(TrayIconBuilder::new(), probe_icon(Mood::Asleep, 0)?)
             .with_tooltip("Samo")
             .with_menu_on_left_click(false)
             .build()
@@ -104,10 +103,10 @@ impl MenuBar {
             None => (true, true),
         };
         if icon_changed && let Some(icon) = probe_icon(next.mood, next.step) {
-            let _ = self.tray.set_icon_templated(Some(icon));
+            set_probe(&self.tray, icon);
         }
         if title_changed {
-            self.tray.set_title(Some(&next.title));
+            show_title(&self.tray, &next.title);
         }
         self.shown = Some(next);
     }
@@ -129,6 +128,9 @@ pub fn refresh(cx: &mut App) {
 /// The probe drawn 2 px per grid pixel with a 2/4 px margin: 36 x 44 px, which macOS shows at exactly 22 pt.
 fn probe_icon(mood: Mood, step: i32) -> Option<Icon> {
     let (rgba, w, h) = probe_template(mood, step, 2, (2, 4));
+    // Windows shows the icon as drawn, so it is made light or dark for the taskbar, and square (ADR-006 §3).
+    #[cfg(windows)]
+    let (rgba, w, h) = tray_rgba(rgba, w, h, light_taskbar());
     Icon::from_rgba(rgba, w, h).ok()
 }
 
@@ -163,7 +165,42 @@ fn pad_figure(s: String) -> String {
     }
 }
 
+/// The CPU load (and how many extensions wait) beside the item.
+#[cfg(target_os = "macos")]
+fn show_title(tray: &TrayIcon, title: &str) {
+    tray.set_title(Some(title));
+}
+
+/// A Windows tray item has no title (ADR-006 §3), so the figure goes in its tooltip.
+#[cfg(not(target_os = "macos"))]
+fn show_title(tray: &TrayIcon, title: &str) {
+    let _ = tray.set_tooltip(Some(format!("Samo · {}", title.trim())));
+}
+
+/// The probe as a template image, so macOS tints it for a light or dark menu bar.
+#[cfg(target_os = "macos")]
+fn with_probe(builder: TrayIconBuilder, icon: Icon) -> TrayIconBuilder {
+    builder.with_icon_templated(icon)
+}
+
+#[cfg(target_os = "macos")]
+fn set_probe(tray: &TrayIcon, icon: Icon) {
+    let _ = tray.set_icon_templated(Some(icon));
+}
+
+/// Windows has no template images: the probe is drawn as it is (ADR-006 §3).
+#[cfg(not(target_os = "macos"))]
+fn with_probe(builder: TrayIconBuilder, icon: Icon) -> TrayIconBuilder {
+    builder.with_icon(icon)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn set_probe(tray: &TrayIcon, icon: Icon) {
+    let _ = tray.set_icon(Some(icon));
+}
+
 /// The main screen's points-to-pixels factor; the item's rectangle arrives in pixels.
+#[cfg(target_os = "macos")]
 pub(crate) fn main_screen_scale() -> f64 {
     objc2::MainThreadMarker::new()
         .and_then(objc2_app_kit::NSScreen::mainScreen)
@@ -172,7 +209,20 @@ pub(crate) fn main_screen_scale() -> f64 {
         .unwrap_or(2.0)
 }
 
+/// On Windows: the display scale the user chose (`AppliedDPI`, 96 = 100 %); the tray's rectangle arrives in pixels.
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn main_screen_scale() -> f64 {
+    windows_registry::CURRENT_USER
+        .open(r"Control Panel\Desktop\WindowMetrics")
+        .and_then(|key| key.get_u32("AppliedDPI"))
+        .ok()
+        .filter(|dpi| *dpi > 0)
+        .map(|dpi| f64::from(dpi) / 96.0)
+        .unwrap_or(1.0)
+}
+
 /// Closes the quick panel, if it is open.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))] // Used only on the Mac until #9 and #10 (ADR-006).
 pub(crate) fn close_panel(cx: &mut App) {
     let state = cx.global::<AppState>();
     if let Some(handle) = state.panel {
@@ -180,6 +230,60 @@ pub(crate) fn close_panel(cx: &mut App) {
         cx.global_mut::<AppState>().panel = None;
         let _ = handle.update(cx, |_, window, _| window.remove_window());
     }
+}
+
+/// Where the quick panel goes, in points, given the item `(left, top, width, height)`, the display and the panel
+/// sizes, centred on the item. On the Mac (`taskbar` false) it always goes under the item, as it always has. On
+/// Windows (`taskbar` true) it goes over an item in the bottom half (a tray on a bottom taskbar) and is kept on the
+/// display.
+pub(crate) fn panel_origin(
+    icon: (f64, f64, f64, f64),
+    display: (f32, f32),
+    panel: (f32, f32),
+    taskbar: bool,
+) -> (f32, f32) {
+    let (left, top, w, h) = icon;
+    let (display_w, display_h) = display;
+    let (panel_w, panel_h) = panel;
+    let x =
+        ((left + w / 2.0) as f32 - panel_w / 2.0).clamp(8.0, (display_w - panel_w - 8.0).max(8.0));
+    let under = (top + h) as f32 + 6.0;
+    if !taskbar {
+        return (x, under);
+    }
+    let y = if (top as f32) < display_h / 2.0 {
+        under
+    } else {
+        top as f32 - panel_h - 6.0
+    };
+    (x, y.clamp(8.0, (display_h - panel_h - 8.0).max(8.0)))
+}
+
+/// The probe for a Windows tray, which shows icons as drawn (no template tinting): its pixels light on a dark
+/// taskbar and dark on a light one, centred in a square so Windows doesn't squash it.
+#[cfg_attr(not(windows), allow(dead_code))] // Used on Windows; tested everywhere.
+pub(crate) fn tray_rgba(rgba: Vec<u8>, w: u32, h: u32, light_taskbar: bool) -> (Vec<u8>, u32, u32) {
+    let ink: u8 = if light_taskbar { 0 } else { 255 };
+    let side = w.max(h);
+    let (dx, dy) = ((side - w) / 2, (side - h) / 2);
+    let mut out = vec![0u8; (side * side * 4) as usize];
+    for (i, px) in rgba.as_chunks::<4>().0.iter().enumerate() {
+        let (x, y) = (i as u32 % w, i as u32 / w);
+        let at = (((y + dy) * side + (x + dx)) * 4) as usize;
+        if let (Some(dst), Some(&alpha)) = (out.get_mut(at..at + 4), px.get(3)) {
+            dst.copy_from_slice(&[ink, ink, ink, alpha]);
+        }
+    }
+    (out, side, side)
+}
+
+/// Whether Windows' taskbar is light (`SystemUsesLightTheme`); dark when it can't be told, as it is by default.
+#[cfg(windows)]
+fn light_taskbar() -> bool {
+    windows_registry::CURRENT_USER
+        .open(r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize")
+        .and_then(|key| key.get_u32("SystemUsesLightTheme"))
+        .is_ok_and(|v| v == 1)
 }
 
 fn toggle_panel(rect: tray_icon::Rect, cx: &mut App) {
@@ -198,24 +302,28 @@ fn toggle_panel(rect: tray_icon::Rect, cx: &mut App) {
         return;
     }
 
-    let scale = main_screen_scale();
-    let icon_left = rect.position.x / scale;
-    let icon_w = f64::from(rect.size.width) / scale;
-    let icon_bottom = (rect.position.y + f64::from(rect.size.height)) / scale;
-    let display_w = cx
-        .primary_display()
-        .map(|d| f32::from(d.bounds().size.width))
-        .unwrap_or(1440.0);
-    let x = ((icon_left + icon_w / 2.0) as f32 - PANEL_W / 2.0)
-        .clamp(8.0, (display_w - PANEL_W - 8.0).max(8.0));
-    let y = icon_bottom as f32 + 6.0;
-
     let ext_lines = state
         .hub
         .ext
         .get()
         .map_or(0, |host| ext_facts_count(&host.snapshot()));
     let panel_h = PANEL_H + FACT_H * ext_lines as f32;
+
+    let scale = main_screen_scale();
+    let icon = (
+        rect.position.x / scale,
+        rect.position.y / scale,
+        f64::from(rect.size.width) / scale,
+        f64::from(rect.size.height) / scale,
+    );
+    let display = cx
+        .primary_display()
+        .map(|d| {
+            let size = d.bounds().size;
+            (f32::from(size.width), f32::from(size.height))
+        })
+        .unwrap_or((1440.0, 900.0));
+    let (x, y) = panel_origin(icon, display, (PANEL_W, panel_h), cfg!(windows));
     let opened = cx.open_window(
         WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(Bounds {
@@ -592,6 +700,39 @@ fn ext_facts(frame: &Frame) -> Vec<(gpui::Stateful<gpui::Div>, Option<NavSection
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Under the Mac's menu bar item always, as before (even on a display below the main one, R25); over a Windows
+    /// tray icon on a bottom taskbar, and on the display.
+    #[test]
+    fn the_panel_sits_under_a_top_item_and_over_a_bottom_one() {
+        let panel = (340.0, 446.0);
+        assert_eq!(
+            panel_origin((1000.0, 0.0, 30.0, 24.0), (1440.0, 900.0), panel, false),
+            (845.0, 30.0)
+        );
+        let (_, y) = panel_origin((1000.0, 1000.0, 30.0, 24.0), (1440.0, 900.0), panel, false);
+        assert_eq!(y, 1030.0, "the Mac never opens upward");
+        let (_, y) = panel_origin((1800.0, 1040.0, 24.0, 40.0), (1920.0, 1080.0), panel, true);
+        assert_eq!(y, 1040.0 - 446.0 - 6.0);
+        let (x, _) = panel_origin((1900.0, 1040.0, 24.0, 40.0), (1920.0, 1080.0), panel, true);
+        assert_eq!(x, 1920.0 - 340.0 - 8.0);
+        let (_, y) = panel_origin((1800.0, 300.0, 24.0, 40.0), (1920.0, 700.0), panel, true);
+        assert_eq!(y, 700.0 - 446.0 - 8.0, "kept on the display on Windows");
+    }
+
+    /// Windows shows a tray icon as drawn: the probe is light on a dark taskbar, dark on a light one, and square.
+    #[test]
+    fn the_windows_tray_probe_is_square_and_shows_on_a_dark_taskbar() {
+        let (rgba, w, h) = tray_rgba(vec![0, 0, 0, 255, 0, 0, 0, 0], 2, 1, false);
+        assert_eq!((w, h), (2, 2));
+        assert_eq!(&rgba[0..4], &[255, 255, 255, 255]);
+        assert_eq!(
+            rgba.iter().skip(3).step_by(4).filter(|a| **a > 0).count(),
+            1
+        );
+        let (rgba, _, _) = tray_rgba(vec![0, 0, 0, 255], 1, 1, true);
+        assert_eq!(&rgba[0..4], &[0, 0, 0, 255]);
+    }
 
     #[test]
     fn meter_words_never_say_zero_for_unknown() {
