@@ -87,21 +87,54 @@ fn now_ms() -> i64 {
 
 /// The only environment a helper gets.
 fn helper_env(data_dir: &Path, config: &HostConfig) -> Vec<(&'static str, String)> {
-    let var = |name: &str, fallback: &str| {
-        env::var(name)
-            .ok()
-            .filter(|v| !v.is_empty())
-            .unwrap_or_else(|| fallback.to_string())
-    };
-    let home = config
-        .home
-        .as_ref()
-        .map_or_else(|| var("HOME", "/"), |h| h.to_string_lossy().into_owned());
+    helper_env_on(cfg!(windows), data_dir, config.home.as_deref(), |name| {
+        env::var(name).ok()
+    })
+}
+
+/// What Windows' own programs and libraries need to run: its folders, its shell, where a user's settings and
+/// temporary files go. A helper gets these and nothing else of Samo's environment (ADR-006).
+const WINDOWS_ENV: [&str; 10] = [
+    "PATH",
+    "SystemRoot",
+    "SystemDrive",
+    "windir",
+    "ComSpec",
+    "PATHEXT",
+    "TEMP",
+    "TMP",
+    "APPDATA",
+    "LOCALAPPDATA",
+];
+
+/// `helper_env` for the given OS, reading Samo's environment through `get` (ADR-006 R25). `home` replaces the
+/// user's home folder (`HOME`, or `USERPROFILE` on Windows).
+fn helper_env_on(
+    windows: bool,
+    data_dir: &Path,
+    home: Option<&Path>,
+    get: impl Fn(&str) -> Option<String>,
+) -> Vec<(&'static str, String)> {
+    let set = |name: &str| get(name).filter(|v| !v.is_empty());
+    let data = ("SAMO_EXT_DATA_DIR", data_dir.to_string_lossy().into_owned());
+    let given_home = home.map(|h| h.to_string_lossy().into_owned());
+    if windows {
+        let mut env: Vec<(&'static str, String)> = WINDOWS_ENV
+            .iter()
+            .filter_map(|name| set(name).map(|v| (*name, v)))
+            .collect();
+        if let Some(home) = given_home.or_else(|| set("USERPROFILE")) {
+            env.push(("USERPROFILE", home));
+        }
+        env.push(data);
+        return env;
+    }
+    let var = |name: &str, fallback: &str| set(name).unwrap_or_else(|| fallback.to_string());
     vec![
-        ("HOME", home),
+        ("HOME", given_home.unwrap_or_else(|| var("HOME", "/"))),
         ("PATH", var("PATH", "/usr/bin:/bin:/usr/sbin:/sbin")),
         ("LANG", var("LANG", "en_US.UTF-8")),
-        ("SAMO_EXT_DATA_DIR", data_dir.to_string_lossy().into_owned()),
+        data,
     ]
 }
 
@@ -699,5 +732,55 @@ impl Run<'_> {
                 });
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn keys(env: &[(&'static str, String)]) -> Vec<&'static str> {
+        let mut keys: Vec<&'static str> = env.iter().map(|(k, _)| *k).collect();
+        keys.sort_unstable();
+        keys
+    }
+
+    fn value<'a>(env: &'a [(&'static str, String)], key: &str) -> Option<&'a str> {
+        env.iter().find(|(k, _)| *k == key).map(|(_, v)| v.as_str())
+    }
+
+    #[test]
+    fn helper_env_follows_the_os() {
+        let samo = |name: &str| match name {
+            "HOME" => Some("/Users/a".to_string()),
+            "PATH" => Some("C:/Windows/system32;C:/Windows".to_string()),
+            "SystemRoot" => Some("C:/Windows".to_string()),
+            "USERPROFILE" => Some("C:/Users/a".to_string()),
+            "LOCALAPPDATA" => Some("C:/Users/a/AppData/Local".to_string()),
+            "SECRET" => Some("hunter2".to_string()),
+            _ => None,
+        };
+        let data = Path::new("/data");
+
+        let mac = helper_env_on(false, data, None, samo);
+        assert_eq!(keys(&mac), ["HOME", "LANG", "PATH", "SAMO_EXT_DATA_DIR"]);
+        assert_eq!(value(&mac, "HOME"), Some("/Users/a"));
+
+        let home = Path::new("C:/tmp/home");
+        let windows = helper_env_on(true, data, Some(home), samo);
+        // Only what Samo itself has: a variable it lacks (APPDATA here) is left out, never invented.
+        assert_eq!(
+            keys(&windows),
+            [
+                "LOCALAPPDATA",
+                "PATH",
+                "SAMO_EXT_DATA_DIR",
+                "SystemRoot",
+                "USERPROFILE"
+            ]
+        );
+        assert_eq!(value(&windows, "USERPROFILE"), Some("C:/tmp/home"));
+        assert_eq!(value(&windows, "SAMO_EXT_DATA_DIR"), Some("/data"));
+        assert!(value(&windows, "SECRET").is_none() && value(&mac, "SECRET").is_none());
     }
 }

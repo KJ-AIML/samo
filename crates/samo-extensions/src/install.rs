@@ -1,3 +1,4 @@
+use crate::paths::helper_file_on;
 use crate::{ExtRoot, InstallError};
 use flate2::read::GzDecoder;
 use samo_domain::extensions::{
@@ -55,12 +56,13 @@ pub fn install_dev(root: &ExtRoot, src: &Path) -> Result<DevInstall, InstallErro
     walk(src, &id, &mut entries)?;
     let checked: Vec<ArchiveEntry> = entries.iter().map(|(entry, _, _)| entry.clone()).collect();
     validate_entries(&id, &checked).map_err(InstallError::Package)?;
-    let helper_entry = format!("{id}/{}", manifest.helper);
+    let helper = helper_file_on(&manifest.helper, cfg!(windows));
+    let helper_entry = format!("{id}/{helper}");
     if !checked
         .iter()
         .any(|e| e.kind == EntryKind::File && e.path == helper_entry)
     {
-        return Err(InstallError::NoHelper(manifest.helper.clone()));
+        return Err(InstallError::NoHelper(helper));
     }
 
     let stamp = stamp_of(&entries);
@@ -299,8 +301,9 @@ pub(crate) fn stage_catalog(
             .map_err(|e| InstallError::io("the package has no extension.toml", e))?;
         let manifest = Manifest::parse(&text).map_err(InstallError::Manifest)?;
         manifest_matches(&manifest, listing).map_err(InstallError::Store)?;
-        if !dir.join(&manifest.helper).is_file() {
-            return Err(InstallError::NoHelper(manifest.helper.clone()));
+        let helper = helper_file_on(&manifest.helper, cfg!(windows));
+        if !dir.join(&helper).is_file() {
+            return Err(InstallError::NoHelper(helper));
         }
         Ok(manifest)
     });
