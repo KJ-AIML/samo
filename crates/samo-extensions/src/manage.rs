@@ -50,14 +50,26 @@ impl fmt::Display for UninstallFailed {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::NotInstalled => write!(f, "it isn't installed"),
-            Self::CantRun => write!(
-                f,
-                "this dev build can't run here, so it can't undo what it changed. Start Samo with \
-                 SAMO_EXT_DEV_DIR pointing at its folder, or uninstall it anyway"
-            ),
+            Self::CantRun => f.write_str(&cant_run_words_on(cfg!(windows))),
             Self::Step { step, said } => write!(f, "`{step}` didn't finish ({said})"),
             Self::Delete(e) => write!(f, "its folder couldn't be deleted ({e})"),
         }
+    }
+}
+
+/// What a dev build that can't run here says when asked to uninstall, for the given OS (ADR-006 R25). On the Mac a
+/// change it leaves behind guards itself; on Windows a hook it added runs its program with no shell, so once the
+/// program is gone the hook's host reports errors until the hook is taken out.
+fn cant_run_words_on(windows: bool) -> String {
+    let words = "this dev build can't run here, so it can't undo what it changed. Start Samo with SAMO_EXT_DEV_DIR \
+                 pointing at its folder, or uninstall it anyway";
+    if windows {
+        format!(
+            "{words}. What it changed then stays, and a program it hooked into (such as Claude Code) reports errors \
+             until that is taken out"
+        )
+    } else {
+        words.to_string()
     }
 }
 
@@ -347,5 +359,27 @@ impl Host {
         };
         History::append(root, "uninstall", id, &detail);
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cant_run_says_what_stays() {
+        // The Mac's words, unchanged (ADR-006 R25).
+        assert_eq!(
+            cant_run_words_on(false),
+            "this dev build can't run here, so it can't undo what it changed. Start Samo with SAMO_EXT_DEV_DIR \
+             pointing at its folder, or uninstall it anyway"
+        );
+        // On Windows a hook Samo can't undo runs a program that is then gone, and its host reports errors.
+        let windows = cant_run_words_on(true);
+        assert!(windows.starts_with(&cant_run_words_on(false)), "{windows}");
+        assert!(
+            windows.contains("stays") && windows.contains("errors"),
+            "{windows}"
+        );
     }
 }
