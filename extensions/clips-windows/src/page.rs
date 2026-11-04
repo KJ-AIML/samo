@@ -6,14 +6,18 @@ use crate::history::{History, Item, Kind};
 use crate::settings::{Settings, Shortcut};
 use chrono::{DateTime, Local};
 use samo_ext_protocol::{ButtonKind, ChoiceOption, Lamp, NoteKind, RowAction, RowItem, Widget};
+use unicode_normalization::char::is_combining_mark;
 
 /// The latest copies the page lists (the list at the shortcut shows them all).
 const RECENT_ON_PAGE: usize = 20;
-const TITLE_CHARS: usize = 79;
+/// A title longer than this many characters (as people see them) is cut to one fewer and an ellipsis, as on the Mac.
+const TITLE_CHARS: usize = 80;
 
 /// Whether the shortcut works.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ShortcutState {
+    /// Nothing holds it yet: the list at the shortcut isn't on Windows yet (R28).
+    NotYet,
     Ready,
     /// Windows refused it: another app has it (R18, never forced).
     Refused,
@@ -69,11 +73,55 @@ fn when(item: &Item, now: DateTime<Local>) -> String {
     }
 }
 
-fn row(item: &Item, now: DateTime<Local>) -> RowItem {
-    let mut title: String = item.title().chars().take(TITLE_CHARS).collect();
-    if item.title().chars().count() > TITLE_CHARS {
-        title.push('…');
+/// Whether `c` belongs to the character before it, as people see characters: a mark (Thai vowels and tones above
+/// and below, accents), Thai and Lao sara am, a joiner, a variation selector, a skin tone, or an emoji tag.
+fn joins(c: char) -> bool {
+    is_combining_mark(c)
+        || matches!(
+            c,
+            '\u{0E33}'
+                | '\u{0EB3}'
+                | '\u{200D}'
+                | '\u{FE00}'..='\u{FE0F}'
+                | '\u{1F3FB}'..='\u{1F3FF}'
+                | '\u{E0020}'..='\u{E007F}'
+        )
+}
+
+/// The characters of `text` as people see them: a base with what joins it, an emoji joined by U+200D, a flag's two
+/// letters.
+fn characters(text: &str) -> Vec<&str> {
+    let mut out: Vec<&str> = Vec::new();
+    let mut start = 0;
+    let mut previous: Option<char> = None;
+    let mut flag_half = false;
+    for (at, c) in text.char_indices() {
+        let flag = ('\u{1F1E6}'..='\u{1F1FF}').contains(&c);
+        let attached = at > 0 && (joins(c) || previous == Some('\u{200D}') || (flag && flag_half));
+        if !attached && at > 0 {
+            out.extend(text.get(start..at));
+            start = at;
+        }
+        flag_half = flag && !(attached && flag_half);
+        previous = Some(c);
     }
+    out.extend(text.get(start..).filter(|rest| !rest.is_empty()));
+    out
+}
+
+/// `text` if it has at most `max` characters as people see them; else its first `max - 1` and an ellipsis.
+pub fn cut(text: &str, max: usize) -> String {
+    let chars = characters(text);
+    if chars.len() <= max {
+        return text.to_string();
+    }
+    let mut cut: String = chars.iter().take(max.saturating_sub(1)).copied().collect();
+    cut.push('…');
+    cut
+}
+
+fn row(item: &Item, now: DateTime<Local>) -> RowItem {
+    let mut title = cut(&item.title(), TITLE_CHARS);
     if title.is_empty() {
         title = " ".into();
     }
@@ -177,6 +225,11 @@ pub fn build(s: &PageState) -> Vec<Widget> {
             format!("Windows refused {k}: another app has it. Choose another below"),
         ),
         (Some(_), ShortcutState::Ready) => (Lamp::Done, "Ready".to_string()),
+        (Some(_), ShortcutState::NotYet) => (
+            Lamp::Off,
+            "The list at the shortcut isn't on Windows yet; Clips keeps what you copy meanwhile"
+                .to_string(),
+        ),
     };
     view.push(Widget::Rows {
         items: vec![RowItem {
@@ -258,7 +311,7 @@ pub fn build(s: &PageState) -> Vec<Widget> {
     }
     view.push(note(
         "Never kept: what password managers mark as secret, and anything copied in 1Password, Bitwarden or KeePass. \
-         Everything stays on this PC.",
+         Kept only on this PC; uninstalling deletes it.",
     ));
     view
 }
@@ -411,6 +464,53 @@ mod tests {
             row.map(|r| (r.lamp, r.trailing)),
             Some((Lamp::Off, "none".to_string()))
         );
+    }
+
+    #[test]
+    fn a_shortcut_nothing_holds_yet_says_so() {
+        let h = History::default();
+        let mut s = state(&h);
+        s.shortcut = ShortcutState::NotYet;
+        let row = rows(&build(&s))
+            .into_iter()
+            .find(|r| r.title == "Open the list");
+        assert_eq!(row.as_ref().map(|r| r.lamp), Some(Lamp::Off));
+        assert!(row.is_some_and(|r| r.detail.contains("isn't on Windows yet")));
+    }
+
+    #[test]
+    fn the_closing_note_says_uninstalling_deletes_the_history() {
+        let h = History::default();
+        let view = build(&state(&h));
+        assert!(view.iter().any(|w| matches!(w,
+            Widget::Note { text, .. } if text.contains("uninstalling deletes it"))));
+    }
+
+    #[test]
+    fn titles_are_cut_between_characters_as_people_see_them() {
+        let titled = |text: &str| {
+            let mut h = History::default();
+            h.add(&Capture::text(text, None), chrono::Utc::now());
+            rows(&build(&state(&h)))
+                .into_iter()
+                .next()
+                .map(|r| r.title)
+                .unwrap_or_default()
+        };
+        // Thai with its marks: 30 characters are three times as many code points, and kept whole.
+        assert_eq!(titled(&"ที่".repeat(30)), "ที่".repeat(30));
+        // 80 is kept whole; 85 is cut to 79 and an ellipsis, never through a mark.
+        assert_eq!(titled(&"ที่".repeat(80)), "ที่".repeat(80));
+        assert_eq!(titled(&"ที่".repeat(85)), format!("{}…", "ที่".repeat(79)));
+        assert_eq!(titled(&"ทำ".repeat(85)), format!("{}…", "ทำ".repeat(79)));
+        // Emoji made of several: a family, a skin tone, a flag.
+        for one in ["👩‍💻", "👍🏽", "🇹🇭", "❤️"] {
+            assert_eq!(
+                titled(&one.repeat(85)),
+                format!("{}…", one.repeat(79)),
+                "{one}"
+            );
+        }
     }
 
     #[test]

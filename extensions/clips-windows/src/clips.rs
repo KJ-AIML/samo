@@ -47,7 +47,7 @@ impl<B: Board> Clips<B> {
             history: Store::new(dir).load(),
             settings,
             watcher: Watcher::new(board, front),
-            shortcut: ShortcutState::Ready,
+            shortcut: ShortcutState::NotYet,
             confirming_clear: false,
             problem: None,
             said: Vec::new(),
@@ -149,7 +149,6 @@ impl<B: Board> Clips<B> {
                     shortcut_choices().into_iter().find(|(id, _)| *id == value)
                 {
                     self.settings.shortcut = shortcut;
-                    self.shortcut = ShortcutState::Ready;
                     self.save_settings();
                 }
             }
@@ -675,6 +674,36 @@ mod tests {
         assert_eq!(c.settings().shortcut, alt_shift);
         c.handle(&choice("bogus"), now);
         assert_eq!(open(tmp.path()).settings().shortcut, alt_shift);
+        Ok(())
+    }
+
+    #[test]
+    fn the_shortcut_isnt_ready_until_something_holds_it() -> Result<(), String> {
+        let tmp = tempfile::tempdir().map_err(|e| e.to_string())?;
+        let now = Utc::now();
+        let mut c = open(tmp.path());
+        c.handle(
+            &HostMsg::Choice {
+                key: "shortcut".into(),
+                value: "alt-shift-v".into(),
+            },
+            now,
+        );
+        let msgs = c.updates(now, false);
+        let lamp = view(&msgs).and_then(|v| {
+            v.iter().find_map(|w| match w {
+                Widget::Rows { items } => items
+                    .iter()
+                    .find(|r| r.title == "Open the list")
+                    .map(|r| r.lamp),
+                _ => None,
+            })
+        });
+        assert_eq!(
+            lamp,
+            Some(Lamp::Off),
+            "the page said Ready with nothing holding the shortcut"
+        );
         Ok(())
     }
 
