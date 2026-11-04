@@ -486,6 +486,25 @@ pub fn macos_satisfies(min: Option<&str>, current: &str) -> bool {
     }
 }
 
+/// Samo for Windows inside its zip (`Samo-<v>-windows-x86_64.zip`): the program, and a file saying its version,
+/// which an update checks against the catalog's (R14), as the Mac's reads `Info.plist`.
+pub const WINDOWS_EXE: &str = "Samo/Samo.exe";
+pub const WINDOWS_RELEASE: &str = "Samo/release.toml";
+
+/// `release.toml` for `version`.
+pub fn windows_release_toml(version: &str) -> String {
+    format!("version = \"{version}\"\n")
+}
+
+/// The version `release.toml` names, if it is a version.
+pub fn windows_release_version(text: &str) -> Option<String> {
+    text.lines().find_map(|line| {
+        let (key, value) = line.split_once('=')?;
+        let version = value.trim().strip_prefix('"')?.strip_suffix('"')?;
+        (key.trim() == "version" && numeric(version).is_some()).then(|| version.to_string())
+    })
+}
+
 /// Whether this OS meets a listing's `min_macos`, for the given OS (ADR-006 R25). On Windows it is about the Mac's
 /// package, never the one Windows installs, so it is always met.
 pub fn os_satisfies_on(min_macos: Option<&str>, macos: &str, windows: bool) -> bool {
@@ -716,6 +735,16 @@ mod tests {
         // Without Windows packages, the JSON is as it always was.
         let json = serde_json::to_string(&listing()).unwrap_or_default();
         assert!(!json.contains("platforms"), "{json}");
+    }
+
+    #[test]
+    fn a_windows_zip_says_its_version() {
+        assert_eq!(WINDOWS_EXE, "Samo/Samo.exe");
+        assert_eq!(WINDOWS_RELEASE, "Samo/release.toml");
+        let text = windows_release_toml("0.5.0");
+        assert_eq!(windows_release_version(&text).as_deref(), Some("0.5.0"));
+        assert_eq!(windows_release_version("version = \"not a version\""), None);
+        assert_eq!(windows_release_version("garbage"), None);
     }
 
     #[test]

@@ -6,6 +6,7 @@ mod layers;
 mod network;
 mod purity;
 mod rls;
+mod samo_package;
 mod store;
 mod swift;
 
@@ -61,6 +62,7 @@ fn run() -> Result<(), String> {
         }
         "ext-publish" => store::publish(&publish_args(&root, &args[1..])?),
         "windows-icon" => icon::run(&root).map(|_| ()),
+        "samo-package" => samo_package::run(&root).map(|_| ()),
         "ext-dev" => {
             let dir = args
                 .get(1)
@@ -68,7 +70,7 @@ fn run() -> Result<(), String> {
             ext_dev::run(&root, &root.join(dir)).map(|_| ())
         }
         other => Err(format!(
-            "unknown xtask command `{other}`; expected `verify`, `ext-dev`, `windows-icon`, `ext-keygen`, `ext-codesign-setup`, `ext-package` or `ext-publish`"
+            "unknown xtask command `{other}`; expected `verify`, `ext-dev`, `windows-icon`, `samo-package`, `ext-keygen`, `ext-codesign-setup`, `ext-package` or `ext-publish`"
         )),
     }
 }
@@ -78,6 +80,7 @@ fn publish_args(root: &Path, args: &[String]) -> Result<store::PublishArgs, Stri
     let mut store = None;
     let mut packages = root.join("target/ext-dist");
     let mut samo = None;
+    let mut samo_windows = None;
     let mut out = None;
     let mut test_key = None;
     let mut it = args.iter();
@@ -90,6 +93,7 @@ fn publish_args(root: &Path, args: &[String]) -> Result<store::PublishArgs, Stri
             "--store" => store = Some(value),
             "--packages" => packages = value,
             "--samo" => samo = Some(value),
+            "--samo-windows" => samo_windows = Some(value),
             "--out" => out = Some(value),
             "--test-key" => test_key = Some(value),
             other => return Err(format!("ext-publish: unknown flag `{other}`")),
@@ -107,6 +111,7 @@ fn publish_args(root: &Path, args: &[String]) -> Result<store::PublishArgs, Stri
         store,
         packages,
         samo,
+        samo_windows,
         test_key,
         published_at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
     })
