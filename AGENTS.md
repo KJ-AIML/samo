@@ -55,3 +55,10 @@ Every crate obeys strict layering (`cargo run -p xtask -- verify`):
     - Claude Sessions writes its Windows entries with `settings::entries_on(true, …)`: hooks in Claude Code's exec
       form (`command` + `args`, no shell), and a status line both Git Bash and PowerShell run. The Mac's entries are
       byte-identical; Samo's entries are recognised by `OWN_MARK` or the helper's own path (`HELPER_MARK`).
+  - **Clips on Windows (#11)** is Rust (`extensions/clips-windows`, same id `clips`), its core pure and tested on both
+    OSes. Windows tells it of each copy (`clipboard-win`'s listener); a look opens the clipboard once for names,
+    markers and contents, and a marker it can't read counts as secret (R22). Its list holds its shortcut with
+    `RegisterHotKey` (refused, never forced: R18) and pastes with `SendInput` only after a pick (R24).
+  - **A platform's own capabilities.** A listing's `overrides[platform]` holds what that platform's build declares
+    where it differs from the Mac's; the store client hands out `Listing::on(this_platform())`, so the store shows
+    and checks those. `ext-publish` writes them from the Windows manifest.
