@@ -62,9 +62,11 @@ mod tests {
 
     /// Keeps one core busy.
     fn busy() -> Command {
-        let mut c = system("/usr/bin/yes", r"WindowsPowerShell\v1.0\powershell.exe");
+        // cmd's endless `for /l` spins from its first millisecond; PowerShell can take seconds to start on a cold
+        // CI runner, which the measurement then caught instead of the loop.
+        let mut c = system("/usr/bin/yes", "cmd.exe");
         if cfg!(windows) {
-            c.args(["-NoProfile", "-Command", "while($true){}"]);
+            c.args(["/d", "/c", "for /l %i in () do rem"]);
         }
         c
     }
@@ -102,8 +104,6 @@ mod tests {
             .stdout(Stdio::null())
             .spawn()
             .map_err(|e| e.to_string())?;
-        // PowerShell takes a moment to start before it spins.
-        thread::sleep(Duration::from_millis(if cfg!(windows) { 1_500 } else { 0 }));
         let busy_cpu = measure_beside_tree_checks(busy.id());
         let idle_cpu = measure_beside_tree_checks(idle.id());
         let _ = busy.kill();
