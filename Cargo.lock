@@ -4480,6 +4480,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "samo-clips"
+version = "0.1.1"
+dependencies = [
+ "chrono",
+ "ring",
+ "samo-ext-protocol",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "unicode-normalization",
+ "uuid",
+]
+
+[[package]]
 name = "samo-domain"
 version = "0.4.1"
 dependencies = [
