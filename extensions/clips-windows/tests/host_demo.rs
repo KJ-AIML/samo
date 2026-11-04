@@ -7,7 +7,7 @@
 
 use samo_clips::watcher::{Board, Put, clip};
 use samo_clips::win::board::WinBoard;
-use samo_ext_protocol::{RowItem, Widget};
+use samo_ext_protocol::{Lamp, RowItem, Widget};
 use samo_extensions::{ExtRoot, ExtSlot, ExtSnapshot, Host, HostConfig, Status};
 use std::fs;
 use std::path::Path;
@@ -151,6 +151,22 @@ fn clips_on_windows_under_samos_host() -> Fallible<()> {
             .any(|w| matches!(w, Widget::Section { title, .. } if title == "PERMISSIONS")),
         "Windows asks for no permission"
     );
+
+    // 1b. A shortcut chosen on the page goes to the list, which tells whether Windows gave it (R18); none takes nothing.
+    host.choice(SLOT, "shortcut", "alt-shift-v");
+    let lamp = |s: &ExtSnapshot| {
+        rows(s, "SHORTCUT")
+            .first()
+            .map(|r| (r.lamp, r.detail.clone()))
+    };
+    let snap = wait(&host, "the list to hold Alt+Shift+V", 10, |s| {
+        lamp(s).is_some_and(|(l, _)| l == Lamp::Done || l == Lamp::Error)
+    })?;
+    eprintln!("Alt+Shift+V: {:?}", lamp(&snap));
+    host.choice(SLOT, "shortcut", "none");
+    wait(&host, "no shortcut", 10, |s| {
+        lamp(s).is_some_and(|(l, d)| l == Lamp::Off && d.starts_with("No shortcut"))
+    })?;
 
     // 2. A copy in another app shows on the page, with the badge.
     let text = format!("clips demo {}", std::process::id());
