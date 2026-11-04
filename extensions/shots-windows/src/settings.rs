@@ -119,7 +119,14 @@ impl Shortcut {
 
     fn from_value(v: &Value) -> Option<Self> {
         let flag = |k: &str| v.get(k).and_then(Value::as_bool).unwrap_or(false);
-        let key = v.get("key")?.as_str()?.chars().next()?;
+        // A letter or digit, as Windows holds it; anything else is no shortcut.
+        let key = v
+            .get("key")?
+            .as_str()?
+            .chars()
+            .next()
+            .filter(char::is_ascii_alphanumeric)?
+            .to_ascii_uppercase();
         Some(Self {
             ctrl: flag("ctrl"),
             alt: flag("alt"),
@@ -205,6 +212,8 @@ impl Settings {
     /// unreadable is the default. Shots 0.1.0's `"after": "pin"` (pin, without copying or saving) is both, then pin.
     pub fn parse(text: &str) -> Self {
         let mut s = Self::default();
+        // A BOM (Windows PowerShell 5.1, older Notepad) is not a damaged file.
+        let text = text.strip_prefix('\u{feff}').unwrap_or(text);
         let Ok(Value::Object(map)) = serde_json::from_str::<Value>(text) else {
             return s;
         };
@@ -286,7 +295,11 @@ pub fn expand(path: &str, home: &Path) -> PathBuf {
         return home.to_path_buf();
     }
     match path.strip_prefix("~/").or_else(|| path.strip_prefix("~\\")) {
-        Some(rest) => home.join(rest),
+        // One path shape: each part joined with this system's separator.
+        Some(rest) => rest
+            .split(['/', '\\'])
+            .filter(|part| !part.is_empty())
+            .fold(home.to_path_buf(), |path, part| path.join(part)),
         None => PathBuf::from(path),
     }
 }
@@ -346,7 +359,10 @@ impl Recent {
     pub fn load(data_dir: &Path) -> Self {
         fs::read(data_dir.join("recent.json"))
             .ok()
-            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+            .and_then(|bytes| {
+                let json = bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(&bytes);
+                serde_json::from_slice(json).ok()
+            })
             .unwrap_or_default()
     }
 
@@ -538,6 +554,43 @@ mod tests {
         assert_eq!(home_from(env, true), Some(PathBuf::from("C:/Users/kj")));
         assert_eq!(home_from(env, false), Some(PathBuf::from("/home/kj")));
         assert_eq!(home_from(|_| None, true), None);
+    }
+
+    /// Windows PowerShell 5.1 and older Notepad write a BOM: settings saved that way still load.
+    #[test]
+    fn a_bom_is_not_a_damaged_file() -> Result<(), String> {
+        let dir = tempfile::tempdir().map_err(|e| e.to_string())?;
+        std::fs::write(dir.path().join("settings.json"), "\u{feff}{\"sound\":true}")
+            .map_err(|e| e.to_string())?;
+        assert!(Settings::load(dir.path()).sound);
+        Ok(())
+    }
+
+    #[test]
+    fn shortcut_keys_are_letters_and_digits() {
+        let s = Settings::parse(
+            r#"{"shortcuts":{"area":{"win":true,"alt":true,"key":"s"},"text":{"ctrl":true,"key":"ก"}}}"#,
+        );
+        assert_eq!(
+            s.shortcuts.get("area"),
+            Some(&Shortcut::area()),
+            "lower case is the same key"
+        );
+        assert!(
+            !s.shortcuts.contains_key("text"),
+            "a key Windows can't hold is dropped"
+        );
+    }
+
+    #[test]
+    fn a_folder_is_one_path_shape() {
+        let home = Path::new("/h");
+        let want = home.join("Pictures").join("Shots").display().to_string();
+        assert_eq!(expand("~/Pictures/Shots", home).display().to_string(), want);
+        assert_eq!(
+            expand("~\\Pictures\\Shots", home).display().to_string(),
+            want
+        );
     }
 
     #[test]
