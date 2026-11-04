@@ -17,8 +17,6 @@ use std::time::Duration;
 
 /// How often Clips looks at the clipboard when Windows won't say when it changes.
 pub const EVERY: Duration = Duration::from_millis(500);
-/// How often the page is refreshed when Windows does say (a pause ending shows within this).
-pub const QUIET: Duration = Duration::from_secs(5);
 
 /// What the serving loop waits for.
 pub enum Event {
@@ -35,12 +33,13 @@ fn send(out: &mut impl Write, msg: &HelperMsg) -> bool {
 }
 
 /// Serves Samo until it says `shutdown` or goes: hello first, then the page and the badge, again whenever they
-/// change. The history is saved when it stops.
+/// change. With `poll`, it looks at the clipboard that often; without, Windows wakes it at each change, and it
+/// sleeps until then, or until the page would change. The history is saved when it stops.
 pub fn serve<B: Board>(
     clips: &mut Clips<B>,
     events: &Receiver<Event>,
     out: &mut impl Write,
-    every: Duration,
+    poll: Option<Duration>,
 ) {
     let hello = HelperMsg::Hello {
         protocol: PROTOCOL_VERSION,
@@ -48,10 +47,13 @@ pub fn serve<B: Board>(
     let mut force = true;
     if send(out, &hello) {
         loop {
-            let now = Utc::now();
             let mut said = Vec::new();
             if !force {
-                match events.recv_timeout(every) {
+                let wait = poll.unwrap_or_else(|| clips.wake_in(Utc::now()));
+                let event = events.recv_timeout(wait);
+                // The time it woke, for what it keeps and a pause it starts.
+                let now = Utc::now();
+                match event {
                     Ok(Event::Host(HostMsg::Shutdown) | Event::Gone)
                     | Err(RecvTimeoutError::Disconnected) => break,
                     Ok(Event::Host(msg)) => said = clips.handle(&msg, now),
@@ -59,7 +61,7 @@ pub fn serve<B: Board>(
                 }
                 clips.tick(now);
             }
-            said.extend(clips.updates(now, force));
+            said.extend(clips.updates(Utc::now(), force));
             if !said.iter().all(|msg| send(out, msg)) {
                 break;
             }
@@ -123,7 +125,7 @@ pub fn run<B: Board>(
         }
     };
     let (tx, rx) = mpsc::channel();
-    let every = if listen(tx.clone()) { QUIET } else { EVERY };
+    let poll = (!listen(tx.clone())).then_some(EVERY);
     let _ = thread::Builder::new().name("stdin".into()).spawn(move || {
         for line in std::io::stdin().lock().lines() {
             let Ok(line) = line else { break };
@@ -136,7 +138,7 @@ pub fn run<B: Board>(
         let _ = tx.send(Event::Gone);
     });
     let mut clips = Clips::open(&dir, board, front);
-    serve(&mut clips, &rx, &mut stdout, every);
+    serve(&mut clips, &rx, &mut stdout, poll);
     drop(held);
     ExitCode::SUCCESS
 }
@@ -162,7 +164,7 @@ mod tests {
             let _ = tx.send(e);
         }
         let mut out = Vec::new();
-        serve(&mut clips, &rx, &mut out, Duration::from_millis(10));
+        serve(&mut clips, &rx, &mut out, Some(Duration::from_millis(10)));
         said(&out)
     }
 
@@ -191,7 +193,7 @@ mod tests {
         let _ = tx.send(Event::Gone);
         let mut out = Vec::new();
         // An hour between looks: only Windows' word makes it look.
-        serve(&mut clips, &rx, &mut out, Duration::from_secs(3600));
+        serve(&mut clips, &rx, &mut out, None);
         assert_eq!(clips.history().items().len(), 1);
         Ok(())
     }
@@ -222,7 +224,7 @@ mod tests {
         let (tx, rx) = mpsc::channel();
         let _ = tx.send(Event::Host(HostMsg::Shutdown));
         let mut out = Vec::new();
-        serve(&mut clips, &rx, &mut out, Duration::from_millis(10));
+        serve(&mut clips, &rx, &mut out, Some(Duration::from_millis(10)));
         assert!(tmp.path().join("history.json").is_file(), "not saved");
         drop(tx);
         Ok(())
@@ -244,7 +246,12 @@ mod tests {
         let tmp = tempfile::tempdir().map_err(|e| e.to_string())?;
         let mut clips = Clips::open(tmp.path(), FakeBoard::default(), Box::new(|| None));
         let (_tx, rx) = mpsc::channel();
-        serve(&mut clips, &rx, &mut Closed, Duration::from_millis(10));
+        serve(
+            &mut clips,
+            &rx,
+            &mut Closed,
+            Some(Duration::from_millis(10)),
+        );
         Ok(())
     }
 

@@ -1,6 +1,6 @@
 //! Windows tells Clips when the clipboard changes (`WM_CLIPBOARDUPDATE`, through `clipboard-win`'s `Monitor`), so
-//! Clips looks then and only then: nothing runs between copies (R21), a copy is kept at once, and two copies
-//! close together are both seen.
+//! Clips looks then: between copies it sleeps (it wakes only when its page would change: a pause ending, midnight,
+//! at most hourly) (R21), a copy is kept at once, and two copies close together are both seen.
 
 use crate::serve::Event;
 use clipboard_win::Monitor;

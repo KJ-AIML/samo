@@ -340,6 +340,31 @@ impl<B: Board> Clips<B> {
         out
     }
 
+    /// How long Clips may sleep when Windows tells it of each copy: until the page would change (a pause ending, or
+    /// midnight, when today's times get their date), at most an hour; soon if the clipboard was busy.
+    pub fn wake_in(&self, now: DateTime<Utc>) -> std::time::Duration {
+        if self.watcher.retry() {
+            return std::time::Duration::from_millis(100);
+        }
+        let midnight = now
+            .with_timezone(&Local)
+            .date_naive()
+            .succ_opt()
+            .and_then(|day| day.and_hms_opt(0, 0, 0))
+            .and_then(|m| m.and_local_timezone(Local).earliest())
+            .map(|m| m.with_timezone(&Utc));
+        let pause_ends = self.watcher.paused_until.filter(|until| *until > now);
+        let hour = std::time::Duration::from_secs(3600);
+        [pause_ends, midnight]
+            .into_iter()
+            .flatten()
+            .min()
+            .and_then(|at| (at - now).to_std().ok())
+            .map_or(hour, |wait| {
+                wait.clamp(std::time::Duration::from_secs(1), hour)
+            })
+    }
+
     /// Samo is stopping Clips: the history is saved; the watch stops with the process.
     pub fn shutdown(&mut self) {
         self.save();
@@ -795,6 +820,35 @@ mod tests {
         assert!(msgs.iter().any(|m| matches!(m,
             HelperMsg::Health { ok: false, message } if message.contains("couldn't read"))));
         assert!(!tmp.path().join("items").exists() || tmp.path().join("history.json").is_dir());
+        Ok(())
+    }
+
+    #[test]
+    fn it_wakes_only_when_the_page_would_change() -> Result<(), String> {
+        let tmp = tempfile::tempdir().map_err(|e| e.to_string())?;
+        let now = Utc::now();
+        let mut c = open(tmp.path());
+        let idle = c.wake_in(now);
+        assert!(
+            idle >= std::time::Duration::from_secs(1)
+                && idle <= std::time::Duration::from_secs(3600)
+        );
+        c.handle(&action("pause", None), now);
+        let paused = c.wake_in(now);
+        // The pause ends within 15 minutes (or midnight comes first).
+        assert!(
+            paused <= std::time::Duration::from_secs(15 * 60) && paused <= idle,
+            "{paused:?}"
+        );
+        c.handle(&action("resume", None), now);
+        c.board_mut().copy_text("busy");
+        c.board_mut().locked = true;
+        assert!(!c.tick(now));
+        assert_eq!(
+            c.wake_in(now),
+            std::time::Duration::from_millis(100),
+            "a busy look is retried soon"
+        );
         Ok(())
     }
 
