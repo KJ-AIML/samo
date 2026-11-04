@@ -638,6 +638,7 @@ struct SamoWorkspaceApp {
     /// The store's list and detail page.
     store_ui: extensions_page::StoreUi,
     /// What installing Samo for this user or Start at sign-in last said, on Windows (Settings).
+    #[cfg(windows)]
     install_note: Option<String>,
 }
 
@@ -748,6 +749,7 @@ impl SamoWorkspaceApp {
             live_span: live::Span::TwoMin,
             live_hover: Default::default(),
             store_ui: extensions_page::StoreUi::new(cx),
+            #[cfg(windows)]
             install_note: None,
         }
     }
