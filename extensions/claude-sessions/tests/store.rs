@@ -1,4 +1,4 @@
-//! These run real hooks and helpers: `/bin/sh` and unix permission bits. Their Windows forms come with #9 (ADR-006).
+//! The store on the Mac: real hooks through `/bin/sh` and unix permission bits. The store comes to Windows with #10.
 #![cfg(unix)]
 
 //! Claude Sessions from the store (ADR-003 M3, RF1): replacing a dev build keeps it connected and keeps its data,
