@@ -26,7 +26,13 @@ pub enum CantUpdate {
     NotABundle,
     /// The folder holding `Samo.app` can't be written to (or macOS runs it from a read-only copy).
     ReadOnly(PathBuf),
+    /// On Windows, `Samo.exe` shares its folder with other files: an update replaces the whole folder, so it never
+    /// does that to one that isn't only Samo's (ADR-006, R14).
+    SharedFolder(PathBuf),
 }
+
+/// What Samo for Windows' own folder holds: its program and its version.
+const SAMO_FILES: [&str; 2] = ["Samo.exe", "release.toml"];
 
 impl fmt::Display for CantUpdate {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -49,6 +55,12 @@ impl fmt::Display for CantUpdate {
                 "Samo can't write to {}, where it is. Install it for this user first",
                 dir.display()
             ),
+            (Self::SharedFolder(dir), _) => write!(
+                f,
+                "Samo.exe is in {} with other files, and an update replaces its whole folder. Install it for \
+                 this user first",
+                dir.display()
+            ),
         }
     }
 }
@@ -69,7 +81,19 @@ pub fn can_update_on(current_exe: &Path, windows: bool) -> Result<AppBundle, Can
         if !named {
             return Err(CantUpdate::NotABundle);
         }
-        current_exe.parent().ok_or(CantUpdate::NotABundle)?
+        let folder = current_exe.parent().ok_or(CantUpdate::NotABundle)?;
+        // The update moves this whole folder to the Recycle Bin: only if it is Samo's alone.
+        let only_samo = fs::read_dir(folder).is_ok_and(|entries| {
+            entries.filter_map(Result::ok).all(|e| {
+                let name = e.file_name().to_string_lossy().into_owned();
+                SAMO_FILES.iter().any(|s| s.eq_ignore_ascii_case(&name))
+                    && e.file_type().is_ok_and(|t| t.is_file())
+            })
+        });
+        if !only_samo {
+            return Err(CantUpdate::SharedFolder(folder.to_path_buf()));
+        }
+        folder
     } else {
         let macos = current_exe.parent().ok_or(CantUpdate::NotABundle)?;
         let contents = macos.parent().ok_or(CantUpdate::NotABundle)?;
@@ -503,6 +527,25 @@ mod windows_tests {
         assert_eq!(
             can_update_on(&app.join("samo-gpui.exe"), true),
             Err(CantUpdate::NotABundle)
+        );
+        // Its release.toml beside it is still Samo's own folder.
+        fs::write(app.join("release.toml"), "version = \"0.5.0\"\n").map_err(|e| e.to_string())?;
+        assert!(can_update_on(&app.join("Samo.exe"), true).is_ok());
+        Ok(())
+    }
+
+    #[test]
+    fn samo_exe_in_a_shared_folder_cant_update_itself() -> Result<(), String> {
+        // An update replaces Samo's whole folder: Samo.exe left in Downloads must never send Downloads to the
+        // Recycle Bin.
+        let dir = tempfile::tempdir().map_err(|e| e.to_string())?;
+        let downloads = dir.path().join("Downloads");
+        fs::create_dir_all(downloads.join("photos")).map_err(|e| e.to_string())?;
+        fs::write(downloads.join("Samo.exe"), b"MZ").map_err(|e| e.to_string())?;
+        fs::write(downloads.join("report.pdf"), b"%PDF").map_err(|e| e.to_string())?;
+        assert_eq!(
+            can_update_on(&downloads.join("Samo.exe"), true),
+            Err(CantUpdate::SharedFolder(downloads.clone()))
         );
         Ok(())
     }
