@@ -88,7 +88,7 @@ pub fn keygen() -> Result<(), String> {
     Ok(())
 }
 
-fn field(text: &str, key: &str) -> Option<String> {
+pub(crate) fn field(text: &str, key: &str) -> Option<String> {
     text.lines().find_map(|l| {
         let (k, v) = l.split_once('=')?;
         (k.trim() == key).then(|| v.trim().trim_matches('"').to_string())
