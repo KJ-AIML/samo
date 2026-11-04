@@ -15,6 +15,13 @@ pub trait WindowOwners: Send + Sync {
 pub struct SystemWindows;
 
 impl SystemWindows {
+    /// Off the Mac it can't be told yet (Windows' window check comes with #9, ADR-006 R28).
+    #[cfg(not(target_os = "macos"))]
+    fn owners() -> Option<HashMap<u32, usize>> {
+        None
+    }
+
+    #[cfg(target_os = "macos")]
     fn owners() -> Option<HashMap<u32, usize>> {
         use objc2::runtime::AnyObject;
         use objc2_core_graphics::{
@@ -69,7 +76,7 @@ impl fmt::Debug for WindowCheck {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "macos"))]
 mod tests {
     use super::*;
 

@@ -7,6 +7,7 @@ use samo_domain::store::{Listing, manifest_matches};
 use samo_ext_protocol::Manifest;
 use std::fs;
 use std::io::{self, Read};
+#[cfg(unix)]
 use std::os::unix::fs::{MetadataExt, PermissionsExt, symlink};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -125,7 +126,7 @@ fn walk(
                 EntryKind::Symlink
             } else if meta.is_dir() {
                 EntryKind::Dir
-            } else if meta.is_file() && meta.nlink() > 1 {
+            } else if meta.is_file() && more_than_one_link(&meta) {
                 EntryKind::Hardlink
             } else if meta.is_file() {
                 EntryKind::File
@@ -210,13 +211,49 @@ fn replace_dir(staging: &Path, target: &Path) -> Result<(), InstallError> {
     fs::rename(staging, target).map_err(|e| InstallError::io("couldn't put the copy in place", e))
 }
 
+/// A file with more than one name (a hard link), which a package may not hold. Off unix Samo can't tell yet, so it
+/// says yes and the dev install is refused (extensions come to Windows with #9, ADR-006 R28).
+#[cfg(unix)]
+fn more_than_one_link(meta: &fs::Metadata) -> bool {
+    meta.nlink() > 1
+}
+
+#[cfg(not(unix))]
+fn more_than_one_link(_meta: &fs::Metadata) -> bool {
+    true
+}
+
+/// A helper is executable (0755) or not (0644). Windows has no such bit.
+#[cfg(unix)]
+fn set_mode(path: &Path, mode: u32) -> io::Result<()> {
+    fs::set_permissions(path, fs::Permissions::from_mode(mode))
+}
+
+#[cfg(not(unix))]
+fn set_mode(_path: &Path, _mode: u32) -> io::Result<()> {
+    Ok(())
+}
+
+#[cfg(unix)]
+fn link_current(version: &str, tmp: &Path) -> Result<(), InstallError> {
+    symlink(version, tmp).map_err(|e| InstallError::io("couldn't link the current version", e))
+}
+
+/// `current` is a link, which Windows allows only in Developer Mode; its Windows form comes with #9.
+#[cfg(not(unix))]
+fn link_current(_version: &str, _tmp: &Path) -> Result<(), InstallError> {
+    Err(InstallError::Io(
+        "extensions come to Samo on Windows later (#9)".into(),
+    ))
+}
+
 /// Points `current` at `version` with a relative link, replacing the old link in one rename so `current` is
 /// never missing.
 pub(crate) fn point_current(root: &ExtRoot, id: &str, version: &str) -> Result<(), InstallError> {
     let current = root.current(id);
     let tmp = root.ext_dir(id).join(".current-tmp");
     let _ = fs::remove_file(&tmp);
-    symlink(version, &tmp).map_err(|e| InstallError::io("couldn't link the current version", e))?;
+    link_current(version, &tmp)?;
     fs::rename(&tmp, &current).map_err(|e| InstallError::io("couldn't link the current version", e))
 }
 
@@ -486,7 +523,7 @@ pub(crate) fn unpack(package: &[u8], id: &str, dest: &Path) -> Result<(), Instal
                     return Err(InstallError::Io("the package ends early".into()));
                 }
                 let mode = if h.mode & 0o111 != 0 { 0o755 } else { 0o644 };
-                fs::set_permissions(&to, fs::Permissions::from_mode(mode)).map_err(write_err)?;
+                set_mode(&to, mode).map_err(write_err)?;
                 skip(&mut reader, padding(h.size))?;
             }
             // Refused by `validate_entries` above.
@@ -499,7 +536,7 @@ pub(crate) fn unpack(package: &[u8], id: &str, dest: &Path) -> Result<(), Instal
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;

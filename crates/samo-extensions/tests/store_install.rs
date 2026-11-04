@@ -1,3 +1,6 @@
+//! These run real helpers: `#!/bin/sh` stand-ins, Swift or codesign. Their Windows forms come with #9 (ADR-006).
+#![cfg(unix)]
+
 //! Installing, updating and uninstalling from a store on this Mac (ADR-003 M3), with a shell-script stand-in for
 //! Hello's helper. Everything happens in a temporary home folder.
 

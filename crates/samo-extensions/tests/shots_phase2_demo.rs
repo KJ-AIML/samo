@@ -1,3 +1,6 @@
+//! These run real helpers: `#!/bin/sh` stand-ins, Swift or codesign. Their Windows forms come with #9 (ADR-006).
+#![cfg(unix)]
+
 //! ADR-004 Phase 2's demo, the parts a machine can check: the real `samo-shots` 0.2.0, installed from a store signed
 //! with a test key, under Samo's real host. Drawing in the editor is driven headless by Shots' own tests
 //! (`EditorWindowTests`); the rest needs a person (M8–M13).

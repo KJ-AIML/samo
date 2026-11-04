@@ -33,3 +33,7 @@ pub use samo_domain::extensions::Source;
 pub use samo_ext_protocol::PopupKind;
 pub use state::{ExtSlot, ExtSnapshot, ExtView, PendingPopup, Status};
 pub use supervisor::MAX_ROWS;
+
+/// Whether extensions and the store run on this OS. On Windows they come with #9 and #10, and Samo says so rather
+/// than starting a host that can't run them (ADR-006 R28).
+pub const RUNS_ON_THIS_OS: bool = cfg!(target_os = "macos");

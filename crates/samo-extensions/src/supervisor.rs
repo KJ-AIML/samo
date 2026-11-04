@@ -14,7 +14,6 @@ use samo_ext_protocol::{
 };
 use std::env;
 use std::io::{BufReader, Read, Write};
-use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
@@ -62,6 +61,22 @@ enum Outcome {
     OverLimit(String),
     /// It ended by itself; it may be restarted.
     Crashed(String),
+}
+
+/// A helper runs in a process group of its own, apart from Samo's.
+#[cfg(unix)]
+fn own_process_group(command: &mut Command) {
+    use std::os::unix::process::CommandExt;
+    command.process_group(0);
+}
+
+/// On Windows: a new process group, and no console window flashing up (ADR-006).
+#[cfg(windows)]
+fn own_process_group(command: &mut Command) {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    command.creation_flags(CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW);
 }
 
 fn now_ms() -> i64 {
@@ -293,10 +308,11 @@ fn run_once(
     family: &mut Vec<Member>,
 ) -> Outcome {
     let config = &job.inner.config;
-    let mut child = match Command::new(&job.helper)
-        .arg("serve")
-        // Its own process group, apart from Samo's.
-        .process_group(0)
+    let mut command = Command::new(&job.helper);
+    command.arg("serve");
+    // Its own process group, apart from Samo's.
+    own_process_group(&mut command);
+    let mut child = match command
         .env_clear()
         .envs(helper_env(&job.data_dir, config))
         .current_dir(&job.data_dir)
