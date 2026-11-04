@@ -5,6 +5,15 @@ use crate::history::{Added, Capture, History, INLINE_TEXT, Item};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+/// Why the saved history wasn't loaded.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Unloaded {
+    /// It was damaged, and is kept beside, by this name.
+    Damaged(String),
+    /// It couldn't be read, for this reason.
+    Unreadable(String),
+}
+
 pub struct Store {
     dir: PathBuf,
 }
@@ -24,12 +33,27 @@ impl Store {
         self.dir.join("history.json")
     }
 
-    /// The saved history; a missing or damaged file is an empty one.
-    pub fn load(&self) -> History {
-        fs::read(self.file())
-            .ok()
-            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-            .unwrap_or_default()
+    /// The saved history; none yet is an empty one. A damaged file is set aside (renamed, never deleted) and said;
+    /// one that can't be read (another program has it open) is said, so it is never taken for empty and saved over.
+    pub fn load(&self) -> Result<History, Unloaded> {
+        let bytes = match fs::read(self.file()) {
+            Ok(bytes) => bytes,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(History::default()),
+            Err(e) => return Err(Unloaded::Unreadable(e.to_string())),
+        };
+        if let Ok(history) = serde_json::from_slice(&bytes) {
+            return Ok(history);
+        }
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs());
+        let aside = format!("history.damaged-{stamp}.json");
+        fs::rename(self.file(), self.dir.join(&aside)).map_err(|e| {
+            Unloaded::Unreadable(format!(
+                "its history is damaged and couldn't be set aside: {e}"
+            ))
+        })?;
+        Err(Unloaded::Damaged(aside))
     }
 
     /// Writes `bytes` to `to` through a temporary file beside it, so a crash never leaves half a file.
@@ -158,7 +182,7 @@ mod tests {
             store.keep(&c, &added, &mut h)?;
         }
         store.save(&h)?;
-        let back = store.load();
+        let back = store.load().map_err(|e| format!("{e:?}"))?;
         assert_eq!(back, h);
         let long = back
             .items()
@@ -187,12 +211,35 @@ mod tests {
     }
 
     #[test]
-    fn a_missing_or_damaged_history_is_empty() -> Result<(), String> {
+    fn a_missing_history_is_empty() -> Result<(), String> {
         let dir = tempfile::tempdir().map_err(|e| e.to_string())?;
         let store = Store::new(&dir.path().join("none-yet"));
-        assert_eq!(store.load(), History::default());
+        assert_eq!(store.load(), Ok(History::default()));
+        Ok(())
+    }
+
+    #[test]
+    fn a_damaged_history_is_set_aside_not_lost() -> Result<(), String> {
+        let dir = tempfile::tempdir().map_err(|e| e.to_string())?;
         std::fs::write(dir.path().join("history.json"), b"{damaged").map_err(|e| e.to_string())?;
-        assert_eq!(Store::new(dir.path()).load(), History::default());
+        let Err(Unloaded::Damaged(aside)) = Store::new(dir.path()).load() else {
+            return Err("a damaged history wasn't set aside".into());
+        };
+        assert!(!dir.path().join("history.json").exists());
+        let kept = std::fs::read(dir.path().join(&aside)).map_err(|e| e.to_string())?;
+        assert_eq!(kept, b"{damaged");
+        Ok(())
+    }
+
+    #[test]
+    fn a_history_that_cant_be_read_isnt_taken_for_empty() -> Result<(), String> {
+        let dir = tempfile::tempdir().map_err(|e| e.to_string())?;
+        // Something Clips can't read where its history is.
+        std::fs::create_dir(dir.path().join("history.json")).map_err(|e| e.to_string())?;
+        assert!(matches!(
+            Store::new(dir.path()).load(),
+            Err(Unloaded::Unreadable(_))
+        ));
         Ok(())
     }
 }

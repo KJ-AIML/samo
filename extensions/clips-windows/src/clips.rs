@@ -6,7 +6,7 @@ use crate::dib;
 use crate::history::{History, Kind};
 use crate::page::{self, PageState, ShortcutState, shortcut_choices};
 use crate::settings::Settings;
-use crate::store::Store;
+use crate::store::{Store, Unloaded};
 use crate::watcher::{Board, MAX_COPY, Put, Watcher, clip};
 use chrono::{DateTime, Local, Utc};
 use samo_ext_protocol::{HelperMsg, HostMsg, PopupKind, Widget};
@@ -30,9 +30,25 @@ pub struct Clips<B: Board> {
     problem: Option<String>,
     /// Pop-ups not yet sent.
     said: Vec<HelperMsg>,
+    /// Why the saved history couldn't be read: then nothing is saved over it.
+    unreadable: Option<String>,
     sent_view: Option<Vec<Widget>>,
     sent_badge: Option<(u32, String)>,
     sent_problem: Option<String>,
+}
+
+/// The saved history, trying again briefly when another program has the file open.
+fn load(store: &Store) -> Result<History, Unloaded> {
+    let mut tries = 0;
+    loop {
+        match store.load() {
+            Err(Unloaded::Unreadable(_)) if tries < 3 => {
+                tries += 1;
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            loaded => return loaded,
+        }
+    }
 }
 
 impl<B: Board> Clips<B> {
@@ -41,16 +57,36 @@ impl<B: Board> Clips<B> {
         let settings = fs::read_to_string(dir.join(SETTINGS))
             .map(|text| Settings::parse(&text))
             .unwrap_or_default();
+        let store = Store::new(dir);
+        let mut said = Vec::new();
+        let mut unreadable = None;
+        let history = match load(&store) {
+            Ok(history) => history,
+            Err(Unloaded::Damaged(aside)) => {
+                said.push(HelperMsg::Popup {
+                    key: "damaged".into(),
+                    kind: PopupKind::Info,
+                    title: "Clips' history was damaged, so it started a new one".into(),
+                    body: format!("The damaged one is kept in Clips' folder as {aside}."),
+                });
+                History::default()
+            }
+            Err(Unloaded::Unreadable(why)) => {
+                unreadable = Some(why);
+                History::default()
+            }
+        };
         Self {
             dir: dir.to_path_buf(),
-            store: Store::new(dir),
-            history: Store::new(dir).load(),
+            store,
+            history,
+            unreadable,
             settings,
             watcher: Watcher::new(board, front),
             shortcut: ShortcutState::NotYet,
             confirming_clear: false,
             problem: None,
-            said: Vec::new(),
+            said,
             sent_view: None,
             sent_badge: None,
             sent_problem: None,
@@ -225,6 +261,10 @@ impl<B: Board> Clips<B> {
             return false;
         };
         let added = self.history.add(&capture, now);
+        if self.unreadable.is_some() {
+            self.save();
+            return true;
+        }
         let kept = self.store.keep(&capture, &added, &mut self.history);
         for gone in &added.dropped {
             self.store.delete(gone);
@@ -235,7 +275,12 @@ impl<B: Board> Clips<B> {
     }
 
     fn save(&mut self) {
-        self.problem = self.store.save(&self.history).err();
+        self.problem = match &self.unreadable {
+            Some(why) => Some(format!(
+                "couldn't read its history ({why}), so it saves nothing until it starts again"
+            )),
+            None => self.store.save(&self.history).err(),
+        };
     }
 
     fn save_settings(&mut self) {
@@ -724,6 +769,32 @@ mod tests {
             })
         });
         assert_eq!(lamp, Some(Lamp::Error));
+        Ok(())
+    }
+
+    #[test]
+    fn a_damaged_history_is_set_aside_and_said() -> Result<(), String> {
+        let tmp = tempfile::tempdir().map_err(|e| e.to_string())?;
+        std::fs::write(tmp.path().join("history.json"), b"{damaged").map_err(|e| e.to_string())?;
+        let mut c = open(tmp.path());
+        assert!(c.history().items().is_empty());
+        let msgs = c.updates(Utc::now(), false);
+        assert!(msgs.iter().any(|m| matches!(m,
+            HelperMsg::Popup { title, .. } if title.contains("damaged"))));
+        Ok(())
+    }
+
+    #[test]
+    fn a_history_it_cant_read_is_never_saved_over() -> Result<(), String> {
+        let tmp = tempfile::tempdir().map_err(|e| e.to_string())?;
+        std::fs::create_dir(tmp.path().join("history.json")).map_err(|e| e.to_string())?;
+        let now = Utc::now();
+        let mut c = open(tmp.path());
+        assert!(copy(&mut c, "one", now));
+        let msgs = c.updates(now, false);
+        assert!(msgs.iter().any(|m| matches!(m,
+            HelperMsg::Health { ok: false, message } if message.contains("couldn't read"))));
+        assert!(!tmp.path().join("items").exists() || tmp.path().join("history.json").is_dir());
         Ok(())
     }
 
