@@ -7,6 +7,14 @@ license.workspace = true
 [lints]
 workspace = true
 
+# A stand-in helper for the host's own tests, on every OS (they find it as CARGO_BIN_EXE_samo-fake-helper).
+# Never shipped: only apps' binaries are packaged.
+[[bin]]
+name = "samo-fake-helper"
+path = "tests/support/fake_helper.rs"
+test = false
+doc = false
+
 [dependencies]
 samo-primitives.workspace = true
 samo-domain.workspace = true
@@ -25,6 +33,20 @@ objc2.workspace = true
 objc2-foundation = { workspace = true, features = ["NSArray", "NSDictionary", "NSString", "NSValue", "NSObject", "NSEnumerator"] }
 objc2-core-foundation = { version = "0.3.2", default-features = false, features = ["std", "objc2", "CFArray"] }
 objc2-core-graphics = { version = "0.3.2", default-features = false, features = ["std", "CGWindow"] }
+
+# Installing on Windows (ADR-006): `current` is a junction, which needs no Developer Mode or admin (`junction`,
+# safe API, windows-sys already in the lockfile), and a hard-linked file is told by its link count (`winapi-util`,
+# as in samo-windows).
+# A helper and everything it starts are kept in one Job Object, closed with kill-on-close, so they end together
+# and can't outlive Samo (ADR-004 R15, R17; `win32job`, a safe API over the Microsoft `windows` crate, whose 0.61 is
+# already in the lockfile).
+[target.'cfg(windows)'.dependencies]
+junction = { version = "2.1.0", default-features = false }
+winapi-util = "0.1.11"
+win32job = "2.0.3"
+# R15 on Windows: the visible top-level windows and the process owning each (`winsafe`, MIT, safe bindings with no
+# dependencies of its own; only its `user` part).
+winsafe = { version = "0.0.29", features = ["user"] }
 
 [dev-dependencies]
 samo-testkit.workspace = true

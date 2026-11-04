@@ -42,13 +42,45 @@ impl Meter {
     }
 }
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::tree;
     use std::process::{Command, Stdio};
     use std::thread;
     use std::time::{Duration, Instant};
+
+    /// A program of the system's own, by its full path: `/usr/bin/yes`, or a file in Windows' System32.
+    fn system(unix: &str, windows: &str) -> Command {
+        if cfg!(windows) {
+            let root = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into());
+            Command::new(format!(r"{root}\System32\{windows}"))
+        } else {
+            Command::new(unix)
+        }
+    }
+
+    /// Keeps one core busy.
+    fn busy() -> Command {
+        // cmd's endless `for /l` spins from its first millisecond; PowerShell can take seconds to start on a cold
+        // CI runner, which the measurement then caught instead of the loop.
+        let mut c = system("/usr/bin/yes", "cmd.exe");
+        if cfg!(windows) {
+            c.args(["/d", "/c", "for /l %i in () do rem"]);
+        }
+        c
+    }
+
+    /// Waits about 30 s, doing nothing.
+    fn idle() -> Command {
+        let mut c = system("/bin/sleep", "PING.EXE");
+        if cfg!(windows) {
+            c.args(["-n", "30", "127.0.0.1"]);
+        } else {
+            c.arg("30");
+        }
+        c
+    }
 
     /// Measures `pid` for 1.5 s while another `System` walks every process each 50 ms, as the tree check does.
     fn measure_beside_tree_checks(pid: u32) -> Option<f32> {
@@ -64,12 +96,12 @@ mod tests {
 
     #[test]
     fn cpu_is_not_inflated_by_tree_checks() -> Result<(), String> {
-        let mut busy = Command::new("/usr/bin/yes")
+        let mut busy = busy()
             .stdout(Stdio::null())
             .spawn()
             .map_err(|e| e.to_string())?;
-        let mut idle = Command::new("/bin/sleep")
-            .arg("30")
+        let mut idle = idle()
+            .stdout(Stdio::null())
             .spawn()
             .map_err(|e| e.to_string())?;
         let busy_cpu = measure_beside_tree_checks(busy.id());
@@ -78,7 +110,7 @@ mod tests {
         let _ = idle.kill();
         let _ = busy.wait();
         let _ = idle.wait();
-        // `yes` keeps one core busy: about 100%, never the 500% and more a shared `System` showed.
+        // One core busy: about 100%, never the 500% and more a shared `System` showed.
         let busy_cpu = busy_cpu.ok_or("lost the busy process")?;
         assert!((30.0..=150.0).contains(&busy_cpu), "busy: {busy_cpu}%");
         let idle_cpu = idle_cpu.ok_or("lost the idle process")?;
@@ -88,10 +120,9 @@ mod tests {
 
     #[test]
     fn gone_process_is_none() -> Result<(), String> {
-        let mut child = Command::new("/usr/bin/true")
-            .spawn()
-            .map_err(|e| e.to_string())?;
+        let mut child = idle().spawn().map_err(|e| e.to_string())?;
         let pid = child.id();
+        let _ = child.kill();
         let _ = child.wait();
         assert_eq!(Meter::start(pid).check(), None);
         Ok(())

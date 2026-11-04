@@ -2,11 +2,11 @@
 //! a crash (backing off), and stops it cleanly.
 
 use crate::History;
+use crate::family::Family;
 use crate::host::{HostConfig, Inner};
 use crate::limits::{HelperLog, Line, MAX_LINE, read_line_capped};
 use crate::meter::Meter;
 use crate::state::{ExtSlot, PendingPopup, Status};
-use crate::tree::{self, Member};
 use samo_domain::extensions::{Backoff, RateGate, Restart};
 use samo_ext_protocol::{
     BadgeMeter, HelperMsg, HostMsg, NoteKind, PROTOCOL_VERSION, Widget, decode_helper_line, encode,
@@ -87,21 +87,54 @@ fn now_ms() -> i64 {
 
 /// The only environment a helper gets.
 fn helper_env(data_dir: &Path, config: &HostConfig) -> Vec<(&'static str, String)> {
-    let var = |name: &str, fallback: &str| {
-        env::var(name)
-            .ok()
-            .filter(|v| !v.is_empty())
-            .unwrap_or_else(|| fallback.to_string())
-    };
-    let home = config
-        .home
-        .as_ref()
-        .map_or_else(|| var("HOME", "/"), |h| h.to_string_lossy().into_owned());
+    helper_env_on(cfg!(windows), data_dir, config.home.as_deref(), |name| {
+        env::var(name).ok()
+    })
+}
+
+/// What Windows' own programs and libraries need to run: its folders, its shell, where a user's settings and
+/// temporary files go. A helper gets these and nothing else of Samo's environment (ADR-006).
+const WINDOWS_ENV: [&str; 10] = [
+    "PATH",
+    "SystemRoot",
+    "SystemDrive",
+    "windir",
+    "ComSpec",
+    "PATHEXT",
+    "TEMP",
+    "TMP",
+    "APPDATA",
+    "LOCALAPPDATA",
+];
+
+/// `helper_env` for the given OS, reading Samo's environment through `get` (ADR-006 R25). `home` replaces the
+/// user's home folder (`HOME`, or `USERPROFILE` on Windows).
+fn helper_env_on(
+    windows: bool,
+    data_dir: &Path,
+    home: Option<&Path>,
+    get: impl Fn(&str) -> Option<String>,
+) -> Vec<(&'static str, String)> {
+    let set = |name: &str| get(name).filter(|v| !v.is_empty());
+    let data = ("SAMO_EXT_DATA_DIR", data_dir.to_string_lossy().into_owned());
+    let given_home = home.map(|h| h.to_string_lossy().into_owned());
+    if windows {
+        let mut env: Vec<(&'static str, String)> = WINDOWS_ENV
+            .iter()
+            .filter_map(|name| set(name).map(|v| (*name, v)))
+            .collect();
+        if let Some(home) = given_home.or_else(|| set("USERPROFILE")) {
+            env.push(("USERPROFILE", home));
+        }
+        env.push(data);
+        return env;
+    }
+    let var = |name: &str, fallback: &str| set(name).unwrap_or_else(|| fallback.to_string());
     vec![
-        ("HOME", home),
+        ("HOME", given_home.unwrap_or_else(|| var("HOME", "/"))),
         ("PATH", var("PATH", "/usr/bin:/bin:/usr/sbin:/sbin")),
         ("LANG", var("LANG", "en_US.UTF-8")),
-        ("SAMO_EXT_DATA_DIR", data_dir.to_string_lossy().into_owned()),
+        data,
     ]
 }
 
@@ -174,10 +207,10 @@ pub(crate) fn run(job: Job, rx: Receiver<Event>) {
     let mut generation = 0u64;
     loop {
         generation += 1;
-        let mut family = Vec::new();
+        let mut family = Family::default();
         let outcome = run_once(&job, &rx, &log, generation, &mut family);
         // Whatever it started and left running goes with it (R15, R17).
-        tree::kill(&mut System::new(), &family);
+        family.end(&mut System::new());
         // A helper that has gone isn't capturing: Samo shows its windows again.
         job.inner.update(job.slot, |rt| rt.capturing = false);
         match outcome {
@@ -305,7 +338,7 @@ fn run_once(
     rx: &Receiver<Event>,
     log: &HelperLog,
     generation: u64,
-    family: &mut Vec<Member>,
+    family: &mut Family,
 ) -> Outcome {
     let config = &job.inner.config;
     let mut command = Command::new(&job.helper);
@@ -325,6 +358,13 @@ fn run_once(
         Err(e) => return Outcome::Crashed(format!("it couldn't be started: {e}")),
     };
     let pid = child.id();
+    // At once, before it can start anything: on Windows its children are then born into its job.
+    let mut sys = System::new();
+    if let Err(e) = family.adopt(&child, &mut sys) {
+        log.note(&format!(
+            "couldn't keep its processes in one job ({e}); they are found by parent"
+        ));
+    }
 
     // stdout → events, one bounded line at a time.
     if let Some(stdout) = child.stdout.take() {
@@ -396,11 +436,9 @@ fn run_once(
         popups: RateGate::popups(),
         unhealthy: None,
     };
-    let mut sys = System::new();
     let mut meter = Meter::start(pid);
     let mut cpu: Vec<f32> = Vec::new();
     let mut next_check = Instant::now() + config.resource_every;
-    *family = tree::tree(&mut sys, pid);
     let mut next_family = Instant::now() + config.window_every;
 
     loop {
@@ -431,7 +469,7 @@ fn run_once(
                             job.inner.update(job.slot, |rt| rt.status = Status::Running);
                         }
                         HelperMsg::Hello { protocol } => {
-                            tree::refresh(&mut sys, pid, family);
+                            family.refresh(&mut sys);
                             stop_child(&mut child, to_helper, config.grace);
                             return Outcome::Halt(format!(
                                 "It speaks protocol {protocol}; this Samo speaks {PROTOCOL_VERSION}"
@@ -465,7 +503,7 @@ fn run_once(
             // From an earlier run of the helper.
             Ok(Event::Line(..)) => {}
             Ok(Event::Eof(g)) if g == generation => {
-                tree::refresh(&mut sys, pid, family);
+                family.refresh(&mut sys);
                 return ended(&mut child, run.unhealthy, said_hello, config.grace);
             }
             Ok(Event::Eof(_)) => {}
@@ -473,7 +511,7 @@ fn run_once(
                 let _ = to_helper.send(msg);
             }
             Ok(Event::Stop) | Err(RecvTimeoutError::Disconnected) => {
-                tree::refresh(&mut sys, pid, family);
+                family.refresh(&mut sys);
                 stop_child(&mut child, to_helper, config.grace);
                 return Outcome::Stopped;
             }
@@ -482,7 +520,7 @@ fn run_once(
 
         // Every pass, however it was woken.
         if !said_hello && started.elapsed() > config.hello_timeout {
-            tree::refresh(&mut sys, pid, family);
+            family.refresh(&mut sys);
             stop_child(&mut child, to_helper, Duration::ZERO);
             return Outcome::Halt(format!(
                 "It didn't say hello within {}s",
@@ -512,16 +550,16 @@ fn run_once(
         }
         if let Ok(Some(_)) = child.try_wait() {
             // It exited, but something else still holds its stdout open.
-            tree::refresh(&mut sys, pid, family);
+            family.refresh(&mut sys);
             return ended(&mut child, run.unhealthy, said_hello, config.grace);
         }
         if Instant::now() >= next_family {
             next_family = Instant::now() + config.window_every;
-            *family = tree::tree(&mut sys, pid);
+            family.walk(&mut sys);
             if !job.declares_windows {
-                let pids: Vec<u32> = family.iter().map(|m| m.pid).collect();
+                let pids = family.pids();
                 if config.windows.0.count(&pids).is_some_and(|n| n > 0) {
-                    tree::refresh(&mut sys, pid, family);
+                    family.refresh(&mut sys);
                     stop_child(&mut child, to_helper, Duration::ZERO);
                     return Outcome::Halt("Opened windows it didn't declare".into());
                 }
@@ -531,7 +569,7 @@ fn run_once(
             next_check = Instant::now() + config.resource_every;
             if let Some((rss, used)) = meter.check() {
                 if rss > job.rss_limit {
-                    tree::refresh(&mut sys, pid, family);
+                    family.refresh(&mut sys);
                     stop_child(&mut child, to_helper, Duration::ZERO);
                     return Outcome::OverLimit(format!(
                         "used {} MB of memory (the limit is {} MB)",
@@ -546,7 +584,7 @@ fn run_once(
                 let samples = cpu.len().max(1) as f32;
                 let average = cpu.iter().sum::<f32>() / samples;
                 if cpu.len() >= config.cpu_samples && average > job.cpu_limit {
-                    tree::refresh(&mut sys, pid, family);
+                    family.refresh(&mut sys);
                     stop_child(&mut child, to_helper, Duration::ZERO);
                     return Outcome::OverLimit(format!(
                         "used {average:.0}% of a CPU core for a minute (the limit is {:.0}%)",
@@ -699,5 +737,55 @@ impl Run<'_> {
                 });
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn keys(env: &[(&'static str, String)]) -> Vec<&'static str> {
+        let mut keys: Vec<&'static str> = env.iter().map(|(k, _)| *k).collect();
+        keys.sort_unstable();
+        keys
+    }
+
+    fn value<'a>(env: &'a [(&'static str, String)], key: &str) -> Option<&'a str> {
+        env.iter().find(|(k, _)| *k == key).map(|(_, v)| v.as_str())
+    }
+
+    #[test]
+    fn helper_env_follows_the_os() {
+        let samo = |name: &str| match name {
+            "HOME" => Some("/Users/a".to_string()),
+            "PATH" => Some("C:/Windows/system32;C:/Windows".to_string()),
+            "SystemRoot" => Some("C:/Windows".to_string()),
+            "USERPROFILE" => Some("C:/Users/a".to_string()),
+            "LOCALAPPDATA" => Some("C:/Users/a/AppData/Local".to_string()),
+            "SECRET" => Some("hunter2".to_string()),
+            _ => None,
+        };
+        let data = Path::new("/data");
+
+        let mac = helper_env_on(false, data, None, samo);
+        assert_eq!(keys(&mac), ["HOME", "LANG", "PATH", "SAMO_EXT_DATA_DIR"]);
+        assert_eq!(value(&mac, "HOME"), Some("/Users/a"));
+
+        let home = Path::new("C:/tmp/home");
+        let windows = helper_env_on(true, data, Some(home), samo);
+        // Only what Samo itself has: a variable it lacks (APPDATA here) is left out, never invented.
+        assert_eq!(
+            keys(&windows),
+            [
+                "LOCALAPPDATA",
+                "PATH",
+                "SAMO_EXT_DATA_DIR",
+                "SystemRoot",
+                "USERPROFILE"
+            ]
+        );
+        assert_eq!(value(&windows, "USERPROFILE"), Some("C:/tmp/home"));
+        assert_eq!(value(&windows, "SAMO_EXT_DATA_DIR"), Some("/data"));
+        assert!(value(&windows, "SECRET").is_none() && value(&mac, "SECRET").is_none());
     }
 }

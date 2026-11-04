@@ -5,6 +5,7 @@
 //! extension has `<id>/<version>/`, a `current` link to the version in use, and its own `data/`.
 
 mod error;
+mod family;
 mod history;
 mod host;
 mod install;
@@ -34,6 +35,6 @@ pub use samo_ext_protocol::PopupKind;
 pub use state::{ExtSlot, ExtSnapshot, ExtView, PendingPopup, Status};
 pub use supervisor::MAX_ROWS;
 
-/// Whether extensions and the store run on this OS. On Windows they come with #9 and #10, and Samo says so rather
-/// than starting a host that can't run them (ADR-006 R28).
-pub const RUNS_ON_THIS_OS: bool = cfg!(target_os = "macos");
+/// Whether the store (and Samo's updates through it) runs on this OS. Extensions run on the Mac and Windows; on
+/// Windows the store comes with #10, and until then Samo says so and fetches nothing (ADR-006 R28).
+pub const STORE_ON_THIS_OS: bool = cfg!(target_os = "macos");

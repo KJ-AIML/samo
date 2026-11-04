@@ -1,4 +1,4 @@
-//! These run real helpers: `#!/bin/sh` stand-ins, Swift or codesign. Their Windows forms come with #9 (ADR-006).
+//! The store on the Mac: packages made with macOS tar, exec bits. The store comes to Windows with #10 (ADR-006).
 #![cfg(unix)]
 
 //! Installing, updating and uninstalling from a store on this Mac (ADR-003 M3), with a shell-script stand-in for
@@ -30,13 +30,8 @@ fn io<E: std::fmt::Display>(e: E) -> String {
 /// Says hello and waits; `off` and `uninstall` leave a mark in the (temporary) home folder.
 fn helper_script(version: &str) -> String {
     format!(
-        r#"case "$1" in
-  off) touch "$HOME/off-ran"; exit 0;;
-  uninstall) touch "$HOME/uninstall-ran"; exit 0;;
-esac
-touch "$SAMO_EXT_DATA_DIR/ran-{version}"
-echo '{{"type":"hello","protocol":1}}'
-while read -r line; do case "$line" in *shutdown*) exit 0;; esac; done"#
+        "@off\nwrite $HOME/off-ran x\n@uninstall\nwrite $HOME/uninstall-ran x\n\
+         @serve\nwrite $DATA/ran-{version} x\nhello\nwait-shutdown"
     )
 }
 
@@ -54,7 +49,13 @@ fn layout(dir: &Path, manifest: &str, script: &str) -> Fallible<Manifest> {
     let _ = fs::remove_dir_all(&ext);
     fs::create_dir_all(&ext).map_err(io)?;
     fs::write(ext.join("extension.toml"), manifest).map_err(io)?;
-    samo_testkit::fake_helper(&ext.join("bin"), "helper", script).map_err(io)?;
+    samo_testkit::fake_helper(
+        Path::new(env!("CARGO_BIN_EXE_samo-fake-helper")),
+        &ext.join("bin"),
+        "helper",
+        script,
+    )
+    .map_err(io)?;
     Manifest::parse(manifest).map_err(io)
 }
 

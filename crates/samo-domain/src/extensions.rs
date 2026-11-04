@@ -115,13 +115,28 @@ fn trim_slashes(path: &str) -> &str {
 /// R5: unsigned code runs only while `SAMO_EXT_DEV_DIR` points at its source (its folder, or the folder holding
 /// it), never just because it was installed once.
 pub fn may_run(source: &Source, dev_dir_env: Option<&str>) -> bool {
+    may_run_on(source, dev_dir_env, cfg!(windows))
+}
+
+/// `may_run` for the given OS (ADR-006 R25). On Windows both paths are compared in the one shape (`C:/…`,
+/// R26), so `\` separates folders there; on the Mac it is part of a name.
+pub fn may_run_on(source: &Source, dev_dir_env: Option<&str>, windows: bool) -> bool {
     match source {
         Source::Catalog => true,
         Source::Dev { path } => {
-            let Some(dev_dir) = dev_dir_env.map(trim_slashes) else {
+            let shape = |p: &str| {
+                if windows {
+                    crate::normalize_path(p)
+                } else {
+                    p.to_string()
+                }
+            };
+            let Some(dev_dir) = dev_dir_env.map(shape) else {
                 return false;
             };
-            let path = trim_slashes(path);
+            let dev_dir = trim_slashes(&dev_dir);
+            let path = shape(path);
+            let path = trim_slashes(&path);
             path == dev_dir
                 || path
                     .rsplit_once('/')
@@ -376,6 +391,24 @@ mod tests {
         ));
         assert!(!may_run(&dev, Some("/")));
         assert!(!may_run(&dev, Some("")));
+    }
+
+    #[test]
+    fn dev_extension_runs_only_with_matching_env_on_windows() {
+        let dev = Source::Dev {
+            path: r"D:\KJ\samo\target\ext-dev\hello".into(),
+        };
+        let windows = |env: Option<&str>| may_run_on(&dev, env, true);
+        assert!(windows(Some(r"D:\KJ\samo\target\ext-dev")));
+        assert!(windows(Some(r"D:\KJ\samo\target\ext-dev\")));
+        assert!(windows(Some(r"d:\KJ\samo\target\ext-dev\hello")));
+        assert!(windows(Some("D:/KJ/samo/target/ext-dev")));
+        assert!(!windows(Some(r"D:\KJ\samo\target")));
+        assert!(!windows(Some(r"D:\KJ\samo\target\ext-dev\hello-2")));
+        assert!(!windows(Some(r"E:\KJ\samo\target\ext-dev")));
+        assert!(!windows(None));
+        // On the Mac a backslash is part of a name, never a separator (ADR-006 R25).
+        assert!(!may_run_on(&dev, Some(r"D:\KJ\samo\target\ext-dev"), false));
     }
 
     #[test]

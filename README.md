@@ -190,8 +190,15 @@ for a new copy twice a second and does nothing else while idle.
 Build it into a folder and point Samo at it; it shows as *dev*, and never replaces a store install:
 
 ```sh
-scripts/ext-dev.sh extensions/claude-sessions     # build it and lay it out in target/ext-dev/
+cargo run -p xtask -- ext-dev extensions/claude-sessions   # build it and lay it out in target/ext-dev/
 SAMO_EXT_DEV_DIR="$PWD/target/ext-dev" cargo run --release -p samo-gpui
+```
+
+On Windows (PowerShell) the same command lays it out, with the helper as `.exe`:
+
+```powershell
+cargo run -p xtask -- ext-dev extensions/claude-sessions
+$env:SAMO_EXT_DEV_DIR = "$PWD\target\ext-dev"; cargo run --release -p samo-gpui
 ```
 
 `extensions/hello` is a small example extension that uses every part a page can have.

@@ -206,10 +206,6 @@ fn snapshot(hub: &Hub, layout: Layout) -> Option<Frame> {
 
 /// Starts installed extensions' helpers (ADR-002). Without a home folder there is nowhere to keep them.
 fn start_extensions(hub: &Hub) {
-    // Not on Windows yet (#9, #10): the pages say so rather than a host that can't run anything (ADR-006 R28).
-    if !samo_extensions::RUNS_ON_THIS_OS {
-        return;
-    }
     let Some(root) = samo_extensions::ExtRoot::resolve() else {
         return;
     };
@@ -219,7 +215,10 @@ fn start_extensions(hub: &Hub) {
         samo_extensions::HostConfig::new(env!("CARGO_PKG_VERSION")),
         Arc::new(move || waker.wake_ui()),
     );
-    if let Some(store) = samo_extensions::store::Store::from_env() {
+    // On Windows the store comes with #10: nothing is fetched until then (ADR-006 R28).
+    if samo_extensions::STORE_ON_THIS_OS
+        && let Some(store) = samo_extensions::store::Store::from_env()
+    {
         let waker = hub.clone();
         let _ = hub
             .store

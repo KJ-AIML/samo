@@ -3,11 +3,7 @@ pub mod store;
 
 use samo_primitives::{ErrorCode, SamoError, SamoResult};
 use samo_store::StorePool;
-#[cfg(unix)]
 use std::fs;
-#[cfg(unix)]
-use std::os::unix::fs::PermissionsExt;
-#[cfg(unix)]
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 
@@ -26,15 +22,15 @@ impl TestDb {
     }
 }
 
-/// Writes `script` as an executable `/bin/sh` program named `name` in `dir`: a stand-in for an extension's
-/// helper in tests (it can say hello, flood, crash or hang on demand). A `/bin/sh` script runs only on unix; the
-/// Windows stand-in comes with extensions on Windows (#9).
-#[cfg(unix)]
-pub fn fake_helper(dir: &Path, name: &str, script: &str) -> SamoResult<PathBuf> {
+/// Lays out a stand-in for an extension's helper in `dir`, on every OS: a fresh copy of `exe` (the
+/// `samo-fake-helper` program, `env!("CARGO_BIN_EXE_samo-fake-helper")` in samo-extensions' tests) named `name`
+/// (`name.exe` on Windows), and `script` beside it as `name.script`, which it follows: it can say hello, flood,
+/// crash, hang or spawn children on demand. A copy, not a hard link, which a package may not hold (R5).
+pub fn fake_helper(exe: &Path, dir: &Path, name: &str, script: &str) -> SamoResult<PathBuf> {
     let io = |e: std::io::Error| SamoError::new(ErrorCode::InternalError, e.to_string());
     fs::create_dir_all(dir).map_err(io)?;
-    let path = dir.join(name);
-    fs::write(&path, format!("#!/bin/sh\n{script}\n")).map_err(io)?;
-    fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).map_err(io)?;
+    let path = dir.join(format!("{name}{}", std::env::consts::EXE_SUFFIX));
+    fs::copy(exe, &path).map_err(io)?;
+    fs::write(dir.join(format!("{name}.script")), script).map_err(io)?;
     Ok(path)
 }

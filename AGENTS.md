@@ -44,3 +44,9 @@ Every crate obeys strict layering (`cargo run -p xtask -- verify`):
     - What each OS calls things lives in `words.rs`, and where things are lives in `places.rs`. Keep the Mac's strings byte-identical.
     - Roots go through `places::scan_root`, so a scan matches its root.
     - Shortcuts are `secondary-…` (⌘ on the Mac, Ctrl on Windows).
+  - **Extensions on Windows (#9).**
+    - A helper is `<helper>.exe` (`helper_file_on`) in `%LOCALAPPDATA%\Samo\Extensions`, and `current` is a junction.
+    - Its family is its Job Object (`family.rs`); the parent walk is only the fallback without a job, and the Mac's
+      walk is unchanged. R15 counts visible top-level windows (`winsafe`).
+    - The host's tests use the `samo-fake-helper` stand-in on both OSes; never a `#!/bin/sh` script.
+    - The store and updates stay off until #10 (`STORE_ON_THIS_OS`), and say so.

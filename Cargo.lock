@@ -2699,6 +2699,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "junction"
+version = "2.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cde48f36530cbd91b65f050101e6c056d6eb743cea2a8f0f19beef69c6742ff8"
+dependencies = [
+ "scopeguard",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "keyboard-types"
 version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4489,6 +4499,7 @@ version = "0.4.1"
 dependencies = [
  "chrono",
  "flate2",
+ "junction",
  "objc2",
  "objc2-core-foundation",
  "objc2-core-graphics",
@@ -4503,6 +4514,9 @@ dependencies = [
  "tempfile",
  "toml 0.8.23",
  "ureq",
+ "win32job",
+ "winapi-util",
+ "winsafe 0.0.29",
 ]
 
 [[package]]
@@ -6363,7 +6377,7 @@ dependencies = [
  "either",
  "home",
  "rustix 0.38.44",
- "winsafe",
+ "winsafe 0.0.19",
 ]
 
 [[package]]
@@ -6374,6 +6388,16 @@ checksum = "5d4a4db5077702ca3015d3d02d74974948aba2ad9e12ab7df718ee64ccd7e97d"
 dependencies = [
  "libredox",
  "wasite",
+]
+
+[[package]]
+name = "win32job"
+version = "2.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8c6a6724ccfbf34154a8691bd868b0fcd2be2ca3f7b47b32614654f1a01b191c"
+dependencies = [
+ "thiserror 1.0.69",
+ "windows 0.61.3",
 ]
 
 [[package]]
@@ -6947,6 +6971,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d135d17ab770252ad95e9a872d365cf3090e3be864a34ab46f48555993efc904"
 
 [[package]]
+name = "winsafe"
+version = "0.0.29"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9ef0ffc427f045c0cc9ebffd6f4f91153dcd2a1547b5c3c29ee3f541e16e95c6"
+
+[[package]]
 name = "wio"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6993,6 +7023,7 @@ dependencies = [
  "security-framework",
  "serde",
  "serde_json",
+ "tempfile",
  "toml 0.8.23",
 ]
 

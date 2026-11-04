@@ -100,8 +100,46 @@ fn clock(ms: i64) -> String {
     }
 }
 
-/// What the store says about where its list came from, if anything.
-fn store_note(view: &StoreView) -> Option<(String, bool)> {
+/// The Extensions page's subtitle. Where the store doesn't run yet (`store_here` false: Windows, #10) it says
+/// nothing about the store (ADR-006 R28).
+fn page_sub_on(installed: usize, on: usize, store_here: bool) -> String {
+    let signed = if store_here {
+        " Every one in the store is signed."
+    } else {
+        ""
+    };
+    match installed {
+        0 => format!("Extensions add to what Samo watches.{signed}"),
+        n => format!("{n} installed, {on} on.{signed}"),
+    }
+}
+
+/// What an empty list says. Without the store there is nothing to pick, refresh or check for updates; the store
+/// note above says why (ADR-006 R28).
+fn empty_words_on(picked: Segment, query: &str, store_here: bool) -> String {
+    match (picked, query.trim().is_empty(), store_here) {
+        (_, false, _) => format!("No extensions match “{}”.", query.trim()),
+        (Segment::Updates, true, true) => "Everything installed is up to date.".to_string(),
+        (Segment::Installed, true, true) => {
+            "Nothing installed yet. Pick one from All to install it.".to_string()
+        }
+        (Segment::All, true, true) => {
+            "No extensions to show. Refresh to load the store.".to_string()
+        }
+        (Segment::Updates, true, false) => "Updates come with the store, later.".to_string(),
+        (_, true, false) => "No extensions yet.".to_string(),
+    }
+}
+
+/// What the store says about where its list came from, if anything. `store_here` is false where the store doesn't
+/// run yet (Windows, until #10): the page says so, and nothing is fetched (ADR-006 R28).
+fn store_note_on(view: &StoreView, store_here: bool) -> Option<(String, bool)> {
+    if !store_here {
+        return Some((
+            "The store comes to Samo on Windows later. Extensions you run from SAMO_EXT_DEV_DIR show here.".into(),
+            false,
+        ));
+    }
     if view.refreshing {
         return Some(("Checking the store…".into(), false));
     }
@@ -119,24 +157,6 @@ fn store_note(view: &StoreView) -> Option<(String, bool)> {
             false,
         )),
         (None, Some(_)) => None,
-    }
-}
-
-/// Where extensions don't run yet (Windows, until #9 and #10), the page says so; nothing is fetched (ADR-006 R28).
-fn extensions_come_later() -> Page {
-    Page {
-        head: Head {
-            icon: "plug",
-            title: "Extensions".to_string(),
-            sub: "Extensions come to Samo on Windows later.".to_string(),
-            crumbs: false,
-            actions: Vec::new(),
-        },
-        body: div().child(card().child(empty(
-            "Claude Sessions, Shots, Clips and the store run on the Mac today. On Windows they come in a later \
-             version of Samo, and nothing is fetched until then.",
-        ))),
-        fill: false,
     }
 }
 
@@ -230,9 +250,6 @@ impl SamoWorkspaceApp {
     }
 
     pub(crate) fn render_extensions(&mut self, frame: &Frame, cx: &mut Context<Self>) -> Page {
-        if !samo_extensions::RUNS_ON_THIS_OS {
-            return extensions_come_later();
-        }
         let all = rows(frame.store.catalog.as_deref(), &frame.ext, Here::now());
         if let Some(id) = self.store_ui.detail.clone() {
             if let Some(row) = all.iter().find(|r| r.listing.id == id) {
@@ -247,12 +264,7 @@ impl SamoWorkspaceApp {
         let pal = p();
         let installed = frame.ext.extensions.len();
         let on = frame.ext.extensions.iter().filter(|e| e.on).count();
-        let sub = match installed {
-            0 => {
-                "Extensions add to what Samo watches. Every one in the store is signed.".to_string()
-            }
-            n => format!("{n} installed, {on} on. Every one in the store is signed."),
-        };
+        let sub = page_sub_on(installed, on, samo_extensions::STORE_ON_THIS_OS);
         let query = self.store_ui.search.read(cx).text().to_string();
         let picked = self.store_ui.segment;
         let shown = visible(all, picked, &query);
@@ -262,7 +274,9 @@ impl SamoWorkspaceApp {
         for problem in &frame.ext.problems {
             content = content.child(error_line(&format!("{problem}.")));
         }
-        if let Some((words, failed)) = store_note(&frame.store) {
+        if let Some((words, failed)) =
+            store_note_on(&frame.store, samo_extensions::STORE_ON_THIS_OS)
+        {
             content = content.child(if frame.store.refreshing {
                 loading(&words)
             } else if failed {
@@ -312,16 +326,7 @@ impl SamoWorkspaceApp {
         );
 
         if shown.is_empty() {
-            let words = match (picked, query.trim().is_empty()) {
-                (_, false) => format!("No extensions match “{}”.", query.trim()),
-                (Segment::Updates, true) => "Everything installed is up to date.".to_string(),
-                (Segment::Installed, true) => {
-                    "Nothing installed yet. Pick one from All to install it.".to_string()
-                }
-                (Segment::All, true) => {
-                    "No extensions to show. Refresh to load the store.".to_string()
-                }
-            };
+            let words = empty_words_on(picked, &query, samo_extensions::STORE_ON_THIS_OS);
             content = content.child(empty(&words));
         } else {
             let mut list = card().p(px(0.0)).gap(px(0.0));
@@ -333,26 +338,31 @@ impl SamoWorkspaceApp {
             content = content.child(list);
         }
 
+        // No Refresh where the store doesn't run yet: it would do nothing (ADR-006 R28).
+        let mut actions = Vec::new();
+        if samo_extensions::STORE_ON_THIS_OS {
+            actions.push(
+                button(
+                    "store-refresh",
+                    "Refresh",
+                    Some("refresh"),
+                    Variant::Default,
+                    false,
+                )
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.store_submit(StoreJob::Refresh { force: true }, UserAction::clicked());
+                    cx.notify();
+                }))
+                .into_any_element(),
+            );
+        }
         Page {
             head: Head {
                 icon: "plug",
                 title: "Extensions".to_string(),
                 sub,
                 crumbs: false,
-                actions: vec![
-                    button(
-                        "store-refresh",
-                        "Refresh",
-                        Some("refresh"),
-                        Variant::Default,
-                        false,
-                    )
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.store_submit(StoreJob::Refresh { force: true }, UserAction::clicked());
-                        cx.notify();
-                    }))
-                    .into_any_element(),
-                ],
+                actions,
             },
             body: content,
             fill: false,
@@ -1233,18 +1243,75 @@ mod tests {
     fn the_store_says_where_its_list_came_from() {
         let mut v = StoreView::default();
         assert!(
-            store_note(&v).is_some_and(|(w, failed)| w.contains("hasn't been opened") && !failed)
+            store_note_on(&v, true)
+                .is_some_and(|(w, failed)| w.contains("hasn't been opened") && !failed)
         );
         v.fetched_at_ms = Some(chrono::Utc::now().timestamp_millis());
-        assert!(store_note(&v).is_none());
+        assert!(store_note_on(&v, true).is_none());
         v.offline = Some("offline".into());
         assert!(
-            store_note(&v).is_some_and(|(w, _)| w.starts_with("Offline: showing the store as of"))
+            store_note_on(&v, true)
+                .is_some_and(|(w, _)| w.starts_with("Offline: showing the store as of"))
         );
         v.fetched_at_ms = None;
         assert!(
-            store_note(&v)
+            store_note_on(&v, true)
                 .is_some_and(|(w, failed)| w.contains("installed extensions only") && failed)
         );
+    }
+
+    #[test]
+    fn without_the_store_nothing_is_claimed_about_it() {
+        // The Mac's words, unchanged.
+        assert_eq!(
+            page_sub_on(0, 0, true),
+            "Extensions add to what Samo watches. Every one in the store is signed."
+        );
+        assert_eq!(
+            page_sub_on(2, 1, true),
+            "2 installed, 1 on. Every one in the store is signed."
+        );
+        assert_eq!(
+            empty_words_on(Segment::Updates, "", true),
+            "Everything installed is up to date."
+        );
+        // Without a store (Windows, #10): no store to vouch for, no update check that ran (ADR-006 R28).
+        assert_eq!(
+            page_sub_on(0, 0, false),
+            "Extensions add to what Samo watches."
+        );
+        assert_eq!(page_sub_on(2, 1, false), "2 installed, 1 on.");
+        for segment in [Segment::All, Segment::Installed, Segment::Updates] {
+            let words = empty_words_on(segment, "", false);
+            assert!(
+                !words.contains("up to date") && !words.contains("Refresh"),
+                "{words}"
+            );
+        }
+        assert_eq!(
+            empty_words_on(Segment::Updates, "", false),
+            "Updates come with the store, later."
+        );
+        assert_eq!(
+            empty_words_on(Segment::All, " x ", false),
+            "No extensions match “x”."
+        );
+    }
+
+    #[test]
+    fn without_the_store_the_page_says_it_comes_later() {
+        // Whatever the store's state, where it doesn't run yet (Windows, #10) the page says so, and not as an error.
+        let mut v = StoreView::default();
+        for _ in 0..2 {
+            let note = store_note_on(&v, false);
+            assert!(
+                note.as_ref().is_some_and(|(w, failed)| w
+                    .starts_with("The store comes to Samo on Windows later")
+                    && w.contains("SAMO_EXT_DEV_DIR")
+                    && !failed),
+                "{note:?}"
+            );
+            v.offline = Some("offline".into());
+        }
     }
 }

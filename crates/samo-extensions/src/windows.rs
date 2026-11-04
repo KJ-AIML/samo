@@ -15,10 +15,27 @@ pub trait WindowOwners: Send + Sync {
 pub struct SystemWindows;
 
 impl SystemWindows {
-    /// Off the Mac it can't be told yet (Windows' window check comes with #9, ADR-006 R28).
-    #[cfg(not(target_os = "macos"))]
+    /// Neither a Mac nor Windows: it can't be told (ADR-006 R28).
+    #[cfg(not(any(target_os = "macos", windows)))]
     fn owners() -> Option<HashMap<u32, usize>> {
         None
+    }
+
+    /// On Windows: every visible top-level window, by the process that owns it (ADR-006). A hidden window is left
+    /// out: Windows gives console programs a hidden console host, and a window shown later is seen at the next
+    /// check, 2 s on.
+    #[cfg(windows)]
+    fn owners() -> Option<HashMap<u32, usize>> {
+        let mut owners = HashMap::new();
+        winsafe::EnumWindows(|hwnd: winsafe::HWND| {
+            if hwnd.IsWindowVisible() {
+                let (_, pid) = hwnd.GetWindowThreadProcessId();
+                *owners.entry(pid).or_insert(0) += 1;
+            }
+            true
+        })
+        .ok()?;
+        Some(owners)
     }
 
     #[cfg(target_os = "macos")]
@@ -76,15 +93,44 @@ impl fmt::Debug for WindowCheck {
     }
 }
 
-#[cfg(all(test, target_os = "macos"))]
+#[cfg(all(test, any(target_os = "macos", windows)))]
 mod tests {
     use super::*;
 
     #[test]
     fn the_window_server_can_be_read() {
-        // This test runs inside a login session (a Mac, or GitHub's macOS runner): the list exists, and a process
-        // that never opened a window owns none.
+        // This test runs inside a login session (a Mac or a Windows PC, or GitHub's runners): the list exists, and
+        // a process that never opened a window owns none.
         let windows = SystemWindows;
         assert_eq!(windows.count(&[std::process::id()]), Some(0));
+    }
+
+    /// Opens a real window on the desktop, so it is run by hand: `cargo test -p samo-extensions -- --ignored`.
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "opens a window on the desktop"]
+    fn a_visible_window_is_counted_for_its_owner() -> Result<(), String> {
+        use std::time::{Duration, Instant};
+        let root = std::env::var("SystemRoot").map_err(|e| e.to_string())?;
+        let mut shown = std::process::Command::new(format!(
+            r"{root}\System32\WindowsPowerShell\v1.0\powershell.exe"
+        ))
+        .args([
+            "-NoProfile",
+            "-Command",
+            "Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.MessageBox]::Show('Samo test')",
+        ])
+        .spawn()
+        .map_err(|e| e.to_string())?;
+        let deadline = Instant::now() + Duration::from_secs(15);
+        let mut seen = SystemWindows.count(&[shown.id()]);
+        while seen == Some(0) && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(100));
+            seen = SystemWindows.count(&[shown.id()]);
+        }
+        let _ = shown.kill();
+        let _ = shown.wait();
+        assert!(seen.is_some_and(|n| n >= 1), "{seen:?}");
+        Ok(())
     }
 }

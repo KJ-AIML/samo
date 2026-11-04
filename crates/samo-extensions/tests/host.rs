@@ -1,7 +1,5 @@
-//! These run real helpers: `#!/bin/sh` stand-ins, Swift or codesign. Their Windows forms come with #9 (ADR-006).
-#![cfg(unix)]
-
-//! The host against real (shell-script) helpers: R8's limits, crashes, shutdown, and turning off and on.
+//! The host against real helpers (the `samo-fake-helper` stand-in, on every OS): R8's limits, crashes, shutdown,
+//! and turning off and on.
 
 use samo_domain::extensions::BackoffConfig;
 use samo_ext_protocol::{Widget, rows_in};
@@ -13,10 +11,10 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
+use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
 
-const HELLO: &str = r#"echo '{"type":"hello","protocol":1}'"#;
-const WAIT_FOR_SHUTDOWN: &str =
-    r#"while read -r line; do case "$line" in *shutdown*) exit 0;; esac; done"#;
+const HELLO: &str = "hello";
+const WAIT_FOR_SHUTDOWN: &str = "wait-shutdown";
 const SLOT: ExtSlot = ExtSlot(0);
 
 struct Fixture {
@@ -37,7 +35,13 @@ fn fixture(script: &str) -> Result<Fixture, String> {
          where = \"nowhere\"\nundo = \"nothing\"\n",
     )
     .map_err(|e| e.to_string())?;
-    samo_testkit::fake_helper(&dev.join("bin"), "helper", script).map_err(|e| e.to_string())?;
+    samo_testkit::fake_helper(
+        Path::new(env!("CARGO_BIN_EXE_samo-fake-helper")),
+        &dev.join("bin"),
+        "helper",
+        script,
+    )
+    .map_err(|e| e.to_string())?;
     let root = ExtRoot::at(dir.path().join("Extensions"));
     Ok(Fixture {
         _dir: dir,
@@ -96,9 +100,9 @@ fn status(snap: &ExtSnapshot) -> Option<Status> {
 fn oversize_and_flood_are_dropped_not_buffered() -> Result<(), String> {
     let script = format!(
         r#"{HELLO}
-head -c 100000 /dev/zero | tr '\0' x; echo
-i=1; while [ $i -le 200 ]; do echo "{{\"type\":\"badge\",\"count\":$i,\"summary\":\"n$i\"}}"; i=$((i+1)); done
-i=1; while [ $i -le 30 ]; do echo "{{\"type\":\"popup\",\"key\":\"k$i\",\"kind\":\"info\",\"title\":\"t$i\"}}"; i=$((i+1)); done
+say-x 100000
+repeat 200 {{"type":"badge","count":{{i}},"summary":"n{{i}}"}}
+repeat 30 {{"type":"popup","key":"k{{i}}","kind":"info","title":"t{{i}}"}}
 {WAIT_FOR_SHUTDOWN}"#
     );
     let f = fixture(&script)?;
@@ -123,13 +127,15 @@ i=1; while [ $i -le 30 ]; do echo "{{\"type\":\"popup\",\"key\":\"k$i\",\"kind\"
 
 #[test]
 fn view_rows_are_capped() -> Result<(), String> {
-    let script = format!(
-        r#"{HELLO}
-printf '{{"type":"view","sections":[{{"widget":"rows","items":['
-i=1; while [ $i -lt 300 ]; do printf '{{"lamp":"done","title":"r%s"}},' $i; i=$((i+1)); done
-printf '{{"lamp":"done","title":"last"}}]}}]}}\n'
-{WAIT_FOR_SHUTDOWN}"#
+    let items: Vec<String> = (1..300)
+        .map(|i| format!(r#"{{"lamp":"done","title":"r{i}"}}"#))
+        .chain([r#"{"lamp":"done","title":"last"}"#.to_string()])
+        .collect();
+    let view = format!(
+        r#"{{"type":"view","sections":[{{"widget":"rows","items":[{}]}}]}}"#,
+        items.join(",")
     );
+    let script = format!("{HELLO}\nsay {view}\n{WAIT_FOR_SHUTDOWN}");
     let f = fixture(&script)?;
     let host = start(&f);
     let snap = wait_for(&host, 10, |s| {
@@ -157,7 +163,7 @@ fn crash_backoff_reaches_stopped() -> Result<(), String> {
 
 #[test]
 fn no_hello_in_time_is_stopped() -> Result<(), String> {
-    let f = fixture("exec sleep 30")?;
+    let f = fixture("sleep 30")?;
     let host = start(&f);
     let snap = wait_for(&host, 10, |s| matches!(status(s), Some(Status::Stopped(_))))?;
     let Some(Status::Stopped(why)) = status(&snap) else {
@@ -170,16 +176,13 @@ fn no_hello_in_time_is_stopped() -> Result<(), String> {
 
 #[test]
 fn shutdown_kills_after_grace() -> Result<(), String> {
-    let script = format!(
-        r#"echo $$ > "$SAMO_EXT_DATA_DIR/pid"
-trap '' TERM
-{HELLO}
-exec sleep 30"#
-    );
+    // It never reads stdin, so it ignores `shutdown` and must be killed.
+    let script = format!("write $DATA/pid $PID\n{HELLO}\nsleep 30");
     let f = fixture(&script)?;
     let host = start(&f);
     wait_for(&host, 10, |s| status(s) == Some(Status::Running))?;
     let pid = fs::read_to_string(f.root.data_dir("test").join("pid")).map_err(|e| e.to_string())?;
+    let pid: u32 = pid.trim().parse().map_err(|e| format!("{e}: {pid}"))?;
     let started = Instant::now();
     host.shutdown_all();
     assert!(
@@ -187,23 +190,26 @@ exec sleep 30"#
         "{:?}",
         started.elapsed()
     );
-    let alive = std::process::Command::new("/bin/kill")
-        .args(["-0", pid.trim()])
-        .stderr(std::process::Stdio::null())
-        .status()
-        .map_err(|e| e.to_string())?;
-    assert!(!alive.success(), "the helper is still running");
+    assert!(!alive(pid), "the helper is still running");
     Ok(())
+}
+
+/// Whether `pid` is a running process.
+fn alive(pid: u32) -> bool {
+    let mut sys = System::new();
+    let pid = Pid::from_u32(pid);
+    sys.refresh_processes_specifics(
+        ProcessesToUpdate::Some(&[pid]),
+        true,
+        ProcessRefreshKind::nothing(),
+    );
+    sys.process(pid).is_some()
 }
 
 #[test]
 fn helper_env_is_minimal() -> Result<(), String> {
-    let script = format!(
-        r#"env > "$SAMO_EXT_DATA_DIR/env.txt"
-pwd > "$SAMO_EXT_DATA_DIR/pwd.txt"
-{HELLO}
-{WAIT_FOR_SHUTDOWN}"#
-    );
+    let script =
+        format!("env-to $DATA/env.txt\ncwd-to $DATA/pwd.txt\n{HELLO}\n{WAIT_FOR_SHUTDOWN}");
     let f = fixture(&script)?;
     let host = start(&f);
     wait_for(&host, 10, |s| status(s) == Some(Status::Running))?;
@@ -212,15 +218,35 @@ pwd > "$SAMO_EXT_DATA_DIR/pwd.txt"
     let mut keys: Vec<&str> = env
         .lines()
         .filter_map(|l| l.split_once('=').map(|(k, _)| k))
-        // Set by the shell itself.
-        .filter(|k| !matches!(*k, "PWD" | "OLDPWD" | "SHLVL" | "_"))
         .collect();
     keys.sort_unstable();
-    assert_eq!(
-        keys,
-        vec!["HOME", "LANG", "PATH", "SAMO_EXT_DATA_DIR"],
-        "{env}"
-    );
+    if cfg!(windows) {
+        // Windows' own variables, only those Samo has itself, and nothing else of Samo's (ADR-006).
+        let allowed = [
+            "PATH",
+            "SystemRoot",
+            "SystemDrive",
+            "windir",
+            "ComSpec",
+            "PATHEXT",
+            "TEMP",
+            "TMP",
+            "APPDATA",
+            "LOCALAPPDATA",
+            "USERPROFILE",
+            "SAMO_EXT_DATA_DIR",
+        ];
+        assert!(keys.iter().all(|k| allowed.contains(k)), "{env}");
+        for needed in ["PATH", "SystemRoot", "USERPROFILE", "SAMO_EXT_DATA_DIR"] {
+            assert!(keys.contains(&needed), "no {needed}: {env}");
+        }
+    } else {
+        assert_eq!(
+            keys,
+            vec!["HOME", "LANG", "PATH", "SAMO_EXT_DATA_DIR"],
+            "{env}"
+        );
+    }
     let pwd = fs::read_to_string(data.join("pwd.txt")).map_err(|e| e.to_string())?;
     let data_real = fs::canonicalize(&data).map_err(|e| e.to_string())?;
     let pwd_real = fs::canonicalize(pwd.trim()).map_err(|e| e.to_string())?;
@@ -232,12 +258,7 @@ pwd > "$SAMO_EXT_DATA_DIR/pwd.txt"
 #[test]
 fn off_runs_helper_off_then_stops() -> Result<(), String> {
     let script = format!(
-        r#"case "$1" in
-  off) touch "$SAMO_EXT_DATA_DIR/off-ran"; exit 0;;
-  on) touch "$SAMO_EXT_DATA_DIR/on-ran"; exit 0;;
-esac
-{HELLO}
-{WAIT_FOR_SHUTDOWN}"#
+        "@off\nwrite $DATA/off-ran x\n@on\nwrite $DATA/on-ran x\n@serve\n{HELLO}\n{WAIT_FOR_SHUTDOWN}"
     );
     let f = fixture(&script)?;
     let host = start(&f);
