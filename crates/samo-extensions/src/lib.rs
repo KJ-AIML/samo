@@ -38,6 +38,6 @@ pub use supervisor::MAX_ROWS;
 /// Whether the extension store runs on this OS: the Mac and Windows (#10, ADR-006).
 pub const STORE_ON_THIS_OS: bool = cfg!(any(target_os = "macos", windows));
 
-/// Whether Samo updates itself from the store on this OS. On Windows that comes with Samo's own zip; until then
-/// Settings says so and nothing is checked (ADR-006 R28).
-pub const SAMO_UPDATES_ON_THIS_OS: bool = cfg!(target_os = "macos");
+/// Whether Samo updates itself from the store on this OS: the Mac's `Samo.app`, and on Windows an installed
+/// `Samo.exe` from its zip (#10, ADR-006).
+pub const SAMO_UPDATES_ON_THIS_OS: bool = cfg!(any(target_os = "macos", windows));

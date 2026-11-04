@@ -1,3 +1,7 @@
+// On Windows a windowed program: started from Explorer, the Start menu or at sign-in, no console window opens beside
+// Samo, and none can take it down when closed (ADR-006).
+#![cfg_attr(windows, windows_subsystem = "windows")]
+
 mod art;
 mod assets;
 mod charts;
@@ -5,9 +9,9 @@ mod components;
 mod disk_view;
 mod ext_view;
 mod extensions_page;
-#[cfg(target_os = "macos")]
 mod finish_update;
 mod hub;
+mod install;
 mod instance;
 mod keys;
 mod layout;
@@ -277,13 +281,7 @@ fn show_extension_popups(cx: &mut App) {
 #[cfg(not(target_os = "macos"))]
 fn follow_captures(_cx: &mut App) {}
 
-/// On Windows the store and updates come with #10, so no update is ever prepared.
-#[cfg(not(target_os = "macos"))]
-fn finish_samo_update(_cx: &mut App) {}
-
-/// Quits Samo, stopping extensions' helpers first (each gets 2 s to finish).
 /// Once the worker has a new Samo downloaded and checked, starts its `--finish-update` and quits (R14).
-#[cfg(target_os = "macos")]
 fn finish_samo_update(cx: &mut App) {
     let state = cx.global::<AppState>();
     if state.updating {
@@ -298,6 +296,14 @@ fn finish_samo_update(cx: &mut App) {
     let bundle = env::current_exe()
         .map_err(|e| e.to_string())
         .and_then(|exe| samo_extensions::update::can_update(&exe).map_err(|e| e.to_string()));
+    // On Windows the old Samo's folder goes to the Recycle Bin: whether it will take it is checked now, while this
+    // Samo still runs to say so, not after it quits (R14).
+    #[cfg(windows)]
+    let bundle = bundle.and_then(|b| {
+        samo_windows::can_recycle(&b.path)
+            .map(|()| b)
+            .map_err(|why| format!("Samo can't replace itself: {why}"))
+    });
     let started = bundle.and_then(|b| finish_update::launch(&prepared, &b.path));
     match started {
         Ok(()) => {
@@ -311,6 +317,7 @@ fn finish_samo_update(cx: &mut App) {
     }
 }
 
+/// Quits Samo, stopping extensions' helpers first (each gets 2 s to finish).
 fn quit(cx: &mut App) {
     if let Some(host) = cx.global::<AppState>().hub.ext.get() {
         host.shutdown_all();
@@ -630,6 +637,9 @@ struct SamoWorkspaceApp {
     live_hover: [live::ChartHover; 3],
     /// The store's list and detail page.
     store_ui: extensions_page::StoreUi,
+    /// What installing Samo for this user or Start at sign-in last said, on Windows (Settings).
+    #[cfg(windows)]
+    install_note: Option<String>,
 }
 
 fn resolve_default_root() -> String {
@@ -739,6 +749,8 @@ impl SamoWorkspaceApp {
             live_span: live::Span::TwoMin,
             live_hover: Default::default(),
             store_ui: extensions_page::StoreUi::new(cx),
+            #[cfg(windows)]
+            install_note: None,
         }
     }
 
@@ -1136,11 +1148,17 @@ impl Render for SamoWorkspaceApp {
 }
 
 fn main() {
+    // Started from its shortcut or Explorer, Samo's working folder is its own, which Windows then won't let an update
+    // move; Samo reads nothing relative to it, so it stands in the temporary folder instead (ADR-006, R14).
+    #[cfg(windows)]
+    let _ = env::set_current_dir(finish_update::neutral_dir());
     // The new Samo, finishing an update the old one prepared: no window, just the swap.
-    #[cfg(target_os = "macos")]
     if let Some(code) = finish_update::from_args(&env::args().collect::<Vec<_>>()) {
         std::process::exit(code);
     }
+    // Just installed for this user: wait for the Samo that installed this one to quit, so this one is the Samo.
+    #[cfg(windows)]
+    install::wait_after(&env::args().collect::<Vec<_>>());
     // One Samo at a time on Windows: a second launch asks the first to show its window, and stops here.
     #[cfg(windows)]
     let instance = match instance::dir().map(|dir| instance::Instance::claim(&dir)) {

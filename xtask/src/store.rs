@@ -398,6 +398,8 @@ pub struct PublishArgs {
     pub store: PathBuf,
     pub packages: PathBuf,
     pub samo: Option<PathBuf>,
+    /// Samo for Windows' zip (`samo-package`), published beside the Mac's, which it needs.
+    pub samo_windows: Option<PathBuf>,
     pub out: PathBuf,
     pub test_key: Option<PathBuf>,
     pub published_at: String,
@@ -531,6 +533,11 @@ pub fn publish(args: &PublishArgs) -> Result<(), String> {
         listings.push(entry);
     }
 
+    if args.samo_windows.is_some() && args.samo.is_none() {
+        return Err(
+            "Samo for Windows needs the Mac's zip beside it (--samo): Samo 0.4.1 reads only the Mac's".into(),
+        );
+    }
     let samo = match &args.samo {
         Some(zip) => {
             let bytes = fs::read(zip).map_err(io("Samo's zip"))?;
@@ -546,11 +553,38 @@ pub fn publish(args: &PublishArgs) -> Result<(), String> {
                 .unwrap_or_default();
             let file = format!("Samo-{version}-macos-arm64.zip");
             copy(&file, &bytes)?;
+            let mut platforms = std::collections::BTreeMap::new();
+            if let Some(windows) = &args.samo_windows {
+                // The same release for Windows: its zip must say the same version.
+                let wbytes = fs::read(windows).map_err(io("Samo for Windows' zip"))?;
+                let wsize = u64::try_from(wbytes.len()).unwrap_or(u64::MAX);
+                if wsize > SAMO_CAP {
+                    return Err(format!("Samo for Windows' zip is over {SAMO_CAP} bytes"));
+                }
+                let wversion = crate::samo_package::windows_zip_version(&wbytes)?;
+                if wversion != version {
+                    return Err(format!(
+                        "Samo for Windows' zip is {wversion}, the Mac's {version}: publish one release"
+                    ));
+                }
+                let wfile = format!("Samo-{version}-{WINDOWS}.zip");
+                copy(&wfile, &wbytes)?;
+                platforms.insert(
+                    WINDOWS.to_string(),
+                    FileRef {
+                        file: wfile,
+                        size: Some(wsize),
+                        sha256: sha256_hex(&wbytes),
+                        width: None,
+                        height: None,
+                    },
+                );
+            }
             Some(SamoRelease {
                 version,
                 whats_new: notes.whats_new,
                 min_macos: notes.min_macos,
-                platforms: Default::default(),
+                platforms,
                 package: FileRef {
                     file,
                     size: Some(size),
@@ -647,8 +681,9 @@ pub fn verify_written(out: &Path, public: &[u8; 32]) -> Result<Catalog, String> 
         }
     }
     if let Some(samo) = &catalog.samo {
-        verify_file("Samo", &read(&samo.package)?, &samo.package, SAMO_CAP)
-            .map_err(|e| e.to_string())?;
+        for zip in std::iter::once(&samo.package).chain(samo.platforms.values()) {
+            verify_file("Samo", &read(zip)?, zip, SAMO_CAP).map_err(|e| e.to_string())?;
+        }
     }
     Ok(catalog)
 }
@@ -800,6 +835,7 @@ mod tests {
             store: dir.join("store"),
             packages,
             samo: None,
+            samo_windows: None,
             out: out.clone(),
             test_key: Some(dir.join("test-key.pk8")),
             published_at: "2026-11-02T10:00:00Z".into(),
@@ -826,6 +862,7 @@ mod tests {
     /// A store with Hello's listing, Hello 0.2.0 staged, and packages named `names` packed from it; then publish.
     fn publish_with(
         names: &[&str],
+        samo_windows: Option<&[u8]>,
     ) -> Result<(tempfile::TempDir, Result<Catalog, String>), String> {
         let dir = tempfile::tempdir().map_err(|e| e.to_string())?;
         let store = dir.path().join("store/extensions/hello");
@@ -849,11 +886,20 @@ mod tests {
         let key = Ed25519KeyPair::generate_pkcs8(&SystemRandom::new()).map_err(|_| "key")?;
         fs::write(dir.path().join("test-key.pk8"), key.as_ref()).map_err(|e| e.to_string())?;
         let out = dir.path().join("dist");
+        let samo_windows = match samo_windows {
+            Some(zip) => {
+                let path = dir.path().join("Samo-0.5.0-windows-x86_64.zip");
+                fs::write(&path, zip).map_err(|e| e.to_string())?;
+                Some(path)
+            }
+            None => None,
+        };
         let published = publish(&PublishArgs {
             trusted: None,
             store: dir.path().join("store"),
             packages,
             samo: None,
+            samo_windows,
             out: out.clone(),
             test_key: Some(dir.path().join("test-key.pk8")),
             published_at: "2026-11-05T10:00:00Z".into(),
@@ -869,10 +915,13 @@ mod tests {
 
     #[test]
     fn publish_pairs_platform_packages() -> Result<(), String> {
-        let (_dir, catalog) = publish_with(&[
-            "hello-0.2.0-macos-arm64.tar.gz",
-            "hello-0.2.0-windows-x86_64.tar.gz",
-        ])?;
+        let (_dir, catalog) = publish_with(
+            &[
+                "hello-0.2.0-macos-arm64.tar.gz",
+                "hello-0.2.0-windows-x86_64.tar.gz",
+            ],
+            None,
+        )?;
         let catalog = catalog?;
         let l = &catalog.extensions[0];
         assert_eq!(l.package.file, "hello-0.2.0-macos-arm64.tar.gz");
@@ -881,15 +930,26 @@ mod tests {
             Some("hello-0.2.0-windows-x86_64.tar.gz")
         );
         // A Mac package alone is a Mac-only listing, as before.
-        let (_dir, catalog) = publish_with(&["hello-0.2.0-macos-arm64.tar.gz"])?;
+        let (_dir, catalog) = publish_with(&["hello-0.2.0-macos-arm64.tar.gz"], None)?;
         assert!(catalog?.extensions[0].platforms.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn publish_refuses_samo_for_windows_alone() -> Result<(), String> {
+        // Samo 0.4.1 reads only the Mac's zip, so a release can't be Windows' alone.
+        let zip = crate::samo_package::zip_samo(b"MZ", "0.5.0")?;
+        let (_dir, catalog) =
+            publish_with(&["hello-0.2.0-macos-arm64.tar.gz"], Some(zip.as_slice()))?;
+        let err = catalog.err().unwrap_or_default();
+        assert!(err.contains("Mac"), "{err}");
         Ok(())
     }
 
     #[test]
     fn publish_refuses_a_windows_only_extension() -> Result<(), String> {
         // Every listing needs the Mac's package: Samo 0.4.1 refuses a catalog with a listing without one.
-        let (_dir, catalog) = publish_with(&["hello-0.2.0-windows-x86_64.tar.gz"])?;
+        let (_dir, catalog) = publish_with(&["hello-0.2.0-windows-x86_64.tar.gz"], None)?;
         let err = catalog.err().unwrap_or_default();
         assert!(err.contains("Mac"), "{err}");
         Ok(())
@@ -924,6 +984,7 @@ mod tests {
             store: dir.join("store"),
             packages: dir.join("packages"),
             samo: None,
+            samo_windows: None,
             out: dir.join("dist"),
             test_key: Some(dir.join("k.pk8")),
             published_at: "2026-11-02T10:00:00Z".into(),

@@ -7,6 +7,10 @@ license.workspace = true
 [lints]
 workspace = true
 
+[build-dependencies]
+# Samo's icon in Samo.exe (build.rs, Windows only); already in the lockfile through GPUI.
+embed-resource = "3.0.12"
+
 [dependencies]
 samo-primitives.workspace = true
 samo-blueprint.workspace = true
