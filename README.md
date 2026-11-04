@@ -89,6 +89,15 @@ To run it straight from the source instead: `cargo run --release -p samo-gpui`.
 
 > Samo is tested on Apple Silicon. Intel Macs should build from source too, but haven't been tried.
 
+### On Windows
+
+Unpack `Samo-<version>-windows-x86_64.zip` anywhere and run `Samo\Samo.exe`. Then **Settings → This PC → Install
+for this user** copies it to `%LOCALAPPDATA%\Programs\Samo`, adds it to the Start menu and restarts it from there;
+no administrator rights are needed. From there it can **Start at sign-in**, and update itself. The zip isn't
+code-signed yet, so Windows SmartScreen asks once before the first run.
+
+To make the zip from the source (Windows 11, the MSVC Rust toolchain): `cargo run -p xtask -- samo-package`.
+
 ## Using Samo
 
 | Page | What it answers |
@@ -216,6 +225,10 @@ $env:SAMO_EXT_DEV_DIR = "$PWD\target\ext-dev"; cargo run --release -p samo-gpui
 and restart** downloads it, checks it (its signature in the catalog, then the app's id, version and code
 signature) before anything changes, then replaces Samo and opens the new one. The old app goes to the Trash, and if
 the swap fails it is put back. Samo 0.1.x has no updater: install 0.2.0 from its DMG once.
+
+On Windows it works the same way for an installed Samo: the download's hash is checked against the signed catalog,
+the zip is unpacked and checked (only `Samo\` inside, its version the catalog's), then the old Samo goes to the
+Recycle Bin and the new one takes its place, or the old one comes back.
 
 ## Also in the box
 

@@ -214,7 +214,17 @@ These continue R1–R24.
   - The store's cache is in `%LOCALAPPDATA%\Samo\Store` and its state in `%APPDATA%\Samo`.
   - `ext-package` makes `<id>-<v>-windows-x86_64.tar.gz` on Windows, packing in-process on both OSes, and
     `ext-publish` pairs each version's Mac and Windows packages under one listing.
-- **PR D:** Samo for Windows: its icon, its zip, installing for this user, and updates.
+- **PR D, Samo for Windows. Built:**
+  - `Samo.exe` carries Samo's icon (icon 1, which Explorer shows and GPUI loads for the window and taskbar), made
+    from `Samo.icns` by `xtask windows-icon`.
+  - `xtask samo-package` writes `Samo-<v>-windows-x86_64.zip`: `Samo/Samo.exe` and `Samo/release.toml`.
+    `ext-publish --samo-windows` publishes it beside the Mac's zip, as one release.
+  - **Installing for this user** (Settings → This PC): `%LOCALAPPDATA%\Programs\Samo`, a Start-menu shortcut,
+    and the installed Samo takes over once this one quits. **Start at sign-in** is an `HKCU\…\Run` value.
+  - **Updates (R14).** An installed `Samo.exe` downloads its zip and checks it in-process: links, paths outside
+    `Samo/`, too many files or bytes are refused, and its version must be the catalog's. The new Samo waits for
+    the old one to quit (R4), moves its folder to the Recycle Bin, renames itself into place, and puts the old one
+    back if that fails.
 
 ### Phases 4–5
 Clips (#11), Shots (#12). Each issue has its own plan and "done when".
