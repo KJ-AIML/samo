@@ -136,7 +136,7 @@ impl SamoWorkspaceApp {
     }
 
     pub(crate) fn render_settings(&mut self, frame: &Frame, cx: &mut Context<Self>) -> Page {
-        if !samo_extensions::STORE_ON_THIS_OS {
+        if !samo_extensions::SAMO_UPDATES_ON_THIS_OS {
             return updates_come_later();
         }
         let view: &StoreView = &frame.store;

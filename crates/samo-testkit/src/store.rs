@@ -2,12 +2,16 @@
 //! pins.
 
 use crate::http::TestServer;
+use flate2::Compression;
+use flate2::write::GzEncoder;
 use ring::signature::{Ed25519KeyPair, KeyPair};
-use samo_domain::store::{Catalog, FileRef, Listing, hex, image_size, sha256_hex};
+use samo_domain::store::{
+    Catalog, FileRef, Listing, MAC, hex, image_size, sha256_hex, this_platform,
+};
 use samo_ext_protocol::{Change, Manifest};
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
-use std::process::Command;
 use tempfile::TempDir;
 
 pub struct FakeStore {
@@ -65,24 +69,43 @@ impl FakeStore {
         fs::write(self.dir.path().join("catalog.json"), bytes).map_err(|e| e.to_string())
     }
 
-    /// Packs `<stage>/<id>/` as `<id>-<version>-macos-arm64.tar.gz` in the store, as `ext-package` does.
+    /// Packs `<stage>/<id>/` as `<id>-<version>-<this platform>.tar.gz` in the store, in-process on every OS, as
+    /// `ext-package` does.
     pub fn put_package(&self, stage: &Path, id: &str, version: &str) -> Result<FileRef, String> {
-        let name = format!("{id}-{version}-macos-arm64.tar.gz");
-        let status = Command::new("tar")
-            .env("COPYFILE_DISABLE", "1")
-            .arg("-C")
-            .arg(stage)
-            .arg("-czf")
-            .arg(self.dir.path().join(&name))
-            .arg(id)
-            .status()
-            .map_err(|e| e.to_string())?;
-        if !status.success() {
-            return Err("tar failed".into());
+        let name = format!("{id}-{version}-{}.tar.gz", this_platform());
+        let mut gz = GzEncoder::new(Vec::new(), Compression::default());
+        {
+            let mut tar = tar::Builder::new(&mut gz);
+            tar.follow_symlinks(false);
+            tar.append_dir_all(id, stage.join(id))
+                .map_err(|e| e.to_string())?;
+            tar.finish().map_err(|e| e.to_string())?;
         }
-        let bytes = fs::read(self.dir.path().join(&name)).map_err(|e| e.to_string())?;
+        let bytes = gz.finish().map_err(|e| e.to_string())?;
+        fs::write(self.dir.path().join(&name), &bytes).map_err(|e| e.to_string())?;
         self.put(&name, &bytes)
     }
+}
+
+/// `package` in the slot this platform reads (ADR-006): the Mac's `package`, or on Windows `platforms`, beside a
+/// Mac package that is never fetched (every listing needs one).
+pub fn for_this_platform(package: FileRef) -> (FileRef, BTreeMap<String, FileRef>) {
+    let here = this_platform();
+    if here == MAC {
+        return (package, BTreeMap::new());
+    }
+    let mac = FileRef {
+        file: package.file.replace(here, MAC),
+        ..package.clone()
+    };
+    (mac, BTreeMap::from([(here.to_string(), package)]))
+}
+
+/// Points `listing` at `package` for this platform.
+pub fn set_package_here(listing: &mut Listing, package: FileRef) {
+    let (mac, platforms) = for_this_platform(package);
+    listing.package = mac;
+    listing.platforms = platforms;
 }
 
 /// A catalog published at `published_at` with these listings.
@@ -95,8 +118,9 @@ pub fn catalog(published_at: &str, extensions: Vec<Listing>) -> Catalog {
     }
 }
 
-/// A valid listing for `id` at `version`, pinning `package`.
+/// A valid listing for `id` at `version`, pinning `package` for this platform.
 pub fn listing(id: &str, version: &str, package: FileRef) -> Listing {
+    let (package, platforms) = for_this_platform(package);
     Listing {
         id: id.into(),
         name: id.into(),
@@ -111,7 +135,7 @@ pub fn listing(id: &str, version: &str, package: FileRef) -> Listing {
         whats_new: String::new(),
         package,
         icon: None,
-        platforms: Default::default(),
+        platforms,
         screenshots: Vec::new(),
         changes: vec![Change {
             what: "Nothing outside its folder".into(),
@@ -126,8 +150,9 @@ pub fn listing(id: &str, version: &str, package: FileRef) -> Listing {
     }
 }
 
-/// The listing a package's own manifest calls for, pinning `package`.
+/// The listing a package's own manifest calls for, pinning `package` for this platform.
 pub fn listing_for(manifest: &Manifest, package: FileRef) -> Listing {
+    let (package, platforms) = for_this_platform(package);
     Listing {
         id: manifest.id.clone(),
         name: manifest.name.clone(),
@@ -142,7 +167,7 @@ pub fn listing_for(manifest: &Manifest, package: FileRef) -> Listing {
         whats_new: String::new(),
         package,
         icon: None,
-        platforms: Default::default(),
+        platforms,
         screenshots: Vec::new(),
         changes: manifest.changes.clone(),
         windows: manifest.windows.clone(),

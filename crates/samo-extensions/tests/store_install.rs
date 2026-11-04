@@ -1,8 +1,5 @@
-//! The store on the Mac: packages made with macOS tar, exec bits. The store comes to Windows with #10 (ADR-006).
-#![cfg(unix)]
-
-//! Installing, updating and uninstalling from a store on this Mac (ADR-003 M3), with a shell-script stand-in for
-//! Hello's helper. Everything happens in a temporary home folder.
+//! Installing, updating and uninstalling from a store (ADR-003 M3), on the Mac and on Windows, with the
+//! `samo-fake-helper` stand-in for Hello's helper. Everything happens in a temporary home folder.
 
 use samo_domain::extensions::{BackoffConfig, Source};
 use samo_domain::store::StoreError;
@@ -14,7 +11,7 @@ use samo_extensions::{
     ExtRoot, ExtSnapshot, Host, HostConfig, InstallError, Registry, Status, StoreInstall,
     UninstallFailed,
 };
-use samo_testkit::store::{FakeStore, catalog, listing_for};
+use samo_testkit::store::{FakeStore, catalog, listing_for, set_package_here};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -143,8 +140,50 @@ fn hello(snap: &ExtSnapshot) -> Option<(String, bool, Status)> {
         .map(|e| (e.version.clone(), e.dev, e.status.clone()))
 }
 
+/// The version `current` points at: a relative link on the Mac (`0.2.0`), a junction holding the full path on
+/// Windows; its last part either way.
+fn current_version(root: &ExtRoot) -> Fallible<String> {
+    let target = fs::read_link(root.current("hello")).map_err(io)?;
+    target
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .ok_or_else(|| format!("current points at {}", target.display()))
+}
+
 fn running(host: &Host, version: &str) -> bool {
     hello(&host.snapshot()) == Some((version.into(), false, Status::Running))
+}
+
+/// On Windows a listing with only the Mac's package is refused in words, and nothing is fetched or installed.
+#[cfg(windows)]
+#[test]
+fn a_mac_only_extension_isnt_installed_on_windows() -> Fallible<()> {
+    let w = World::new()?;
+    let (mut l1, _) = w.package("0.1.0", &helper_script("0.1.0"))?;
+    l1.platforms.clear();
+    w.shop.publish(&catalog("2026-11-02T10:00:00Z", vec![l1]))?;
+    let host = w.host(None);
+    let worker = StoreWorker::start(w.store(), host.clone(), Arc::new(|| {}));
+    worker.submit(StoreJob::Refresh { force: true }, UserAction::clicked());
+    wait_for("the catalog", 10, || {
+        let v = worker.view();
+        v.catalog.is_some() && !v.refreshing
+    })?;
+    worker.submit(StoreJob::Install("hello".into()), UserAction::clicked());
+    let mut said = None;
+    wait_for("the refusal", 10, || {
+        said = worker
+            .view()
+            .jobs
+            .get("hello")
+            .and_then(|j| j.error.clone());
+        said.is_some()
+    })?;
+    let said = said.unwrap_or_default();
+    assert!(said.contains("made for the Mac"), "{said}");
+    assert!(hello(&host.snapshot()).is_none());
+    assert!(!w.root.ext_dir("hello").exists());
+    Ok(())
 }
 
 #[test]
@@ -188,10 +227,7 @@ fn install_update_uninstall_from_catalog() -> Fallible<()> {
     wait_for("the job to finish", 5, || worker.view().jobs.is_empty())?;
     assert!(data.join("ran-0.2.0").exists() && data.join("kept").exists());
     assert!(!w.root.version_dir("hello", "0.1.0").exists());
-    assert_eq!(
-        fs::read_link(w.root.current("hello")).map_err(io)?,
-        PathBuf::from("0.2.0")
-    );
+    assert_eq!(current_version(&w.root)?, "0.2.0");
     assert!(
         !w.home().join("off-ran").exists(),
         "an update never runs `off`"
@@ -239,10 +275,7 @@ fn update_goes_back_when_the_new_helper_is_silent() -> Fallible<()> {
         "{err:?}"
     );
     wait_for("0.1.0 to run again", 10, || running(&host, "0.1.0"))?;
-    assert_eq!(
-        fs::read_link(w.root.current("hello")).map_err(io)?,
-        PathBuf::from("0.1.0")
-    );
+    assert_eq!(current_version(&w.root)?, "0.1.0");
     assert!(!w.root.version_dir("hello", "0.2.0").exists());
     assert_eq!(
         Registry::load(&w.root)
@@ -350,7 +383,7 @@ fn manifest_must_match_catalog_entry() -> Fallible<()> {
     let liar = w.shop.put_package(&stage, "hello", "0.1.0")?;
     let liar_bytes = fs::read(w.shop.dir.path().join(&liar.file)).map_err(io)?;
     let mut claims = listing.clone();
-    claims.package = liar;
+    set_package_here(&mut claims, liar);
     assert!(matches!(
         host.install_from_store(&claims, &liar_bytes),
         Err(InstallError::Store(StoreError::ManifestMismatch("changes")))

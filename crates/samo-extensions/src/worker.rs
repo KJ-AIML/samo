@@ -6,7 +6,7 @@ use crate::Host;
 use crate::net::UserAction;
 use crate::store::{ImageKind, Store};
 use crate::update::{PreparedUpdate, can_update, prepare_update};
-use samo_domain::store::{Catalog, FileRef, PACKAGE_CAP, newer};
+use samo_domain::store::{Catalog, FileRef, PACKAGE_CAP, newer, this_platform};
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Sender};
@@ -309,7 +309,15 @@ fn install(store: &Store, host: &Host, s: &Shared, id: &str, action: &UserAction
             },
         );
     });
-    let bytes = match store.file(&listing.name, &listing.package, PACKAGE_CAP, action) {
+    // This platform's package; on Windows a Mac-only extension has none (ADR-006).
+    let Some(package) = listing.package_on(this_platform()) else {
+        fail(format!(
+            "{} is made for the Mac: it has no Windows version yet.",
+            listing.name
+        ));
+        return;
+    };
+    let bytes = match store.file(&listing.name, package, PACKAGE_CAP, action) {
         Ok(b) => b,
         Err(e) => {
             fail(format!(

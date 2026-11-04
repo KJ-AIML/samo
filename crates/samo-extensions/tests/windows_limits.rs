@@ -392,10 +392,13 @@ fn needs_newer_macos_is_blocked() -> Fallible<()> {
     let snap = wait_for(&host, "it to be blocked", |s| {
         matches!(status(s), Some(Status::Blocked(_)))
     })?;
-    assert_eq!(
-        status(&snap),
-        Some(Status::Blocked("Needs macOS 99.0 or newer".into()))
-    );
+    // On Windows a manifest naming a macOS is a Mac build's (ADR-006).
+    let why = if cfg!(windows) {
+        "Made for the Mac: this is its Mac version"
+    } else {
+        "Needs macOS 99.0 or newer"
+    };
+    assert_eq!(status(&snap), Some(Status::Blocked(why.into())));
     host.shutdown_all();
 
     // And the store won't install it.
@@ -413,10 +416,11 @@ fn needs_newer_macos_is_blocked() -> Fallible<()> {
         .install_from_store(&l, b"")
         .map(|_| ())
         .map_err(|e| e.to_string());
+    // On Windows the listing's min_macos is about its Mac package; this one is refused for its empty package.
     assert!(
         refused
             .as_ref()
-            .is_err_and(|e| e.contains("needs macOS 99.0")),
+            .is_err_and(|e| cfg!(windows) || e.contains("needs macOS 99.0")),
         "{refused:?}"
     );
     host.shutdown_all();

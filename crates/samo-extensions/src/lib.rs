@@ -35,6 +35,9 @@ pub use samo_ext_protocol::PopupKind;
 pub use state::{ExtSlot, ExtSnapshot, ExtView, PendingPopup, Status};
 pub use supervisor::MAX_ROWS;
 
-/// Whether the store (and Samo's updates through it) runs on this OS. Extensions run on the Mac and Windows; on
-/// Windows the store comes with #10, and until then Samo says so and fetches nothing (ADR-006 R28).
-pub const STORE_ON_THIS_OS: bool = cfg!(target_os = "macos");
+/// Whether the extension store runs on this OS: the Mac and Windows (#10, ADR-006).
+pub const STORE_ON_THIS_OS: bool = cfg!(any(target_os = "macos", windows));
+
+/// Whether Samo updates itself from the store on this OS. On Windows that comes with Samo's own zip; until then
+/// Settings says so and nothing is checked (ADR-006 R28).
+pub const SAMO_UPDATES_ON_THIS_OS: bool = cfg!(target_os = "macos");
