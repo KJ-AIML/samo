@@ -1,4 +1,4 @@
-//! These run real helpers: `#!/bin/sh` stand-ins, Swift or codesign. Their Windows forms come with #9 (ADR-006).
+//! Real Swift helpers and codesign, on the Mac only. Windows gets Shots and Clips as Rust rewrites (#11, #12).
 #![cfg(unix)]
 
 //! ADR-004 Phase 4's demo, the parts a machine can check: the real `samo-shots` 0.4.0, installed from a store signed

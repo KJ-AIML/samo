@@ -74,6 +74,10 @@ The Mac build does not change.
 | `~/Library/Application Support/Samo` | `%APPDATA%\Samo`; caches and extensions in `%LOCALAPPDATA%\Samo` |
 | ⌘ shortcuts | Ctrl (`secondary-` in GPUI keybindings) |
 | `/`-rooted paths | `C:/Users/kj/…` (§4, R26) |
+| A helper in its own process group, its tree found by parent pid (R15, R17) | A Job Object closed with kill-on-close (`win32job`): the family is the job's own list, and it ends with Samo |
+| The window server's window list (R15) | The visible top-level windows and their owners (`EnumWindows`, through `winsafe`) |
+| `current`, a symlink to the version in use | `current`, an NTFS junction (`junction`; no Developer Mode) |
+| A helper `bin/<name>` | `bin/<name>.exe`; manifests name it once, without `.exe` |
 | Swift extensions (Shots, Clips) | Rust rewrites (#11, #12) |
 
 ---
@@ -88,7 +92,7 @@ These continue R1–R24.
 | **R26 — One shape for Windows paths** | Anti-goal 2 | **Normalising.** `samo_domain::paths::normalize_path` gives Windows paths `/` separators, an upper-case drive, and no trailing `/` except on the drive root (`C:/`). A `/`-rooted path is never changed, since a Mac name may contain `\`. **On Windows,** only a drive path in that shape is a scan root or can be trashed. A `/`-rooted path there is on the current drive, so it fails closed, as do relative, UNC and `C:foo` paths. **On the Mac,** a drive path is a relative name and fails closed, as it always did. | `normalize_keeps_mac_paths_and_shapes_windows_ones`, `scan_roots_follow_the_os` |
 | **R27 — R2 on Windows** | Anti-goal 2 | **Protected, in any case:** drive roots; `Windows`, `Program Files`, `Program Files (x86)` and `ProgramData`, with everything under them; `Users` and `Documents and Settings`, and each `<name>` under them; `$Recycle.Bin` anywhere; `System Volume Information`, `Recovery`, `Boot`, `bootmgr`, `pagefile.sys`, `hiberfil.sys` and `swapfile.sys`. **Also protected:** a name Windows resolves to somewhere else, so it can't be judged by how it reads. That means `.` and `..`, a trailing dot or space, a stream (`name:stream`), and an 8.3 short name (`PROGRA~1`). **Unchanged:** the identity check. | `windows_system_paths_are_protected_in_any_case`, `windows_lookalike_forms_fail_closed` |
 | **R28 — Said, never faked** | Anti-goals 2, 4 | A reading Windows can't give is `Unsupported` (R3). A feature whose Windows mechanism isn't built yet stays off on Windows, and its page says so. | Per phase |
-| **R29 — No `unsafe` for Windows** | Anti-goal 3 | `unsafe_code = "forbid"` stays for every crate. Windows APIs are reached only through safe crates (`sysinfo`, `trash`, `winapi-util`, `filesize`, `windows-registry`, `tray-icon`, GPUI) and Windows' own tools run by full path (`taskkill`, `mountvol`). A need with no safe wrapper comes back to KJ as a decision. | The compiler |
+| **R29 — No `unsafe` for Windows** | Anti-goal 3 | `unsafe_code = "forbid"` stays for every crate. Windows APIs are reached only through safe crates (`sysinfo`, `trash`, `winapi-util`, `filesize`, `windows-registry`, `tray-icon`, GPUI; for extensions `win32job`, `winsafe` and `junction`) and Windows' own tools run by full path (`taskkill`, `mountvol`). A need with no safe wrapper comes back to KJ as a decision. | The compiler |
 | **R30 — The gates run on Windows** | Anti-goals 1, 2 | `xtask` builds on Windows. Gates 1–6 run there. Gate 7's Swift build and tests run only on macOS, where the Swift extensions are. Files are LF in every checkout (`.gitattributes`), and the gates read CRLF too. CI has a Windows job (`scripts/ci-windows.sh`). | `crlf_test_module_is_not_shipped`; CI `windows` |
 
 ---
@@ -104,7 +108,14 @@ These continue R1–R24.
   Each app chooses one with `cfg(target_os)`. `samo-macos` is not edited for Windows. This beat renaming it to `samo-platform` with two modules, which would touch every Mac path and gate for no gain to the Mac.
 - **[call] The MSVC toolchain** (`x86_64-pc-windows-msvc`). The repo pins `1.99.0`; on a PC whose rustup default host is GNU, use `RUSTUP_TOOLCHAIN=1.99.0-x86_64-pc-windows-msvc`.
 - **[call] Until #1 is done, Windows checks the crates that build there.** `scripts/ci-windows.sh` lists them, and the list grows with each PR until it is the whole workspace.
-- **[call] Extensions and the store stay off on Windows until #9 and #10.** Their pages say so (R28).
+- **[call] Extensions run on Windows from #9; the store and updates stay off until #10.** Their pages say so,
+  and nothing is fetched (R28).
+- **[call] On Windows a helper's family is its Job Object.** Windows keeps an orphan's old parent pid and reuses
+  pids quickly, so walking parent pids could take another process for the helper's child. The walk, with the rule
+  that a child never started before its parent, is only the fallback for a helper that can't be put in a job. The
+  Mac's walk is unchanged.
+- **[call] R15 on Windows counts visible windows.** Every console helper has a hidden console host (`conhost.exe`)
+  in its family; a hidden window shown later is seen at the next check, 2 s on.
 
 ## 6. Build Order
 
@@ -151,9 +162,22 @@ These continue R1–R24.
   5. It stays in the tray after its window closes.
   6. `cargo test --workspace` passes on Windows, and the macOS jobs pass unchanged.
 
-### Phases 2–5
-Extensions on Windows (#9), store and updates (#10), Clips (#11), Shots (#12). Each issue has its own plan and
-"done when".
+### Phase 2 — Extensions on Windows (#9)
+- **PR A, the extension host. Built:**
+  - Extensions live in `%LOCALAPPDATA%\Samo\Extensions`. A helper is `<helper>.exe`, started with no console
+    window and Windows' own environment (its folders, shell and temporary folder) and nothing else of Samo's.
+  - `current` is a junction, swapped so it never points at a removed version. A reinstall keeps the old copy
+    until the new one is in place, and a hard-linked file is refused (R5).
+  - A helper's family is its Job Object: it ends when the helper stops, and when Samo ends, however Samo ends.
+  - R8's limits, the crash backoff and R15 work as on the Mac. The host's tests use one Rust fake helper, so they
+    run on both.
+  - The app starts the host. The Extensions page lists what runs from `SAMO_EXT_DEV_DIR` and says the store comes
+    later.
+  - `cargo run -p xtask -- ext-dev <folder>` lays out an extension on either OS.
+- **PR B:** Claude Sessions on Windows.
+
+### Phases 3–5
+Store and updates (#10), Clips (#11), Shots (#12). Each issue has its own plan and "done when".
 
 ---
 
