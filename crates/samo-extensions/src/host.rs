@@ -144,6 +144,18 @@ impl Inner {
     }
 }
 
+/// Why an installed extension whose manifest names `min_macos` can't run here, if it can't, for the given OS
+/// (ADR-006 R25). On Windows `min_macos` is about the Mac's package, so it never blocks: a Mac build never gets
+/// installed there, as it has no `<helper>.exe` (refused as having no helper).
+fn min_macos_block_on(min_macos: Option<&str>, macos: &str, windows: bool) -> Option<String> {
+    let min = min_macos?;
+    if windows || macos_satisfies(Some(min), macos) {
+        None
+    } else {
+        Some(format!("Needs macOS {min} or newer"))
+    }
+}
+
 /// This Mac's macOS version (`"15.1"`), or `None` if it can't be told.
 pub fn this_macos() -> Option<String> {
     sysinfo::System::os_version()
@@ -321,10 +333,12 @@ impl Host {
             self.inner.waker.poke();
             return;
         }
-        if let Some(min) = rt.manifest.min_macos.clone()
-            && !macos_satisfies(Some(&min), config.macos.as_deref().unwrap_or_default())
-        {
-            rt.status = Status::Blocked(format!("Needs macOS {min} or newer"));
+        if let Some(why) = min_macos_block_on(
+            rt.manifest.min_macos.as_deref(),
+            config.macos.as_deref().unwrap_or_default(),
+            cfg!(windows),
+        ) {
+            rt.status = Status::Blocked(why);
             drop(state);
             self.inner.waker.poke();
             return;
@@ -596,6 +610,18 @@ impl Host {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn min_macos_blocks_only_on_the_mac() {
+        assert_eq!(min_macos_block_on(None, "", true), None);
+        assert_eq!(min_macos_block_on(Some("14.0"), "15.1", false), None);
+        assert_eq!(
+            min_macos_block_on(Some("14.0"), "13.6", false).as_deref(),
+            Some("Needs macOS 14.0 or newer")
+        );
+        // On Windows it is about the Mac's package. A Mac build has no <helper>.exe, so it never installs there.
+        assert_eq!(min_macos_block_on(Some("14.0"), "11 (26200)", true), None);
+    }
 
     #[test]
     fn limits_come_from_the_manifest_or_r8() -> Result<(), String> {

@@ -763,6 +763,15 @@ impl SamoWorkspaceApp {
                         )),
                 )
             }
+            (RowState::MacOnly, _) => {
+                buttons = buttons.child(
+                    div()
+                        .font(body(FontWeight::NORMAL))
+                        .text_size(px(T_META))
+                        .text_color(pal.text_2)
+                        .child("Made for the Mac: it has no Windows version yet"),
+                )
+            }
             (RowState::Update, _) => {
                 buttons = buttons
                     .child(uninstall(cx))

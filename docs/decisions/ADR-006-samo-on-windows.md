@@ -200,8 +200,24 @@ These continue R1–R24.
   - **Left for KJ's hand check**, as it needs clicks and his live Claude Code settings: the Claude Sessions page
     showing sessions working, waiting and done with today's tokens, and Connect then Disconnect on the live file.
 
-### Phases 3–5
-Store and updates (#10), Clips (#11), Shots (#12). Each issue has its own plan and "done when".
+### Phase 3 — The store and updates on Windows (#10)
+- **[call] One catalog for both, still schema 1.** Every listing and Samo release keeps its Mac `package`; Windows'
+  goes in a new optional `platforms` map (`"windows-x86_64"`), which Samo 0.4.1 ignores (`catalog_compat` runs
+  0.4.1's own reader on such a catalog). A version can't be Windows' alone, since 0.4.1 needs the Mac's package.
+- **[call] Samo for Windows is unsigned** (SmartScreen warns once). The catalog's signature pins every file's
+  SHA-256, which is what R11 and R14 rely on.
+- **[call] Signing the catalog stays a Mac step**, where the key is (KJ's Keychain). Windows builds and packages
+  (`ext-package`, `samo-package`), and those files go in the Mac's `--packages` folder.
+- **PR C, the store. Built:**
+  - A listing with a Windows package installs it; one without is *Mac only*, with no Install. `min_macos` and the
+    macOS permission lines apply only on the Mac.
+  - The store's cache is in `%LOCALAPPDATA%\Samo\Store` and its state in `%APPDATA%\Samo`.
+  - `ext-package` makes `<id>-<v>-windows-x86_64.tar.gz` on Windows, packing in-process on both OSes, and
+    `ext-publish` pairs each version's Mac and Windows packages under one listing.
+- **PR D:** Samo for Windows: its icon, its zip, installing for this user, and updates.
+
+### Phases 4–5
+Clips (#11), Shots (#12). Each issue has its own plan and "done when".
 
 ---
 

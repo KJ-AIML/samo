@@ -7,6 +7,7 @@ use ring::signature::{ED25519, UnparsedPublicKey};
 use samo_ext_protocol::{Change, Limits, Manifest, valid_id, valid_version};
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
+use std::collections::BTreeMap;
 use std::fmt;
 
 /// R13's caps.
@@ -42,7 +43,53 @@ pub struct SamoRelease {
     pub whats_new: String,
     #[serde(default)]
     pub min_macos: String,
+    /// The Mac's zip. Samo 0.4.1 reads only this.
     pub package: FileRef,
+    /// Samo for other platforms, by `WINDOWS` (ADR-006). Older Samos ignore it; left out when empty.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub platforms: BTreeMap<String, FileRef>,
+}
+
+/// The Mac's platform: `package` is its package.
+pub const MAC: &str = "macos-arm64";
+/// Windows' platform, a key in `platforms`.
+pub const WINDOWS: &str = "windows-x86_64";
+
+/// The platform Samo runs on, given the OS (ADR-006 R25).
+pub fn platform_on(windows: bool) -> &'static str {
+    if windows { WINDOWS } else { MAC }
+}
+
+/// The platform this Samo runs on.
+pub fn this_platform() -> &'static str {
+    platform_on(cfg!(windows))
+}
+
+/// The package for `platform`: the Mac's is `package`, every other one is in `platforms`. `None`: not for it.
+fn package_on<'a>(
+    package: &'a FileRef,
+    platforms: &'a BTreeMap<String, FileRef>,
+    platform: &str,
+) -> Option<&'a FileRef> {
+    if platform == MAC {
+        Some(package)
+    } else {
+        platforms.get(platform)
+    }
+}
+
+impl SamoRelease {
+    /// This release's zip for `platform`, if it has one.
+    pub fn package_on(&self, platform: &str) -> Option<&FileRef> {
+        package_on(&self.package, &self.platforms, platform)
+    }
+}
+
+impl Listing {
+    /// This extension's package for `platform`; `None` means it isn't made for it (*Mac only* on Windows).
+    pub fn package_on(&self, platform: &str) -> Option<&FileRef> {
+        package_on(&self.package, &self.platforms, platform)
+    }
 }
 
 /// One extension in the store.
@@ -64,7 +111,11 @@ pub struct Listing {
     pub min_samo: String,
     #[serde(default)]
     pub whats_new: String,
+    /// The Mac's package. Every listing has one: Samo 0.4.1 refuses a catalog with a listing without it.
     pub package: FileRef,
+    /// Packages for other platforms, by `WINDOWS` (ADR-006). Older Samos ignore it; left out when empty.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub platforms: BTreeMap<String, FileRef>,
     #[serde(default)]
     pub icon: Option<FileRef>,
     #[serde(default)]
@@ -236,6 +287,9 @@ fn check_listing(l: &Listing) -> Result<(), StoreError> {
         return bad(format!("more than {MAX_SHOTS} screenshots"));
     }
     check_ref(&l.id, &l.package)?;
+    for package in l.platforms.values() {
+        check_ref(&l.id, package)?;
+    }
     if let Some(icon) = &l.icon {
         check_ref(&l.id, icon)?;
     }
@@ -276,6 +330,9 @@ pub fn verify_catalog(bytes: &[u8], sig_hex: &str, key: &[u8; 32]) -> Result<Cat
             ));
         }
         check_ref("Samo", &samo.package)?;
+        for package in samo.platforms.values() {
+            check_ref("Samo", package)?;
+        }
     }
     for listing in &catalog.extensions {
         check_listing(listing)?;
@@ -429,6 +486,12 @@ pub fn macos_satisfies(min: Option<&str>, current: &str) -> bool {
     }
 }
 
+/// Whether this OS meets a listing's `min_macos`, for the given OS (ADR-006 R25). On Windows it is about the Mac's
+/// package, never the one Windows installs, so it is always met.
+pub fn os_satisfies_on(min_macos: Option<&str>, macos: &str, windows: bool) -> bool {
+    windows || macos_satisfies(min_macos, macos)
+}
+
 /// How two versions compare; an unreadable version compares as unknown.
 pub fn compare_versions(a: &str, b: &str) -> Option<Ordering> {
     Some(numeric(a)?.cmp(&numeric(b)?))
@@ -557,6 +620,7 @@ mod tests {
             min_samo: "0.2.0".into(),
             whats_new: String::new(),
             package: file("hello-0.2.0-macos-arm64.tar.gz", b"package"),
+            platforms: BTreeMap::new(),
             icon: None,
             screenshots: Vec::new(),
             changes: vec![change()],
@@ -607,6 +671,68 @@ mod tests {
         // Signed but unsafe: a file name with a path in it.
         let mut bad = listing();
         bad.package.file = "../../evil".into();
+        let c = Catalog {
+            schema: 1,
+            published_at: "2026-11-02T10:00:00Z".into(),
+            samo: None,
+            extensions: vec![bad],
+        };
+        let bytes = serde_json::to_vec(&c).map_err(|e| e.to_string())?;
+        let sig = hex(k.sign(&bytes).as_ref());
+        assert!(matches!(
+            verify_catalog(&bytes, &sig, &public(&k)),
+            Err(StoreError::BadListing(_))
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn platform_packages_are_picked_per_os() {
+        let mut l = listing();
+        assert_eq!(l.package_on(MAC), Some(&l.package));
+        assert_eq!(l.package_on(WINDOWS), None, "a Mac-only extension");
+        let win = file("hello-0.2.0-windows-x86_64.tar.gz", b"win");
+        l.platforms.insert(WINDOWS.into(), win.clone());
+        assert_eq!(l.package_on(WINDOWS), Some(&win));
+        assert_eq!(l.package_on("linux-x86_64"), None);
+        assert_eq!(platform_on(false), MAC);
+        assert_eq!(platform_on(true), WINDOWS);
+        let release = SamoRelease {
+            version: "0.5.0".into(),
+            whats_new: String::new(),
+            min_macos: String::new(),
+            package: file("Samo-0.5.0-macos-arm64.zip", b"mac"),
+            platforms: BTreeMap::from([(
+                WINDOWS.into(),
+                file("Samo-0.5.0-windows-x86_64.zip", b"w"),
+            )]),
+        };
+        assert_eq!(release.package_on(MAC), Some(&release.package));
+        assert!(
+            release
+                .package_on(WINDOWS)
+                .is_some_and(|f| f.file.ends_with("windows-x86_64.zip"))
+        );
+        // Without Windows packages, the JSON is as it always was.
+        let json = serde_json::to_string(&listing()).unwrap_or_default();
+        assert!(!json.contains("platforms"), "{json}");
+    }
+
+    #[test]
+    fn min_macos_applies_only_on_the_mac() {
+        assert!(!os_satisfies_on(Some("14.0"), "13.6", false));
+        assert!(os_satisfies_on(Some("14.0"), "15.1", false));
+        assert!(os_satisfies_on(None, "", false));
+        // On Windows a `min_macos` is about the Mac's package, never this one.
+        assert!(os_satisfies_on(Some("14.0"), "", true));
+    }
+
+    #[test]
+    fn a_bad_platform_package_fails_the_catalog() -> Result<(), String> {
+        let k = key()?;
+        let mut bad = listing();
+        bad.platforms
+            .insert(WINDOWS.into(), file("../../evil.tar.gz", b"x"));
         let c = Catalog {
             schema: 1,
             published_at: "2026-11-02T10:00:00Z".into(),

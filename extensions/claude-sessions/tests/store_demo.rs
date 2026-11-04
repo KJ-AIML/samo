@@ -233,6 +233,7 @@ fn store_phase2_demo() -> Fallible<()> {
         version: "99.0.0".into(),
         whats_new: "Faster".into(),
         min_macos: "11.0".into(),
+        platforms: Default::default(),
         package: d
             .shop
             .put("Samo-99.0.0-macos-arm64.zip", &fs::read(&zip).map_err(io)?)?,

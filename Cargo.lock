@@ -4609,6 +4609,7 @@ dependencies = [
 name = "samo-testkit"
 version = "0.4.1"
 dependencies = [
+ "flate2",
  "ring",
  "samo-blueprint",
  "samo-domain",
@@ -4616,6 +4617,7 @@ dependencies = [
  "samo-primitives",
  "samo-store",
  "serde_json",
+ "tar",
  "tempfile",
  "tokio",
 ]
@@ -5509,6 +5511,16 @@ name = "take-until"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8bdb6fa0dfa67b38c1e66b7041ba9dcf23b99d8121907cd31c807a332f7a0bbb"
+
+[[package]]
+name = "tar"
+version = "0.4.46"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3f6221d9a6003c78398e3b239969f352578258df48c8eb051caadae0015bc840"
+dependencies = [
+ "filetime",
+ "libc",
+]
 
 [[package]]
 name = "tempfile"
@@ -7017,12 +7029,14 @@ name = "xtask"
 version = "0.4.1"
 dependencies = [
  "chrono",
+ "flate2",
  "ring",
  "samo-domain",
  "samo-ext-protocol",
  "security-framework",
  "serde",
  "serde_json",
+ "tar",
  "tempfile",
  "toml 0.8.23",
 ]

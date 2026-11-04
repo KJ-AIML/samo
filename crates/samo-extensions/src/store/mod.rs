@@ -111,9 +111,9 @@ impl Store {
     }
 
     /// Samo's own store: `SAMO_EXT_CATALOG_URL` or [`STORE_URL`], the built-in key, and the cache and state file
-    /// under the home folder. `None` without a home.
+    /// under the home folder, or on Windows `%LOCALAPPDATA%` and `%APPDATA%`. `None` without them.
     pub fn from_env() -> Option<Self> {
-        let home = PathBuf::from(env::var_os("HOME").filter(|h| !h.is_empty())?);
+        let (cache, state) = dirs_on(|name| env::var_os(name), cfg!(windows))?;
         let url = env::var("SAMO_EXT_CATALOG_URL")
             .ok()
             .filter(|u| !u.is_empty())
@@ -122,12 +122,7 @@ impl Store {
         if let Some(bytes) = unhex(STORE_PUBLIC_KEY).filter(|b| b.len() == 32) {
             key.copy_from_slice(&bytes);
         }
-        Some(Self::new(
-            &url,
-            key,
-            &home.join("Library/Caches/Samo/Store"),
-            &home.join("Library/Application Support/Samo/store-state.toml"),
-        ))
+        Some(Self::new(&url, key, &cache, &state))
     }
 
     /// Tests use a shorter wait for a quiet server.
@@ -255,11 +250,64 @@ impl Store {
     }
 }
 
+/// The store's cache folder and its state file, for the given OS (ADR-006 R25): under the home folder on the Mac;
+/// the cache in `%LOCALAPPDATA%\Samo\Store` and the state in `%APPDATA%\Samo` on Windows.
+fn dirs_on(
+    get: impl Fn(&str) -> Option<std::ffi::OsString>,
+    windows: bool,
+) -> Option<(PathBuf, PathBuf)> {
+    let set = |name: &str| get(name).filter(|v| !v.is_empty()).map(PathBuf::from);
+    if windows {
+        let local = set("LOCALAPPDATA")?;
+        let roaming = set("APPDATA")?;
+        return Some((
+            local.join("Samo").join("Store"),
+            roaming.join("Samo").join("store-state.toml"),
+        ));
+    }
+    let home = set("HOME")?;
+    Some((
+        home.join("Library/Caches/Samo/Store"),
+        home.join("Library/Application Support/Samo/store-state.toml"),
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use samo_testkit::store::{FakeStore, catalog, listing, png};
     use std::time::Duration;
+
+    #[test]
+    fn store_dirs_follow_the_os() {
+        let get = |name: &str| match name {
+            "HOME" => Some("/Users/a".into()),
+            "LOCALAPPDATA" => Some(r"C:\Users\a\AppData\Local".into()),
+            "APPDATA" => Some(r"C:\Users\a\AppData\Roaming".into()),
+            _ => None,
+        };
+        let (cache, state) = dirs_on(get, false).unwrap_or_default();
+        assert_eq!(cache, PathBuf::from("/Users/a/Library/Caches/Samo/Store"));
+        assert_eq!(
+            state,
+            PathBuf::from("/Users/a/Library/Application Support/Samo/store-state.toml")
+        );
+        let (cache, state) = dirs_on(get, true).unwrap_or_default();
+        assert_eq!(
+            cache,
+            PathBuf::from(r"C:\Users\a\AppData\Local")
+                .join("Samo")
+                .join("Store")
+        );
+        assert_eq!(
+            state,
+            PathBuf::from(r"C:\Users\a\AppData\Roaming")
+                .join("Samo")
+                .join("store-state.toml")
+        );
+        assert_eq!(dirs_on(|_| None, true), None);
+        assert_eq!(dirs_on(|_| None, false), None);
+    }
 
     struct Fixture {
         shop: FakeStore,

@@ -121,6 +121,12 @@ fn updates_come_later() -> Page {
     }
 }
 
+/// What opening Settings asks of the store: the catalog, for Samo's own update, where Samo updates itself; nothing
+/// elsewhere, where the page says nothing is fetched (ADR-006 R28).
+fn refresh_on_open(updates_here: bool) -> Option<StoreJob> {
+    updates_here.then_some(StoreJob::Refresh { force: false })
+}
+
 impl SamoWorkspaceApp {
     fn settings_submit(&self, job: StoreJob, action: UserAction) {
         if let Some(store) = self.hub.store.get() {
@@ -129,14 +135,16 @@ impl SamoWorkspaceApp {
     }
 
     /// The sidebar's or rail's Settings, clicked: the store's catalog is fetched if the cached one is over 10
-    /// minutes old. Only click handlers call this.
+    /// minutes old, where Samo updates itself. Only click handlers call this.
     pub(crate) fn settings_opened_by_click(&mut self, cx: &mut Context<Self>) {
         self.set_nav(NavSection::Settings, cx);
-        self.settings_submit(StoreJob::Refresh { force: false }, UserAction::clicked());
+        if let Some(job) = refresh_on_open(samo_extensions::SAMO_UPDATES_ON_THIS_OS) {
+            self.settings_submit(job, UserAction::clicked());
+        }
     }
 
     pub(crate) fn render_settings(&mut self, frame: &Frame, cx: &mut Context<Self>) -> Page {
-        if !samo_extensions::STORE_ON_THIS_OS {
+        if !samo_extensions::SAMO_UPDATES_ON_THIS_OS {
             return updates_come_later();
         }
         let view: &StoreView = &frame.store;
@@ -325,11 +333,23 @@ mod tests {
     use super::*;
     use samo_domain::store::FileRef;
 
+    #[test]
+    fn opening_settings_fetches_only_where_updates_run() {
+        // Where Samo doesn't update itself yet (Windows, until its zip), Settings says nothing is checked or
+        // fetched, so opening it fetches nothing (ADR-006 R28).
+        assert!(matches!(
+            refresh_on_open(true),
+            Some(StoreJob::Refresh { force: false })
+        ));
+        assert!(refresh_on_open(false).is_none());
+    }
+
     fn release(version: &str) -> SamoRelease {
         SamoRelease {
             version: version.into(),
             whats_new: "- Faster".into(),
             min_macos: "11.0".into(),
+            platforms: Default::default(),
             package: FileRef {
                 file: format!("Samo-{version}-macos-arm64.zip"),
                 size: Some(1),
