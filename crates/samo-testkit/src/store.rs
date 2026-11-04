@@ -1,4 +1,4 @@
-//! A store on this Mac for tests: a folder served over HTTP, a catalog signed with a test key, and the files it
+//! A store for tests, on the Mac and Windows: a folder served over HTTP, a catalog signed with a test key, and the files it
 //! pins.
 
 use crate::http::TestServer;

@@ -158,6 +158,10 @@ changed, then deletes it (Claude Sessions keeps its one-time backup, `~/.claude/
 store's listings live in [`samo-extensions`](https://github.com/KJ-AIML/samo-extensions): a teammate adds one with
 a pull request, and KJ reviews and signs it. The design is [ADR-003](docs/decisions/ADR-003-samo-extension-store.md).
 
+On Windows the store works the same way: an extension with a Windows build installs it, and one without shows as
+*Mac only*. A Windows build is made on Windows (`cargo run -p xtask -- ext-package <folder>` writes
+`<id>-<version>-windows-x86_64.tar.gz`) and published from the Mac with the Mac's build, under one listing.
+
 ### Shots
 
 **Shots** is a screenshot extension in the store ([ADR-004](docs/decisions/ADR-004-samo-shots.md)). Press ⇧⌘2 and

@@ -49,7 +49,9 @@ Every crate obeys strict layering (`cargo run -p xtask -- verify`):
     - Its family is its Job Object (`family.rs`); the parent walk is only the fallback without a job, and the Mac's
       walk is unchanged. R15 counts visible top-level windows (`winsafe`).
     - The host's tests use the `samo-fake-helper` stand-in on both OSes; never a `#!/bin/sh` script.
-    - The store and updates stay off until #10 (`STORE_ON_THIS_OS`), and say so.
+    - The store runs on Windows (`STORE_ON_THIS_OS`): a listing installs its `platforms["windows-x86_64"]` package, or
+      is *Mac only*. Every listing keeps its Mac `package` (Samo 0.4.1 reads only that; `catalog_compat` checks it).
+      Samo's own updates on Windows come with its zip (`SAMO_UPDATES_ON_THIS_OS`), and until then say so.
     - Claude Sessions writes its Windows entries with `settings::entries_on(true, …)`: hooks in Claude Code's exec
       form (`command` + `args`, no shell), and a status line both Git Bash and PowerShell run. The Mac's entries are
       byte-identical; Samo's entries are recognised by `OWN_MARK` or the helper's own path (`HELPER_MARK`).

@@ -122,6 +122,10 @@ bytes, base64):
 }
 ```
 
+- **Packages for Windows (ADR-006, #10).** A listing or the Samo release may also carry
+  `"platforms": { "windows-x86_64": { "file": "claude-sessions-0.2.1-windows-x86_64.tar.gz", … } }`. `package` stays
+  the Mac's, and every listing has one: Samo 0.4.1 ignores `platforms` and reads the catalog as before. Windows
+  installs its own entry, or shows the listing as *Mac only*.
 - **Where each field comes from.** `ext-publish` takes `id`, `name`, `version`, `protocol`, `min_samo`, `summary`
   and `changes` from the package's own `extension.toml`. It takes only the store fields (`author`, `description`,
   `categories`, `homepage`, `whats_new`, captions) from `listing.toml`. It refuses a listing that repeats a
