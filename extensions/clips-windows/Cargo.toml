@@ -27,3 +27,10 @@ unicode-normalization = "0.1.26"
 
 [dev-dependencies]
 tempfile.workspace = true
+
+# Windows' clipboard, the app in front, and (PR F) the shortcut, the list and pasting (ADR-006 R29: safe crates only).
+# `clipboard-win` (BSL-1.0, by DoumanAsh, maintained since 2015) is a safe API over the Win32 clipboard: its sequence
+# number, formats, registered formats, text, bytes and file lists. `winsafe` (MIT) is already Samo's for R15.
+[target.'cfg(windows)'.dependencies]
+clipboard-win = "5.4.3"
+winsafe = { version = "0.0.29", features = ["user", "kernel"] }

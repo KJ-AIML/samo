@@ -1,0 +1,28 @@
+id = "clips"
+name = "Clips"
+version = "0.1.1"
+protocol = 1
+min_samo = "0.4.0"
+helper = "bin/samo-clips"
+summary = "Clipboard history: Win+Alt+V finds anything you copied and pastes it where you are"
+windows = "Opens its own window: the list at its shortcut (Win+Alt+V unless you change it)"
+watches = "Watches the clipboard: checks for a new copy twice a second, and keeps it on this PC"
+
+[limits]
+memory_mb = 300
+cpu_pct = 20
+
+[[changes]]
+what = "Keeps a history of what you copy, leaving out what password managers mark as secret"
+where = "Clips' own folder in Samo"
+undo = "Uninstall deletes the history"
+
+[[changes]]
+what = "Listens for its shortcut (Win+Alt+V unless you change it) while it is on"
+where = "Your keyboard shortcuts"
+undo = "Off or Uninstall lets it go"
+
+[[changes]]
+what = "Presses Ctrl+V for you in the app you were in, when you pick a copy from the list"
+where = "The app you were in"
+undo = "Nothing to undo"

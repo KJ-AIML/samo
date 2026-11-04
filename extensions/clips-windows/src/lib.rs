@@ -13,3 +13,5 @@ pub mod serve;
 pub mod settings;
 pub mod store;
 pub mod watcher;
+#[cfg(windows)]
+pub mod win;
