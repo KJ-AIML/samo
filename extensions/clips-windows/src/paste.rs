@@ -5,13 +5,15 @@
 
 use std::time::Duration;
 
-/// What the flow needs from Windows; tests stand in for all of it. Windows are their handles' values.
+/// What the flow needs from Windows; tests stand in for all of it.
 pub trait Windows {
-    fn front(&self) -> Option<isize>;
+    /// A window: Windows' handle, or a number in tests.
+    type Window: PartialEq;
+    fn front(&self) -> Option<Self::Window>;
     /// Asks `target` to come forward.
-    fn activate(&self, target: isize);
-    /// Whether `target`'s program runs as administrator.
-    fn elevated(&self, target: isize) -> bool;
+    fn activate(&self, target: &Self::Window);
+    /// Whether `target`'s program runs as administrator and Clips doesn't (Windows won't let Clips type into it).
+    fn elevated(&self, target: &Self::Window) -> bool;
     /// Presses Ctrl+V.
     fn press_paste(&self);
     fn sleep(&self, time: Duration);
@@ -29,15 +31,21 @@ pub const COPIED: &str = "Copied: press Ctrl+V";
 const PATIENCE: Duration = Duration::from_millis(600);
 const STEP: Duration = Duration::from_millis(20);
 
-#[derive(Debug, Default)]
-pub struct PasteFlow {
+#[derive(Debug)]
+pub struct PasteFlow<W> {
     /// The window in front when the list opened.
-    previous: Option<isize>,
+    previous: Option<W>,
 }
 
-impl PasteFlow {
+impl<W> Default for PasteFlow<W> {
+    fn default() -> Self {
+        Self { previous: None }
+    }
+}
+
+impl<W: PartialEq> PasteFlow<W> {
     /// The list is opening: remember where to paste.
-    pub fn remember(&mut self, front: Option<isize>) {
+    pub fn remember(&mut self, front: Option<W>) {
         self.previous = front;
     }
 
@@ -47,19 +55,19 @@ impl PasteFlow {
     }
 
     /// A pick: the item is already on the clipboard and the list closed. Paste into the remembered window.
-    pub fn picked(&mut self, w: &impl Windows) -> Outcome {
+    pub fn picked(&mut self, w: &impl Windows<Window = W>) -> Outcome {
         let Some(target) = self.previous.take() else {
             return Outcome::CopiedOnly(COPIED.into());
         };
-        if w.elevated(target) {
+        if w.elevated(&target) {
             return Outcome::CopiedOnly(format!(
                 "{COPIED} (Windows doesn't let Clips paste into an app run as administrator)"
             ));
         }
-        w.activate(target);
+        w.activate(&target);
         let mut waited = Duration::ZERO;
         loop {
-            if w.front() == Some(target) {
+            if w.front().as_ref() == Some(&target) {
                 // A moment for the window to take the keyboard back; then it must still be in front (R24).
                 w.sleep(Duration::from_millis(50));
                 if w.front().as_ref() != Some(&target) {
@@ -102,6 +110,7 @@ mod tests {
     }
 
     impl Windows for FakeWindows {
+        type Window = isize;
         fn front(&self) -> Option<isize> {
             let mut fronts = self.fronts.borrow_mut();
             if fronts.len() > 1 {
@@ -110,10 +119,10 @@ mod tests {
                 fronts.first().copied().flatten()
             }
         }
-        fn activate(&self, target: isize) {
-            self.activated.set(Some(target));
+        fn activate(&self, target: &isize) {
+            self.activated.set(Some(*target));
         }
-        fn elevated(&self, _target: isize) -> bool {
+        fn elevated(&self, _target: &isize) -> bool {
             self.elevated
         }
         fn press_paste(&self) {

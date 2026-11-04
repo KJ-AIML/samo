@@ -3,7 +3,8 @@
 //! nothing changed, R21), and answers Samo's messages. It exits when Samo says `shutdown` or closes its stdin; the
 //! history stays.
 
-use crate::clips::Clips;
+use crate::clips::{Clips, ListAsk};
+use crate::settings::Shortcut;
 use crate::watcher::Board;
 use chrono::Utc;
 use samo_ext_protocol::{HelperMsg, HostMsg, PROTOCOL_VERSION, decode_host_line, encode};
@@ -11,7 +12,7 @@ use std::fs::{self, File, TryLockError};
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::thread;
 use std::time::Duration;
 
@@ -25,6 +26,21 @@ pub enum Event {
     Gone,
     /// Windows says the clipboard changed: look now.
     Changed,
+    /// The list asks something.
+    List(ListAsk),
+}
+
+/// What this OS adds around the clipboard: word of each change, and the list at its shortcut.
+pub trait Desk {
+    /// Starts telling of clipboard changes on `tx`; false if it can't (Clips then looks twice a second).
+    fn listen(&self, tx: Sender<Event>) -> bool;
+    /// Starts the list at `shortcut`; it asks Clips on `tx`. Returns how to give it a new shortcut, which never
+    /// waits for the list.
+    fn list(
+        &self,
+        tx: Sender<Event>,
+        shortcut: Option<Shortcut>,
+    ) -> Box<dyn Fn(Option<Shortcut>) + Send>;
 }
 
 fn send(out: &mut impl Write, msg: &HelperMsg) -> bool {
@@ -34,12 +50,14 @@ fn send(out: &mut impl Write, msg: &HelperMsg) -> bool {
 
 /// Serves Samo until it says `shutdown` or goes: hello first, then the page and the badge, again whenever they
 /// change. With `poll`, it looks at the clipboard that often; without, Windows wakes it at each change, and it
-/// sleeps until then, or until the page would change. The history is saved when it stops.
+/// sleeps until then, or until the page would change. A new shortcut chosen on the page goes to `new_shortcut`. The
+/// history is saved when it stops.
 pub fn serve<B: Board>(
     clips: &mut Clips<B>,
     events: &Receiver<Event>,
     out: &mut impl Write,
     poll: Option<Duration>,
+    new_shortcut: &dyn Fn(Option<Shortcut>),
 ) {
     let hello = HelperMsg::Hello {
         protocol: PROTOCOL_VERSION,
@@ -56,7 +74,15 @@ pub fn serve<B: Board>(
                 match event {
                     Ok(Event::Host(HostMsg::Shutdown) | Event::Gone)
                     | Err(RecvTimeoutError::Disconnected) => break,
-                    Ok(Event::Host(msg)) => said = clips.handle(&msg, now),
+                    Ok(Event::Host(msg)) => {
+                        let before = clips.settings().shortcut;
+                        said = clips.handle(&msg, now);
+                        let after = clips.settings().shortcut;
+                        if after != before {
+                            new_shortcut(after);
+                        }
+                    }
+                    Ok(Event::List(ask)) => said = clips.ask(ask),
                     Ok(Event::Changed) | Err(RecvTimeoutError::Timeout) => {}
                 }
                 clips.tick(now);
@@ -89,12 +115,11 @@ pub fn data_dir() -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
-/// `serve` on this process's stdin and stdout, with this OS's clipboard. `listen` starts telling of changes on the
-/// channel it is given, and says whether it could.
+/// `serve` on this process's stdin and stdout, with this OS's clipboard and desk.
 pub fn run<B: Board>(
     board: B,
     front: Box<dyn Fn() -> Option<String> + Send>,
-    listen: impl FnOnce(mpsc::Sender<Event>) -> bool,
+    desk: &impl Desk,
 ) -> ExitCode {
     let Some(dir) = data_dir() else {
         eprintln!("samo-clips: Samo didn't say where Clips keeps its files (SAMO_EXT_DATA_DIR)");
@@ -125,7 +150,9 @@ pub fn run<B: Board>(
         }
     };
     let (tx, rx) = mpsc::channel();
-    let poll = (!listen(tx.clone())).then_some(EVERY);
+    let mut clips = Clips::open(&dir, board, front);
+    let poll = (!desk.listen(tx.clone())).then_some(EVERY);
+    let new_shortcut = desk.list(tx.clone(), clips.settings().shortcut);
     let _ = thread::Builder::new().name("stdin".into()).spawn(move || {
         for line in std::io::stdin().lock().lines() {
             let Ok(line) = line else { break };
@@ -137,8 +164,7 @@ pub fn run<B: Board>(
         }
         let _ = tx.send(Event::Gone);
     });
-    let mut clips = Clips::open(&dir, board, front);
-    serve(&mut clips, &rx, &mut stdout, poll);
+    serve(&mut clips, &rx, &mut stdout, poll, &*new_shortcut);
     drop(held);
     ExitCode::SUCCESS
 }
@@ -146,6 +172,7 @@ pub fn run<B: Board>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::clips::ListAsk;
     use crate::fake::FakeBoard;
     use samo_ext_protocol::{Widget, decode_helper_line};
     use std::sync::mpsc;
@@ -164,7 +191,13 @@ mod tests {
             let _ = tx.send(e);
         }
         let mut out = Vec::new();
-        serve(&mut clips, &rx, &mut out, Some(Duration::from_millis(10)));
+        serve(
+            &mut clips,
+            &rx,
+            &mut out,
+            Some(Duration::from_millis(10)),
+            &|_| {},
+        );
         said(&out)
     }
 
@@ -193,8 +226,51 @@ mod tests {
         let _ = tx.send(Event::Gone);
         let mut out = Vec::new();
         // An hour between looks: only Windows' word makes it look.
-        serve(&mut clips, &rx, &mut out, None);
+        serve(&mut clips, &rx, &mut out, None, &|_| {});
         assert_eq!(clips.history().items().len(), 1);
+        Ok(())
+    }
+
+    #[test]
+    fn the_lists_asks_are_answered() -> Result<(), String> {
+        let tmp = tempfile::tempdir().map_err(|e| e.to_string())?;
+        let mut clips = Clips::open(tmp.path(), FakeBoard::default(), Box::new(|| None));
+        clips.board_mut().copy_text("asked");
+        clips.tick(Utc::now());
+        let (tx, rx) = mpsc::channel();
+        let (reply, answer) = mpsc::sync_channel(1);
+        let _ = tx.send(Event::List(ListAsk::Items(reply)));
+        let _ = tx.send(Event::Gone);
+        serve(&mut clips, &rx, &mut Vec::new(), None, &|_| {});
+        let items = answer.try_recv().map_err(|e| e.to_string())?;
+        assert_eq!(items.first().map(|i| i.text.as_str()), Some("asked"));
+        Ok(())
+    }
+
+    #[test]
+    fn a_new_shortcut_goes_to_the_list() -> Result<(), String> {
+        let tmp = tempfile::tempdir().map_err(|e| e.to_string())?;
+        let mut clips = Clips::open(tmp.path(), FakeBoard::default(), Box::new(|| None));
+        let (tx, rx) = mpsc::channel();
+        let choose = |value: &str| {
+            Event::Host(HostMsg::Choice {
+                key: "shortcut".into(),
+                value: value.into(),
+            })
+        };
+        let _ = tx.send(choose("none"));
+        let _ = tx.send(choose("none"));
+        let _ = tx.send(choose("alt-shift-v"));
+        let _ = tx.send(Event::Gone);
+        let told = std::cell::RefCell::new(Vec::new());
+        serve(&mut clips, &rx, &mut Vec::new(), None, &|s| {
+            told.borrow_mut().push(s.map(|s| s.to_string()));
+        });
+        assert_eq!(
+            told.into_inner(),
+            [None, Some("Alt+Shift+V".to_string())],
+            "told once per change"
+        );
         Ok(())
     }
 
@@ -224,7 +300,13 @@ mod tests {
         let (tx, rx) = mpsc::channel();
         let _ = tx.send(Event::Host(HostMsg::Shutdown));
         let mut out = Vec::new();
-        serve(&mut clips, &rx, &mut out, Some(Duration::from_millis(10)));
+        serve(
+            &mut clips,
+            &rx,
+            &mut out,
+            Some(Duration::from_millis(10)),
+            &|_| {},
+        );
         assert!(tmp.path().join("history.json").is_file(), "not saved");
         drop(tx);
         Ok(())
@@ -251,6 +333,7 @@ mod tests {
             &rx,
             &mut Closed,
             Some(Duration::from_millis(10)),
+            &|_| {},
         );
         Ok(())
     }

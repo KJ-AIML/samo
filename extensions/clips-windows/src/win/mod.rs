@@ -2,6 +2,7 @@
 //! pasting (PR F).
 
 pub mod board;
+pub mod hotkey;
 pub mod listen;
 
 /// The real clipboard in tests.

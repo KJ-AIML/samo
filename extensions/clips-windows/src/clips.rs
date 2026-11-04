@@ -3,7 +3,7 @@
 //! shortcut and list plug in through `Board` (ADR-005 C1–C4). Ported from the Mac's `ClipsApp.swift`.
 
 use crate::dib;
-use crate::history::{History, Kind};
+use crate::history::{History, Item, Kind};
 use crate::page::{self, PageState, ShortcutState, shortcut_choices};
 use crate::settings::Settings;
 use crate::store::{Store, Unloaded};
@@ -12,6 +12,28 @@ use chrono::{DateTime, Local, Utc};
 use samo_ext_protocol::{HelperMsg, HostMsg, PopupKind, Widget};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::mpsc::SyncSender;
+
+/// What the list asks of Clips, from its own thread; the answers come back on the channels given.
+#[derive(Debug)]
+pub enum ListAsk {
+    /// The history, pins first.
+    Items(SyncSender<Vec<Item>>),
+    /// Put this item on the clipboard, to paste it; says whether it is there.
+    Put {
+        id: String,
+        plain: bool,
+        done: SyncSender<bool>,
+    },
+    /// Pins it, or unpins it if it is pinned; then the history.
+    Pin(String, SyncSender<Vec<Item>>),
+    /// Deletes it; then the history.
+    Delete(String, SyncSender<Vec<Item>>),
+    /// Something to tell you, such as "Copied: press Ctrl+V".
+    Say(String),
+    /// Whether Windows took the shortcut.
+    Shortcut(ShortcutState),
+}
 
 /// The history's sizes the page offers.
 const LIMITS: [usize; 3] = [50, 200, 500];
@@ -240,6 +262,44 @@ impl<B: Board> Clips<B> {
         }
     }
 
+    /// What the list asked; what to tell Samo at once (a pop-up), if anything. A reply the list no longer waits for
+    /// is dropped.
+    pub fn ask(&mut self, ask: ListAsk) -> Vec<HelperMsg> {
+        let popup = |title: String| HelperMsg::Popup {
+            key: "paste".into(),
+            kind: PopupKind::Info,
+            title,
+            body: String::new(),
+        };
+        match ask {
+            ListAsk::Items(reply) => {
+                let _ = reply.try_send(self.history.items().to_vec());
+            }
+            ListAsk::Put { id, plain, done } => {
+                let put = self.put(&id, plain);
+                let _ = done.try_send(put);
+                if !put && self.history.item(&id).is_some() {
+                    return vec![popup(
+                        "Couldn't copy: another app is using the clipboard".into(),
+                    )];
+                }
+            }
+            ListAsk::Pin(id, reply) => {
+                let pinned = self.history.item(&id).is_some_and(|i| i.pinned);
+                self.history.pin(&id, !pinned);
+                self.save();
+                let _ = reply.try_send(self.history.items().to_vec());
+            }
+            ListAsk::Delete(id, reply) => {
+                self.delete(&id);
+                let _ = reply.try_send(self.history.items().to_vec());
+            }
+            ListAsk::Say(words) => return vec![popup(words)],
+            ListAsk::Shortcut(state) => self.shortcut = state,
+        }
+        Vec::new()
+    }
+
     /// One look at the clipboard; true if a copy was kept.
     pub fn tick(&mut self, now: DateTime<Utc>) -> bool {
         if !self.settings.watching {
@@ -375,9 +435,11 @@ impl<B: Board> Clips<B> {
 mod tests {
     use super::*;
     use crate::fake::FakeBoard;
+    use crate::history::Item;
     use crate::settings::Shortcut;
     use crate::watcher::clip;
     use samo_ext_protocol::{Lamp, Widget};
+    use std::sync::mpsc::{self, SyncSender};
 
     fn open(dir: &Path) -> Clips<FakeBoard> {
         Clips::open(
@@ -866,6 +928,99 @@ mod tests {
             msgs.iter()
                 .any(|m| matches!(m, HelperMsg::Health { ok: false, .. }))
         );
+        Ok(())
+    }
+
+    // What the list asks, from its own thread.
+
+    fn ask_items(
+        c: &mut Clips<FakeBoard>,
+        ask: impl FnOnce(SyncSender<Vec<Item>>) -> ListAsk,
+    ) -> Vec<String> {
+        let (tx, rx) = mpsc::sync_channel(1);
+        c.ask(ask(tx));
+        rx.try_recv()
+            .map(|items| items.into_iter().map(|i| i.text).collect())
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn the_list_gets_the_history_pins_first() -> Result<(), String> {
+        let tmp = tempfile::tempdir().map_err(|e| e.to_string())?;
+        let now = Utc::now();
+        let mut c = open(tmp.path());
+        copy(&mut c, "one", now);
+        copy(&mut c, "two", now);
+        assert_eq!(ask_items(&mut c, ListAsk::Items), ["two", "one"]);
+        let one = id_of(&c, "one");
+        assert_eq!(
+            ask_items(&mut c, |tx| ListAsk::Pin(one.clone(), tx)),
+            ["one", "two"]
+        );
+        assert!(
+            open(tmp.path())
+                .history()
+                .item(&one)
+                .is_some_and(|i| i.pinned),
+            "not saved"
+        );
+        // Alt+P again unpins: it goes to the top of the recent copies, as on the Mac.
+        assert_eq!(
+            ask_items(&mut c, |tx| ListAsk::Pin(one.clone(), tx)),
+            ["one", "two"]
+        );
+        assert!(c.history().item(&one).is_some_and(|i| !i.pinned));
+        assert_eq!(
+            ask_items(&mut c, |tx| ListAsk::Delete(one.clone(), tx)),
+            ["two"]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_pick_is_put_as_clips_own_and_says_so() -> Result<(), String> {
+        let tmp = tempfile::tempdir().map_err(|e| e.to_string())?;
+        let now = Utc::now();
+        let mut c = open(tmp.path());
+        copy(&mut c, "one", now);
+        copy(&mut c, "two", now);
+        let one = id_of(&c, "one");
+        let (tx, rx) = mpsc::sync_channel(1);
+        assert!(
+            c.ask(ListAsk::Put {
+                id: one.clone(),
+                plain: false,
+                done: tx
+            })
+            .is_empty()
+        );
+        assert_eq!(rx.try_recv(), Ok(true));
+        assert!(!c.tick(now), "the pick was kept as a new copy");
+        c.board_mut().busy = true;
+        let (tx, rx) = mpsc::sync_channel(1);
+        let said = c.ask(ListAsk::Put {
+            id: one,
+            plain: false,
+            done: tx,
+        });
+        assert_eq!(rx.try_recv(), Ok(false));
+        assert!(said.iter().any(|m| matches!(m, HelperMsg::Popup { .. })));
+        Ok(())
+    }
+
+    #[test]
+    fn the_list_reports_its_shortcut_and_what_to_say() -> Result<(), String> {
+        let tmp = tempfile::tempdir().map_err(|e| e.to_string())?;
+        let now = Utc::now();
+        let mut c = open(tmp.path());
+        c.updates(now, false);
+        assert!(c.ask(ListAsk::Shortcut(ShortcutState::Refused)).is_empty());
+        let msgs = c.updates(now, false);
+        assert!(view(&msgs).is_some(), "the page didn't change");
+        let said = c.ask(ListAsk::Say("Copied: press Ctrl+V".into()));
+        assert!(said.iter().any(
+            |m| matches!(m, HelperMsg::Popup { title, .. } if title == "Copied: press Ctrl+V")
+        ));
         Ok(())
     }
 }

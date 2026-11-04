@@ -141,7 +141,7 @@ mod tests {
     fn history(texts: &[&str]) -> History {
         let mut h = History::default();
         for t in texts {
-            h.add(Capture::text(t, Some("notepad.exe")), Utc::now());
+            h.add(&Capture::text(t, Some("notepad.exe")), Utc::now());
         }
         h
     }
