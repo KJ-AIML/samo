@@ -8,6 +8,7 @@ mod extensions_page;
 #[cfg(target_os = "macos")]
 mod finish_update;
 mod hub;
+mod instance;
 mod layout;
 mod live;
 mod locations;
@@ -326,6 +327,58 @@ fn open_main(cx: &mut App, nav: Option<NavSection>) {
     .detach();
 }
 
+/// The Mac's titlebar is see-through, with the traffic lights inside Samo's sidebar. Windows keeps its own, with its
+/// minimize, maximize and close buttons: a see-through one there has none and can't be dragged (ADR-006 §3).
+fn main_titlebar() -> TitlebarOptions {
+    if cfg!(windows) {
+        TitlebarOptions {
+            title: Some(SharedString::from("Samo")),
+            appears_transparent: false,
+            traffic_light_position: None,
+        }
+    } else {
+        TitlebarOptions {
+            title: Some(SharedString::from("Samo")),
+            appears_transparent: true,
+            traffic_light_position: Some(point(px(20.0), px(20.0))),
+        }
+    }
+}
+
+/// GPUI quits a Windows app when its last window closes. Samo keeps running in the tray, as it does in the Mac's
+/// menu bar, so on Windows it keeps one window that is never shown (ADR-006 §3).
+#[cfg(windows)]
+fn keep_running_in_tray(cx: &mut App) {
+    let _ = cx.open_window(
+        WindowOptions {
+            window_bounds: Some(WindowBounds::Windowed(Bounds {
+                origin: point(px(0.0), px(0.0)),
+                size: size(px(1.0), px(1.0)),
+            })),
+            titlebar: None,
+            focus: false,
+            show: false,
+            kind: gpui::WindowKind::PopUp,
+            is_movable: false,
+            is_resizable: false,
+            is_minimizable: false,
+            ..Default::default()
+        },
+        |_, cx| cx.new(|_| Keeper),
+    );
+}
+
+/// The window that is never shown.
+#[cfg(windows)]
+struct Keeper;
+
+#[cfg(windows)]
+impl Render for Keeper {
+    fn render(&mut self, _: &mut Window, _: &mut gpui::Context<Self>) -> impl IntoElement {
+        div()
+    }
+}
+
 fn open_main_now(cx: &mut App, nav: Option<NavSection>) {
     if let Some(handle) = cx.global::<AppState>().main {
         let reused = handle
@@ -347,11 +400,7 @@ fn open_main_now(cx: &mut App, nav: Option<NavSection>) {
         WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(bounds)),
             window_min_size: Some(size(px(640.0), px(520.0))),
-            titlebar: Some(TitlebarOptions {
-                title: Some(SharedString::from("Samo")),
-                appears_transparent: true,
-                traffic_light_position: Some(point(px(20.0), px(20.0))),
-            }),
+            titlebar: Some(main_titlebar()),
             ..Default::default()
         },
         |window, cx| {
@@ -1065,6 +1114,14 @@ fn main() {
     if let Some(code) = finish_update::from_args(&env::args().collect::<Vec<_>>()) {
         std::process::exit(code);
     }
+    // One Samo at a time on Windows: a second launch asks the first to show its window, and stops here.
+    #[cfg(windows)]
+    let instance = match instance::dir().map(|dir| instance::Instance::claim(&dir)) {
+        Some(Ok(instance::Claim::AlreadyRunning)) => return,
+        Some(Ok(instance::Claim::Claimed(instance))) => Some(instance),
+        // Can't tell (no app-data folder, or the lock can't be made): run, as the Mac always does.
+        _ => None,
+    };
     let app = Application::new().with_assets(assets::Assets);
     // Closing the window leaves Samo in the menu bar; the Dock icon brings the window back.
     app.on_reopen(|cx| open_main(cx, None));
@@ -1110,12 +1167,19 @@ fn main() {
         });
         let menubar = menubar::MenuBar::install(cx);
         cx.global_mut::<AppState>().menubar = menubar;
+        #[cfg(windows)]
+        keep_running_in_tray(cx);
 
         // Draw when there is news, and only then: a burst of wakes becomes one frame.
         cx.spawn(async move |cx| {
             while wake_rx.next().await.is_some() {
                 while wake_rx.try_recv().is_ok() {}
                 let drawn = cx.update(|cx| {
+                    // Another launch asked for the window (Windows; the Dock does this on the Mac).
+                    #[cfg(windows)]
+                    if instance.as_ref().is_some_and(|i| i.take_show_request()) {
+                        open_main(cx, None);
+                    }
                     cx.refresh_windows();
                     menubar::refresh(cx);
                     show_extension_popups(cx);

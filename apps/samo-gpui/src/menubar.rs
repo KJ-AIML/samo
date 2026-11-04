@@ -106,7 +106,7 @@ impl MenuBar {
             set_probe(&self.tray, icon);
         }
         if title_changed {
-            self.tray.set_title(Some(&next.title));
+            show_title(&self.tray, &next.title);
         }
         self.shown = Some(next);
     }
@@ -160,6 +160,18 @@ fn pad_figure(s: String) -> String {
     } else {
         format!("{}{s}", "\u{2007}".repeat(width - n))
     }
+}
+
+/// The CPU load (and how many extensions wait) beside the item.
+#[cfg(target_os = "macos")]
+fn show_title(tray: &TrayIcon, title: &str) {
+    tray.set_title(Some(title));
+}
+
+/// A Windows tray item has no title (ADR-006 §3), so the figure goes in its tooltip.
+#[cfg(not(target_os = "macos"))]
+fn show_title(tray: &TrayIcon, title: &str) {
+    let _ = tray.set_tooltip(Some(format!("Samo{title}")));
 }
 
 /// The probe as a template image, so macOS tints it for a light or dark menu bar.
@@ -217,6 +229,27 @@ pub(crate) fn close_panel(cx: &mut App) {
     }
 }
 
+/// Where the quick panel goes, in points, given the item `(left, top, width, height)`, the display and the panel
+/// sizes: centred on the item and kept on the display; under it when it is in the top half (the Mac's menu bar),
+/// over it when it is in the bottom half (a Windows tray on a bottom taskbar).
+pub(crate) fn panel_origin(
+    icon: (f64, f64, f64, f64),
+    display: (f32, f32),
+    panel: (f32, f32),
+) -> (f32, f32) {
+    let (left, top, w, h) = icon;
+    let (display_w, display_h) = display;
+    let (panel_w, panel_h) = panel;
+    let x =
+        ((left + w / 2.0) as f32 - panel_w / 2.0).clamp(8.0, (display_w - panel_w - 8.0).max(8.0));
+    let y = if (top as f32) < display_h / 2.0 {
+        (top + h) as f32 + 6.0
+    } else {
+        (top as f32 - panel_h - 6.0).max(8.0)
+    };
+    (x, y)
+}
+
 fn toggle_panel(rect: tray_icon::Rect, cx: &mut App) {
     let state = cx.global::<AppState>();
     if let Some(handle) = state.panel {
@@ -233,24 +266,28 @@ fn toggle_panel(rect: tray_icon::Rect, cx: &mut App) {
         return;
     }
 
-    let scale = main_screen_scale();
-    let icon_left = rect.position.x / scale;
-    let icon_w = f64::from(rect.size.width) / scale;
-    let icon_bottom = (rect.position.y + f64::from(rect.size.height)) / scale;
-    let display_w = cx
-        .primary_display()
-        .map(|d| f32::from(d.bounds().size.width))
-        .unwrap_or(1440.0);
-    let x = ((icon_left + icon_w / 2.0) as f32 - PANEL_W / 2.0)
-        .clamp(8.0, (display_w - PANEL_W - 8.0).max(8.0));
-    let y = icon_bottom as f32 + 6.0;
-
     let ext_lines = state
         .hub
         .ext
         .get()
         .map_or(0, |host| ext_facts_count(&host.snapshot()));
     let panel_h = PANEL_H + FACT_H * ext_lines as f32;
+
+    let scale = main_screen_scale();
+    let icon = (
+        rect.position.x / scale,
+        rect.position.y / scale,
+        f64::from(rect.size.width) / scale,
+        f64::from(rect.size.height) / scale,
+    );
+    let display = cx
+        .primary_display()
+        .map(|d| {
+            let size = d.bounds().size;
+            (f32::from(size.width), f32::from(size.height))
+        })
+        .unwrap_or((1440.0, 900.0));
+    let (x, y) = panel_origin(icon, display, (PANEL_W, panel_h));
     let opened = cx.open_window(
         WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(Bounds {
@@ -627,6 +664,20 @@ fn ext_facts(frame: &Frame) -> Vec<(gpui::Stateful<gpui::Div>, Option<NavSection
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Under the Mac's menu bar item, as before; over a Windows tray icon on a bottom taskbar; on the display.
+    #[test]
+    fn the_panel_sits_under_a_top_item_and_over_a_bottom_one() {
+        let panel = (340.0, 446.0);
+        assert_eq!(
+            panel_origin((1000.0, 0.0, 30.0, 24.0), (1440.0, 900.0), panel),
+            (845.0, 30.0)
+        );
+        let (_, y) = panel_origin((1800.0, 1040.0, 24.0, 40.0), (1920.0, 1080.0), panel);
+        assert_eq!(y, 1040.0 - 446.0 - 6.0);
+        let (x, _) = panel_origin((1900.0, 1040.0, 24.0, 40.0), (1920.0, 1080.0), panel);
+        assert_eq!(x, 1920.0 - 340.0 - 8.0);
+    }
 
     #[test]
     fn meter_words_never_say_zero_for_unknown() {
