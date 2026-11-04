@@ -38,10 +38,13 @@ fn is_shell(name: &str) -> bool {
     SHELLS.contains(&base)
 }
 
-/// `chain` (parent first) up to the first process that started after the one below it: that one isn't its parent
-/// but a later process given a reused pid (Windows keeps an orphan's old parent pid). `own_start` is this process's
-/// start time.
-fn until_reused(chain: Vec<ProcInfo>, own_start: u64) -> Vec<ProcInfo> {
+/// On Windows, `chain` (parent first) up to the first process that started after the one below it: that one isn't
+/// its parent but a later process given a reused pid (Windows keeps an orphan's old parent pid). `own_start` is
+/// this process's start time. The Mac gives an orphan to launchd, so its chain is kept as it is (ADR-006 R25).
+fn until_reused_on(chain: Vec<ProcInfo>, own_start: u64, windows: bool) -> Vec<ProcInfo> {
+    if !windows {
+        return chain;
+    }
     let mut below = own_start;
     chain
         .into_iter()
@@ -104,7 +107,7 @@ pub fn ancestors(depth: usize) -> Vec<ProcInfo> {
         }
         pid = parent;
     }
-    until_reused(chain, own_start)
+    until_reused_on(chain, own_start, cfg!(windows))
 }
 
 /// Whether each process is still the one recorded (same pid and start time).
@@ -196,13 +199,15 @@ mod tests {
                 name: "explorer.exe".into(),
             },
         ];
-        let kept = until_reused(chain.clone(), own_start);
+        let kept = until_reused_on(chain.clone(), own_start, true);
         assert_eq!(kept.iter().map(|c| c.pid).collect::<Vec<_>>(), [20]);
+        // The Mac gives an orphan to launchd, so its chain is as it was, whatever the clock did (ADR-006 R25).
+        assert_eq!(until_reused_on(chain.clone(), own_start, false), chain);
         // In order, every one is kept.
         let mut fine = chain;
         fine[1].start_time_secs = 900;
-        assert_eq!(until_reused(fine, own_start).len(), 2);
-        assert!(until_reused(vec![p(30, "claude.exe")], 10).is_empty());
+        assert_eq!(until_reused_on(fine, own_start, true).len(), 2);
+        assert!(until_reused_on(vec![p(30, "claude.exe")], 10, true).is_empty());
     }
 
     #[test]
