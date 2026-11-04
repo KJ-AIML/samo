@@ -2,7 +2,31 @@
 //! pasting (PR F).
 
 pub mod board;
+pub mod hotkey;
+pub mod list;
 pub mod listen;
+pub mod paste;
+
+use crate::serve::{Desk, Event};
+use crate::settings::Shortcut;
+use std::sync::mpsc::Sender;
+
+/// Windows' desk: its word at each clipboard change, and the list at the shortcut.
+pub struct WinDesk;
+
+impl Desk for WinDesk {
+    fn listen(&self, tx: Sender<Event>) -> bool {
+        listen::listen(tx)
+    }
+
+    fn list(
+        &self,
+        tx: Sender<Event>,
+        shortcut: Option<Shortcut>,
+    ) -> Box<dyn Fn(Option<Shortcut>) + Send> {
+        list::start(tx, shortcut)
+    }
+}
 
 /// The real clipboard in tests.
 #[cfg(test)]

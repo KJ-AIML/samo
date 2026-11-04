@@ -147,6 +147,7 @@ pub fn listing(id: &str, version: &str, package: FileRef) -> Listing {
         permissions: Vec::new(),
         min_macos: None,
         limits: None,
+        overrides: BTreeMap::new(),
     }
 }
 
@@ -175,6 +176,7 @@ pub fn listing_for(manifest: &Manifest, package: FileRef) -> Listing {
         permissions: manifest.permissions.clone(),
         min_macos: manifest.min_macos.clone(),
         limits: manifest.limits,
+        overrides: BTreeMap::new(),
     }
 }
 

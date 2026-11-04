@@ -1,13 +1,14 @@
-//! PR E's demo, end to end: the real `samo-clips.exe` under Samo's real extension host, on this PC's real clipboard.
-//! A copy shows on Clips' page in Samo; a copy marked secret doesn't; Delete and Pause from Samo work; turning Clips
-//! off stops it and keeps the history. The shortcut is left unset, so the test never takes one from this PC.
+//! Clips' demo, end to end: the real `samo-clips.exe` under Samo's real extension host, on this PC's real clipboard.
+//! A shortcut chosen on the page is held by the list (Alt+Shift+V, for a moment, then none); a copy shows on Clips'
+//! page in Samo; a copy marked secret doesn't; Delete and Pause from Samo work; turning Clips off stops it and keeps
+//! the history. It starts with no shortcut, and presses no keys.
 //!
 //! It replaces what you copied, so it runs on CI, or when `SAMO_TEST_CLIPBOARD=1`; the text that was there goes back.
 #![cfg(windows)]
 
 use samo_clips::watcher::{Board, Put, clip};
 use samo_clips::win::board::WinBoard;
-use samo_ext_protocol::{RowItem, Widget};
+use samo_ext_protocol::{Lamp, RowItem, Widget};
 use samo_extensions::{ExtRoot, ExtSlot, ExtSnapshot, Host, HostConfig, Status};
 use std::fs;
 use std::path::Path;
@@ -151,6 +152,22 @@ fn clips_on_windows_under_samos_host() -> Fallible<()> {
             .any(|w| matches!(w, Widget::Section { title, .. } if title == "PERMISSIONS")),
         "Windows asks for no permission"
     );
+
+    // 1b. A shortcut chosen on the page goes to the list, which tells whether Windows gave it (R18); none takes nothing.
+    host.choice(SLOT, "shortcut", "alt-shift-v");
+    let lamp = |s: &ExtSnapshot| {
+        rows(s, "SHORTCUT")
+            .first()
+            .map(|r| (r.lamp, r.detail.clone()))
+    };
+    let snap = wait(&host, "the list to hold Alt+Shift+V", 10, |s| {
+        lamp(s).is_some_and(|(l, _)| l == Lamp::Done || l == Lamp::Error)
+    })?;
+    eprintln!("Alt+Shift+V: {:?}", lamp(&snap));
+    host.choice(SLOT, "shortcut", "none");
+    wait(&host, "no shortcut", 10, |s| {
+        lamp(s).is_some_and(|(l, d)| l == Lamp::Off && d.starts_with("No shortcut"))
+    })?;
 
     // 2. A copy in another app shows on the page, with the badge.
     let text = format!("clips demo {}", std::process::id());

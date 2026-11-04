@@ -186,6 +186,65 @@ fn a_mac_only_extension_isnt_installed_on_windows() -> Fallible<()> {
     Ok(())
 }
 
+/// Clips' case: the Windows build declares other capabilities than the Mac's, so they are in the listing's `overrides`.
+/// On Windows the store shows Windows' own, and the package installs against them (R11), not the Mac's.
+#[cfg(windows)]
+#[test]
+fn a_windows_build_installs_against_its_own_capabilities() -> Fallible<()> {
+    use samo_domain::store::{Capabilities, WINDOWS};
+    let w = World::new()?;
+    let (mut l1, _) = w.package("0.1.0", &helper_script("0.1.0"))?;
+    let windows_own = Capabilities {
+        summary: Some("Hello, on Windows".into()),
+        changes: l1.changes.clone(),
+        windows: l1.windows.clone(),
+        watches: l1.watches.clone(),
+        permissions: l1.permissions.clone(),
+        min_macos: l1.min_macos.clone(),
+        limits: l1.limits,
+    };
+    // What the Mac's build says.
+    l1.changes = vec![samo_ext_protocol::Change {
+        what: "Asks macOS for Accessibility".into(),
+        place: "System Settings".into(),
+        undo: "Turn it off there".into(),
+    }];
+    l1.permissions = vec!["accessibility".into()];
+    l1.min_macos = Some("14.0".into());
+    l1.overrides.insert(WINDOWS.to_string(), windows_own);
+    w.shop.publish(&catalog("2026-11-05T10:00:00Z", vec![l1]))?;
+    let host = w.host(None);
+    let worker = StoreWorker::start(w.store(), host.clone(), Arc::new(|| {}));
+    worker.submit(StoreJob::Refresh { force: true }, UserAction::clicked());
+    wait_for("the catalog", 10, || {
+        let v = worker.view();
+        v.catalog.is_some() && !v.refreshing
+    })?;
+    let shown = worker
+        .view()
+        .catalog
+        .and_then(|c| c.extensions.first().cloned())
+        .ok_or("no listing")?;
+    assert_eq!(shown.summary, "Hello, on Windows");
+    assert!(
+        shown.permissions.is_empty(),
+        "the Mac's permissions were shown on Windows"
+    );
+    assert_eq!(shown.min_macos, None);
+    worker.submit(StoreJob::Install("hello".into()), UserAction::clicked());
+    wait_for("Hello to run", 15, || running(&host, "0.1.0"))?;
+    assert!(
+        worker
+            .view()
+            .jobs
+            .get("hello")
+            .and_then(|j| j.error.clone())
+            .is_none()
+    );
+    host.shutdown_all();
+    Ok(())
+}
+
 #[test]
 fn install_update_uninstall_from_catalog() -> Fallible<()> {
     let w = World::new()?;

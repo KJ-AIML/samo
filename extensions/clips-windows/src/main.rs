@@ -20,7 +20,7 @@ fn serve() -> ExitCode {
     samo_clips::serve::run(
         WinBoard::default(),
         Box::new(front_app),
-        samo_clips::win::listen::listen,
+        &samo_clips::win::WinDesk,
     )
 }
 

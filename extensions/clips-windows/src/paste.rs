@@ -5,15 +5,19 @@
 
 use std::time::Duration;
 
-/// What the flow needs from Windows; tests stand in for all of it. Windows are their handles' values.
+/// What the flow needs from Windows; tests stand in for all of it.
 pub trait Windows {
-    fn front(&self) -> Option<isize>;
+    /// A window: Windows' handle, or a number in tests.
+    type Window: PartialEq;
+    fn front(&self) -> Option<Self::Window>;
     /// Asks `target` to come forward.
-    fn activate(&self, target: isize);
-    /// Whether `target`'s program runs as administrator.
-    fn elevated(&self, target: isize) -> bool;
-    /// Presses Ctrl+V.
-    fn press_paste(&self);
+    fn activate(&self, target: &Self::Window);
+    /// Whether `target`'s program runs as administrator and Clips doesn't (Windows won't let Clips type into it).
+    fn elevated(&self, target: &Self::Window) -> bool;
+    /// Whether Alt, Shift or a Win key is held: Ctrl+V pressed then would be another shortcut.
+    fn keys_held(&self) -> bool;
+    /// Presses Ctrl+V; false if Windows took none of it.
+    fn press_paste(&self) -> bool;
     fn sleep(&self, time: Duration);
 }
 
@@ -28,16 +32,24 @@ pub const COPIED: &str = "Copied: press Ctrl+V";
 /// How long to wait for the window to be in front again, and how often to look.
 const PATIENCE: Duration = Duration::from_millis(600);
 const STEP: Duration = Duration::from_millis(20);
+/// How long to wait for Alt, Shift and Win to be let go.
+const LET_GO: Duration = Duration::from_millis(500);
 
-#[derive(Debug, Default)]
-pub struct PasteFlow {
+#[derive(Debug)]
+pub struct PasteFlow<W> {
     /// The window in front when the list opened.
-    previous: Option<isize>,
+    previous: Option<W>,
 }
 
-impl PasteFlow {
+impl<W> Default for PasteFlow<W> {
+    fn default() -> Self {
+        Self { previous: None }
+    }
+}
+
+impl<W: PartialEq> PasteFlow<W> {
     /// The list is opening: remember where to paste.
-    pub fn remember(&mut self, front: Option<isize>) {
+    pub fn remember(&mut self, front: Option<W>) {
         self.previous = front;
     }
 
@@ -47,25 +59,36 @@ impl PasteFlow {
     }
 
     /// A pick: the item is already on the clipboard and the list closed. Paste into the remembered window.
-    pub fn picked(&mut self, w: &impl Windows) -> Outcome {
+    pub fn picked(&mut self, w: &impl Windows<Window = W>) -> Outcome {
         let Some(target) = self.previous.take() else {
             return Outcome::CopiedOnly(COPIED.into());
         };
-        if w.elevated(target) {
+        if w.elevated(&target) {
             return Outcome::CopiedOnly(format!(
                 "{COPIED} (Windows doesn't let Clips paste into an app run as administrator)"
             ));
         }
-        w.activate(target);
+        w.activate(&target);
         let mut waited = Duration::ZERO;
         loop {
-            if w.front() == Some(target) {
+            if w.front().as_ref() == Some(&target) {
+                // Alt+Enter, or the shortcut still held: Ctrl+V must not become Ctrl+Alt+V.
+                let mut held_for = Duration::ZERO;
+                while w.keys_held() {
+                    if held_for >= LET_GO {
+                        return Outcome::CopiedOnly(COPIED.into());
+                    }
+                    w.sleep(STEP);
+                    held_for += STEP;
+                }
                 // A moment for the window to take the keyboard back; then it must still be in front (R24).
                 w.sleep(Duration::from_millis(50));
                 if w.front().as_ref() != Some(&target) {
                     return Outcome::CopiedOnly(COPIED.into());
                 }
-                w.press_paste();
+                if !w.press_paste() {
+                    return Outcome::CopiedOnly(COPIED.into());
+                }
                 return Outcome::Pasted;
             }
             if waited >= PATIENCE {
@@ -86,6 +109,10 @@ mod tests {
     struct FakeWindows {
         fronts: RefCell<Vec<Option<isize>>>,
         elevated: bool,
+        /// Whether Alt, Shift or Win is held, at each look (the last stays).
+        held: RefCell<Vec<bool>>,
+        /// Windows drops the injected keys.
+        blocked: bool,
         activated: Cell<Option<isize>>,
         pressed: Cell<u32>,
     }
@@ -95,6 +122,8 @@ mod tests {
             Self {
                 fronts: RefCell::new(fronts),
                 elevated: false,
+                held: RefCell::new(vec![false]),
+                blocked: false,
                 activated: Cell::new(None),
                 pressed: Cell::new(0),
             }
@@ -102,6 +131,7 @@ mod tests {
     }
 
     impl Windows for FakeWindows {
+        type Window = isize;
         fn front(&self) -> Option<isize> {
             let mut fronts = self.fronts.borrow_mut();
             if fronts.len() > 1 {
@@ -110,14 +140,26 @@ mod tests {
                 fronts.first().copied().flatten()
             }
         }
-        fn activate(&self, target: isize) {
-            self.activated.set(Some(target));
+        fn activate(&self, target: &isize) {
+            self.activated.set(Some(*target));
         }
-        fn elevated(&self, _target: isize) -> bool {
+        fn elevated(&self, _target: &isize) -> bool {
             self.elevated
         }
-        fn press_paste(&self) {
+        fn keys_held(&self) -> bool {
+            let mut held = self.held.borrow_mut();
+            if held.len() > 1 {
+                held.remove(0)
+            } else {
+                held.first().copied().unwrap_or(false)
+            }
+        }
+        fn press_paste(&self) -> bool {
+            if self.blocked {
+                return false;
+            }
             self.pressed.set(self.pressed.get() + 1);
+            true
         }
         fn sleep(&self, _for: Duration) {}
     }
@@ -134,6 +176,34 @@ mod tests {
         flow.cancelled();
         assert_eq!(flow.picked(&w), Outcome::CopiedOnly(COPIED.into()));
         assert_eq!(w.pressed.get(), 0);
+    }
+
+    /// Ctrl+V with Alt still held (Alt+Enter, or Win+Alt+V held) would be Ctrl+Alt+V: Paste Special in Word, nothing
+    /// in Notepad, a stray character on AltGr keyboards.
+    #[test]
+    fn paste_waits_for_alt_shift_and_win_to_be_let_go() {
+        let w = FakeWindows::new(vec![Some(7)]);
+        *w.held.borrow_mut() = vec![true, true, true, false];
+        let mut flow = PasteFlow::default();
+        flow.remember(Some(7));
+        assert_eq!(flow.picked(&w), Outcome::Pasted);
+        assert_eq!(w.pressed.get(), 1);
+
+        // Still held after the wait: copied only, nothing pressed.
+        let w = FakeWindows::new(vec![Some(7)]);
+        *w.held.borrow_mut() = vec![true];
+        flow.remember(Some(7));
+        assert_eq!(flow.picked(&w), Outcome::CopiedOnly(COPIED.into()));
+        assert_eq!(w.pressed.get(), 0);
+    }
+
+    #[test]
+    fn a_paste_windows_blocks_is_copied_only() {
+        let mut w = FakeWindows::new(vec![Some(7)]);
+        w.blocked = true;
+        let mut flow = PasteFlow::default();
+        flow.remember(Some(7));
+        assert_eq!(flow.picked(&w), Outcome::CopiedOnly(COPIED.into()));
     }
 
     #[test]

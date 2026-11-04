@@ -35,6 +35,17 @@ pub struct Catalog {
     pub extensions: Vec<Listing>,
 }
 
+impl Catalog {
+    /// The catalog as `platform` sees it: each listing with that platform's own capabilities (`Listing::on`).
+    #[must_use]
+    pub fn on(mut self, platform: &str) -> Catalog {
+        for listing in &mut self.extensions {
+            *listing = listing.on(platform);
+        }
+        self
+    }
+}
+
 /// Samo's own latest release.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SamoRelease {
@@ -90,6 +101,24 @@ impl Listing {
     pub fn package_on(&self, platform: &str) -> Option<&FileRef> {
         package_on(&self.package, &self.platforms, platform)
     }
+
+    /// The listing as `platform` sees it: its own summary, changes and capabilities, where it has them.
+    #[must_use]
+    pub fn on(&self, platform: &str) -> Listing {
+        let mut seen = self.clone();
+        if let Some(caps) = self.overrides.get(platform) {
+            if let Some(summary) = &caps.summary {
+                seen.summary.clone_from(summary);
+            }
+            seen.changes.clone_from(&caps.changes);
+            seen.windows.clone_from(&caps.windows);
+            seen.watches.clone_from(&caps.watches);
+            seen.permissions.clone_from(&caps.permissions);
+            seen.min_macos.clone_from(&caps.min_macos);
+            seen.limits = caps.limits;
+        }
+        seen
+    }
 }
 
 /// One extension in the store.
@@ -127,6 +156,29 @@ pub struct Listing {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub windows: Option<String>,
     /// What it watches while idle (ADR-005).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub watches: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub permissions: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_macos: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limits: Option<Limits>,
+    /// What a platform's build declares where it differs from the Mac's, by platform (ADR-006): on that platform it
+    /// replaces the capabilities above (`on`). Older Samos ignore it; left out when empty.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub overrides: BTreeMap<String, Capabilities>,
+}
+
+/// A platform's own summary, changes and capabilities (ADR-004, ADR-005), where its build differs from the Mac's.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Capabilities {
+    /// Its own summary, if it differs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
+    pub changes: Vec<Change>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub windows: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub watches: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -283,6 +335,12 @@ fn check_listing(l: &Listing) -> Result<(), StoreError> {
     if l.changes.is_empty() {
         return bad("it must say what it changes on the Mac".into());
     }
+    if l.overrides.contains_key(MAC) {
+        return bad("the Mac's own are the listing's; it has no override".into());
+    }
+    if l.overrides.values().any(|caps| caps.changes.is_empty()) {
+        return bad("each platform it overrides must say what it changes there".into());
+    }
     if l.screenshots.len() > MAX_SHOTS {
         return bad(format!("more than {MAX_SHOTS} screenshots"));
     }
@@ -436,6 +494,11 @@ pub fn image_size(bytes: &[u8]) -> Option<(u32, u32)> {
         }
     }
     None
+}
+
+/// `manifest_matches` against the listing as `platform` sees it: a Windows package against Windows' capabilities.
+pub fn manifest_matches_on(m: &Manifest, l: &Listing, platform: &str) -> Result<(), StoreError> {
+    manifest_matches(m, &l.on(platform))
 }
 
 /// The package's manifest must say what its listing says (ADR-003 M3): what you read in the store is what you
@@ -648,6 +711,7 @@ mod tests {
             permissions: Vec::new(),
             min_macos: None,
             limits: None,
+            overrides: BTreeMap::new(),
         }
     }
 
@@ -896,6 +960,119 @@ mod tests {
         let back: Listing = serde_json::from_str(&plain).map_err(|e| e.to_string())?;
         assert_eq!(back, listing());
         Ok(())
+    }
+
+    /// Clips on Windows: what its Windows build declares, where it differs from the Mac's.
+    fn windows_capabilities() -> Capabilities {
+        Capabilities {
+            summary: Some("Win+Alt+V finds anything you copied".into()),
+            changes: vec![Change {
+                what: "Presses Ctrl+V for you".into(),
+                place: "The app you were in".into(),
+                undo: "Nothing to undo".into(),
+            }],
+            windows: Some("The list at its shortcut".into()),
+            watches: Some("Windows tells it of each new copy".into()),
+            permissions: Vec::new(),
+            min_macos: None,
+            limits: None,
+        }
+    }
+
+    #[test]
+    fn windows_capabilities_override_the_macs() -> Result<(), String> {
+        let mut l = listing();
+        l.windows = Some("The list, and a shortcut window".into());
+        l.watches = Some("Checks twice a second".into());
+        l.permissions = vec!["accessibility".into()];
+        l.min_macos = Some("14.0".into());
+        l.overrides.insert(WINDOWS.into(), windows_capabilities());
+        let mac = l.on(MAC);
+        assert_eq!(
+            (
+                mac.summary.as_str(),
+                mac.permissions.clone(),
+                mac.min_macos.clone(),
+                mac.changes.clone()
+            ),
+            (
+                "Every widget",
+                vec!["accessibility".to_string()],
+                Some("14.0".to_string()),
+                vec![change()]
+            )
+        );
+        let win = l.on(WINDOWS);
+        let caps = windows_capabilities();
+        assert_eq!(Some(win.summary.clone()), caps.summary);
+        assert_eq!(
+            (
+                win.changes.clone(),
+                win.windows.clone(),
+                win.watches.clone(),
+                win.permissions.clone(),
+                win.min_macos.clone(),
+                win.limits
+            ),
+            (
+                caps.changes,
+                caps.windows,
+                caps.watches,
+                caps.permissions,
+                caps.min_macos,
+                caps.limits
+            )
+        );
+        // Windows' manifest matches the listing as Windows sees it, and not as the Mac does.
+        let mut m = Manifest::parse(
+            "id = \"hello\"
+name = \"Hello\"
+version = \"0.2.0\"
+protocol = 1
+min_samo = \"0.2.0\"
+\n             helper = \"bin/samo-ext-hello\"
+summary = \"Win+Alt+V finds anything you copied\"
+\n             windows = \"The list at its shortcut\"
+watches = \"Windows tells it of each new copy\"
+
+\n             [[changes]]
+what = \"w\"
+where = \"p\"
+undo = \"u\"
+",
+        )
+        .map_err(|e| e.to_string())?;
+        m.changes = windows_capabilities().changes;
+        manifest_matches_on(&m, &l, WINDOWS).map_err(|e| e.to_string())?;
+        assert!(manifest_matches_on(&m, &l, MAC).is_err());
+        // Written only when there are some; read back as written.
+        let json = serde_json::to_string(&l).map_err(|e| e.to_string())?;
+        let back: Listing = serde_json::from_str(&json).map_err(|e| e.to_string())?;
+        assert_eq!(back, l);
+        assert!(
+            !serde_json::to_string(&listing())
+                .map_err(|e| e.to_string())?
+                .contains("overrides")
+        );
+        Ok(())
+    }
+
+    /// The Mac's own are the listing's, which Samo 0.4.1 reads: an override for the Mac would show new Samos
+    /// something else (R25).
+    #[test]
+    fn the_mac_has_no_override() {
+        let mut l = listing();
+        l.overrides.insert(MAC.into(), windows_capabilities());
+        assert!(matches!(check_listing(&l), Err(StoreError::BadListing(_))));
+    }
+
+    #[test]
+    fn a_platforms_override_must_say_what_it_changes() {
+        let mut l = listing();
+        let mut caps = windows_capabilities();
+        caps.changes.clear();
+        l.overrides.insert(WINDOWS.into(), caps);
+        assert!(matches!(check_listing(&l), Err(StoreError::BadListing(_))));
     }
 
     #[test]
