@@ -13,4 +13,5 @@ pub mod naming;
 pub mod selection;
 pub mod settings;
 pub mod shots;
+pub mod stitch;
 pub mod watchdog;
