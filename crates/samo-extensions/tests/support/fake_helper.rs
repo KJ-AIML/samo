@@ -8,13 +8,13 @@
 //!
 //! `hello` · `say <line>` · `say-x <n>` · `repeat <n> <template>` · `wait-shutdown` · `sleep <secs>` ·
 //! `exit <code>` · `write <path> <text>` · `env-to <path>` · `cwd-to <path>` · `spawn-sleeper <secs> [<pidfile>]` ·
-//! `spawn <json array: program and arguments>` · `burn` · `light` · `hold-mb <n>`
+//! `spawn <json array: program and arguments>` (its pid goes to `$DATA/spawned`) · `burn` · `light` · `hold-mb <n>`
 
 use std::env;
 use std::fs;
 use std::io::{BufRead, Write};
 use std::path::PathBuf;
-use std::process::{Command, ExitCode};
+use std::process::{Command, ExitCode, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -124,8 +124,15 @@ fn run(line: &str, held: &mut Vec<Vec<u8>>) -> Option<u8> {
         }
         "spawn" => {
             let argv: Vec<String> = serde_json::from_str(rest).unwrap_or_default();
-            if let Some((program, args)) = argv.split_first() {
-                let _ = Command::new(program).args(args).spawn();
+            if let Some((program, args)) = argv.split_first()
+                && let Ok(child) = Command::new(program)
+                    .args(args)
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::null())
+                    .spawn()
+            {
+                let data = PathBuf::from(env::var("SAMO_EXT_DATA_DIR").unwrap_or_default());
+                let _ = fs::write(data.join("spawned"), child.id().to_string());
             }
         }
         "burn" => loop {

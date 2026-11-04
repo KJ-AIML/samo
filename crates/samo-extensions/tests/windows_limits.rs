@@ -210,6 +210,63 @@ fn descendants_windows_are_counted() -> Fallible<()> {
     Ok(())
 }
 
+/// With the real window check, a helper that opens no window runs on. On Windows its family includes a hidden
+/// console host, which mustn't count as a window.
+#[cfg(any(target_os = "macos", windows))]
+#[test]
+fn a_helper_without_windows_runs_on_with_the_real_check() -> Fallible<()> {
+    let f = fixture("", "", &format!("{HELLO}\n{WAIT_FOR_SHUTDOWN}"))?;
+    let mut c = config(&f, |_| Some(0));
+    c.windows = WindowCheck::default();
+    let host = Host::start(f.root.clone(), c, Arc::new(|| {}));
+    wait_for(&host, "it to run", |s| status(s) == Some(Status::Running))?;
+    // Many checks, every 50 ms.
+    thread::sleep(Duration::from_millis(1_000));
+    assert_eq!(status(&host.snapshot()), Some(Status::Running));
+    host.shutdown_all();
+    Ok(())
+}
+
+/// R15 for real on Windows: the helper starts a program that shows a window, and Samo stops the helper and ends
+/// what it started. It opens a window on the desktop, so it is run by hand (`-- --ignored`).
+#[cfg(windows)]
+#[test]
+#[ignore = "opens a window on the desktop"]
+fn an_undeclared_window_on_the_desktop_stops_the_tree() -> Fallible<()> {
+    let root = std::env::var("SystemRoot").map_err(|e| e.to_string())?;
+    let powershell = format!(r"{root}\System32\WindowsPowerShell\v1.0\powershell.exe");
+    let argv = serde_json::to_string(&[
+        powershell.as_str(),
+        "-NoProfile",
+        "-Command",
+        "Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.MessageBox]::Show('Samo R15 test')",
+    ])
+    .map_err(|e| e.to_string())?;
+    let f = fixture(
+        "",
+        "",
+        &format!("spawn {argv}\n{HELLO}\n{WAIT_FOR_SHUTDOWN}"),
+    )?;
+    let mut c = config(&f, |_| Some(0));
+    c.windows = WindowCheck::default();
+    c.window_every = Duration::from_millis(500);
+    let host = Host::start(f.root.clone(), c, Arc::new(|| {}));
+    let snap = wait_for(&host, "R15 to stop it", |s| stopped_because(s).is_some())?;
+    assert_eq!(
+        stopped_because(&snap).as_deref(),
+        Some("Opened windows it didn't declare")
+    );
+    let spawned =
+        fs::read_to_string(f.root.data_dir("test").join("spawned")).map_err(|e| e.to_string())?;
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while alive(&spawned) && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(20));
+    }
+    assert!(!alive(&spawned), "the window's process outlived the helper");
+    host.shutdown_all();
+    Ok(())
+}
+
 #[test]
 fn stop_kills_descendants() -> Fallible<()> {
     let script = format!("spawn-sleeper 300 $DATA/child\n{HELLO}\n{WAIT_FOR_SHUTDOWN}");
