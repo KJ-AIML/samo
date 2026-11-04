@@ -145,6 +145,9 @@ Claude Code's documented hooks and status line).
 - **Connect** adds Samo's hooks to `~/.claude/settings.json`, after backing it up to `settings.json.samo-bak`;
   **Plan limits** sets Claude Code's status line, never replacing one you have. Both come out exactly when you
   turn them off. It never goes online.
+- On Windows it runs from `SAMO_EXT_DEV_DIR` until the store comes (#10). `~/.claude` is `%USERPROFILE%\.claude`;
+  the hooks run Samo's helper with no shell (Claude Code 2.1.139 or newer), and the status line works in Git Bash
+  and PowerShell.
 
 ### The store
 

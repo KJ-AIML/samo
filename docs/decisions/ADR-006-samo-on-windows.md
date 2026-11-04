@@ -174,7 +174,31 @@ These continue R1–R24.
   - The app starts the host. The Extensions page lists what runs from `SAMO_EXT_DEV_DIR` and says the store comes
     later.
   - `cargo run -p xtask -- ext-dev <folder>` lays out an extension on either OS.
-- **PR B:** Claude Sessions on Windows.
+- **PR B, Claude Sessions. Built:**
+  - It reads `%USERPROFILE%\.claude` and keeps its data in `%LOCALAPPDATA%`.
+  - **Hooks** use Claude Code's exec form (`command` + `args`, CLI 2.1.139+): Claude Code runs Samo's helper with no
+    shell, so it makes no difference whether Git Bash is installed.
+  - **The status line** has no exec form; Claude Code runs it through Git Bash, or PowerShell without Git Bash. Its
+    command is the helper's path with forward slashes and no quotes, which both shells run, if the path holds only
+    letters, digits and `. _ - / : ~ +`; else `~/…` from the home folder if that does. A space, `'`, `&`, `(` or
+    `$` would break one shell or the other, so otherwise Plan limits says why and writes nothing.
+  - Samo's entries are recognised by the helper's own path as well, so Disconnect finds them wherever
+    `SAMO_EXT_ROOT` keeps extensions (R7).
+  - **One guarantee is weaker than on the Mac.** The Mac's hook command checks that the helper is there, so a hook
+    left behind does nothing. An exec-form hook has no such check: if a dev build is uninstalled "anyway" (it can't
+    run to undo its change) or its folder is deleted by hand, Claude Code reports a hook error on each event until
+    the hooks are taken out. The uninstall message says so on Windows.
+  - A hook finds Claude Code above Git Bash's two `bash.exe`, `pwsh.exe`, `powershell.exe` or `cmd.exe`. On
+    Windows a "parent" that started after its child is a reused pid, and is skipped; the Mac's chain is as before.
+  - **Checked on this PC:**
+    - The release app runs Claude Sessions and Hello from `SAMO_EXT_DEV_DIR`, as children of Samo, and lists them
+      in the sidebar. Force-killing Samo ended both and their console hosts.
+    - The installed hook, fed a real UserPromptSubmit event, recorded the session as working and found the
+      `claude.exe` running it. It exits 0, silently, in about 30 ms (R9).
+    - Connect and Disconnect bring a copy of the real `settings.json` (with other tools' hooks and status line)
+      back byte for byte, and Plan limits is refused there (an ignored test, `real_settings`).
+  - **Left for KJ's hand check**, as it needs clicks and his live Claude Code settings: the Claude Sessions page
+    showing sessions working, waiting and done with today's tokens, and Connect then Disconnect on the live file.
 
 ### Phases 3–5
 Store and updates (#10), Clips (#11), Shots (#12). Each issue has its own plan and "done when".

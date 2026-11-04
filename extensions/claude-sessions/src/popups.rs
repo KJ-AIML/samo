@@ -50,11 +50,7 @@ pub fn waiting_sentence(reason: &str) -> String {
 }
 
 fn project(file: &SessionFile) -> String {
-    file.cwd
-        .trim_end_matches('/')
-        .rsplit('/')
-        .next()
-        .filter(|n| !n.is_empty())
+    crate::sessions::last_folder(&file.cwd)
         .unwrap_or("A session")
         .to_string()
 }

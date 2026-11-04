@@ -115,7 +115,12 @@ pub fn backup_once(path: &Path) -> Result<bool, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::settings::{connect, disconnect};
+    use crate::settings::{Entries, connect, disconnect, entries_on};
+
+    /// The Mac's entries: these tests are about the file, not the entries in it.
+    fn mac_entries() -> Entries {
+        entries_on(false, Path::new("/x"), Path::new("/Users/a"))
+    }
 
     #[test]
     fn write_refused_if_changed_since_read() -> Result<(), String> {
@@ -127,7 +132,7 @@ mod tests {
         let (value, seen) = read(&path)?;
         // Claude Code writes in between.
         fs::write(&path, r#"{"model":"sonnet"}"#).map_err(|e| e.to_string())?;
-        let (connected, _) = connect(value, true).map_err(|e| e.to_string())?;
+        let (connected, _) = connect(value, true, &mac_entries()).map_err(|e| e.to_string())?;
         assert!(write_if_unchanged(&path, &connected, &seen).is_err());
         assert_eq!(
             fs::read_to_string(&path).map_err(|e| e.to_string())?,
@@ -151,7 +156,8 @@ mod tests {
         symlink(&real, &path).map_err(|e| e.to_string())?;
 
         let (value, seen) = read(&path)?;
-        let (connected, _) = connect(value, seen.existed()).map_err(|e| e.to_string())?;
+        let (connected, _) =
+            connect(value, seen.existed(), &mac_entries()).map_err(|e| e.to_string())?;
         write_if_unchanged(&path, &connected, &seen)?;
 
         assert!(
@@ -189,7 +195,8 @@ mod tests {
         let path = settings_path(dir.path());
         let (value, seen) = read(&path)?;
         assert!(!seen.existed());
-        let (connected, created) = connect(value, seen.existed()).map_err(|e| e.to_string())?;
+        let (connected, created) =
+            connect(value, seen.existed(), &mac_entries()).map_err(|e| e.to_string())?;
         write_if_unchanged(&path, &connected, &seen)?;
         assert!(path.is_file());
         let text = fs::read_to_string(&path).map_err(|e| e.to_string())?;

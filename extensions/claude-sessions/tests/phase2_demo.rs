@@ -1,4 +1,4 @@
-//! These run real hooks and helpers: `/bin/sh` and unix permission bits. Their Windows forms come with #9 (ADR-006).
+//! Mac demos: real hooks through `/bin/sh`, unix permission bits and the store, which comes to Windows with #10.
 #![cfg(unix)]
 
 //! ADR-002 Phase 2's demo, end to end and automated: Samo's real extension host runs the real `samo-claude`,

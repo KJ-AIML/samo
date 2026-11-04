@@ -12,16 +12,48 @@ pub struct ProcInfo {
     pub name: String,
 }
 
-const SHELLS: [&str; 6] = ["sh", "bash", "zsh", "dash", "fish", "ksh"];
+/// Shells Claude Code runs a hook or status line through: `sh -c` on the Mac; on Windows Git Bash (two
+/// `bash.exe`), or PowerShell when Git Bash is missing (ADR-006).
+const SHELLS: [&str; 9] = [
+    "sh",
+    "bash",
+    "zsh",
+    "dash",
+    "fish",
+    "ksh",
+    "cmd",
+    "pwsh",
+    "powershell",
+];
 
 fn is_shell(name: &str) -> bool {
-    // A login shell's name starts with `-`; a path may come with it.
+    // A login shell's name starts with `-`; a path may come with it. Windows names end in `.exe`, in any case.
     let base = name
         .trim_start_matches('-')
-        .rsplit('/')
+        .rsplit(['/', '\\'])
         .next()
         .unwrap_or(name);
+    let base = base.to_ascii_lowercase();
+    let base = base.strip_suffix(".exe").unwrap_or(&base);
     SHELLS.contains(&base)
+}
+
+/// On Windows, `chain` (parent first) up to the first process that started after the one below it: that one isn't
+/// its parent but a later process given a reused pid (Windows keeps an orphan's old parent pid). `own_start` is
+/// this process's start time. The Mac gives an orphan to launchd, so its chain is kept as it is (ADR-006 R25).
+fn until_reused_on(chain: Vec<ProcInfo>, own_start: u64, windows: bool) -> Vec<ProcInfo> {
+    if !windows {
+        return chain;
+    }
+    let mut below = own_start;
+    chain
+        .into_iter()
+        .take_while(|p| {
+            let in_order = p.start_time_secs <= below;
+            below = p.start_time_secs;
+            in_order
+        })
+        .collect()
 }
 
 /// Claude Code's identity, given the hook's ancestors (parent first).
@@ -40,6 +72,14 @@ pub fn ancestors(depth: usize) -> Vec<ProcInfo> {
     let mut sys = System::new();
     let mut chain = Vec::new();
     let mut pid = Pid::from_u32(std::process::id());
+    sys.refresh_processes_specifics(
+        ProcessesToUpdate::Some(&[pid]),
+        false,
+        ProcessRefreshKind::nothing(),
+    );
+    let own_start = sys
+        .process(pid)
+        .map_or(u64::MAX, sysinfo::Process::start_time);
     for _ in 0..=depth {
         sys.refresh_processes_specifics(
             ProcessesToUpdate::Some(&[pid]),
@@ -67,7 +107,7 @@ pub fn ancestors(depth: usize) -> Vec<ProcInfo> {
         }
         pid = parent;
     }
-    chain
+    until_reused_on(chain, own_start, cfg!(windows))
 }
 
 /// Whether each process is still the one recorded (same pid and start time).
@@ -122,6 +162,52 @@ mod tests {
         assert_eq!(claude_identity(&[p(100, "node")]).map(|i| i.pid), Some(100));
         assert_eq!(claude_identity(&[p(300, "/bin/bash")]), None);
         assert_eq!(claude_identity(&[p(1, "launchd")]), None);
+    }
+
+    #[test]
+    fn windows_shells_are_skipped() {
+        // Git Bash runs a hook through two bash.exe, PowerShell through pwsh.exe or powershell.exe.
+        let chain = [
+            p(500, "bash.exe"),
+            p(400, "BASH.EXE"),
+            p(300, "pwsh.exe"),
+            p(250, "powershell.exe"),
+            p(200, "cmd.exe"),
+            p(100, "claude.exe"),
+        ];
+        assert_eq!(claude_identity(&chain).map(|i| i.pid), Some(100));
+        assert_eq!(
+            claude_identity(&[p(300, r"C:\Program Files\Git\usr\bin\bash.exe")]),
+            None
+        );
+    }
+
+    #[test]
+    fn a_parent_started_later_is_not_the_parent() {
+        // Windows keeps an orphan's old parent pid, and gives pids out again: a "parent" that started after its
+        // child is some other process, and the chain stops before it.
+        let own_start = 1_000;
+        let chain = vec![
+            ProcInfo {
+                pid: 20,
+                start_time_secs: 900,
+                name: "bash.exe".into(),
+            },
+            ProcInfo {
+                pid: 10,
+                start_time_secs: 950,
+                name: "explorer.exe".into(),
+            },
+        ];
+        let kept = until_reused_on(chain.clone(), own_start, true);
+        assert_eq!(kept.iter().map(|c| c.pid).collect::<Vec<_>>(), [20]);
+        // The Mac gives an orphan to launchd, so its chain is as it was, whatever the clock did (ADR-006 R25).
+        assert_eq!(until_reused_on(chain.clone(), own_start, false), chain);
+        // In order, every one is kept.
+        let mut fine = chain;
+        fine[1].start_time_secs = 900;
+        assert_eq!(until_reused_on(fine, own_start, true).len(), 2);
+        assert!(until_reused_on(vec![p(30, "claude.exe")], 10, true).is_empty());
     }
 
     #[test]

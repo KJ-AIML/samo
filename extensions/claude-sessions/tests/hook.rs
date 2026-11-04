@@ -1,10 +1,9 @@
-//! These run real hooks and helpers: `/bin/sh` and unix permission bits. Their Windows forms come with #9 (ADR-006).
-#![cfg(unix)]
-
-//! The hook as Claude Code runs it (R9): silent, always exit 0, quick, whatever it is given.
+//! The hook as Claude Code runs it (R9): silent, always exit 0, quick, whatever it is given. Claude Code runs the
+//! program itself (on Windows in its exec form, with no shell), and so do these tests, on every OS.
 
 use std::fs;
 use std::io::Write;
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::process::{Command, Output, Stdio};
 use std::time::{Duration, Instant};
@@ -61,19 +60,37 @@ fn hook_is_silent_and_exits_zero_on_bad_input() -> Result<(), String> {
     assert!(text.contains("\"state\":\"working\""), "{text}");
     assert!(!dir.path().join("evil.json").exists());
 
-    // A data folder it can't write to.
-    let locked = dir.path().join("locked");
-    fs::create_dir_all(&locked).map_err(|e| e.to_string())?;
-    fs::set_permissions(&locked, fs::Permissions::from_mode(0o500)).map_err(|e| e.to_string())?;
-    let out = hook(&locked.join("data"), &event("ok-2", "UserPromptSubmit"))?;
-    assert!(out.status.success());
-    assert!(out.stdout.is_empty());
-    let _ = fs::set_permissions(&locked, fs::Permissions::from_mode(0o700));
+    // A data folder it can't write to (unix permission bits).
+    #[cfg(unix)]
+    {
+        let locked = dir.path().join("locked");
+        fs::create_dir_all(&locked).map_err(|e| e.to_string())?;
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o500))
+            .map_err(|e| e.to_string())?;
+        let out = hook(&locked.join("data"), &event("ok-2", "UserPromptSubmit"))?;
+        assert!(out.status.success());
+        assert!(out.stdout.is_empty());
+        let _ = fs::set_permissions(&locked, fs::Permissions::from_mode(0o700));
+    }
 
     // The end of a session removes its file.
     let out = hook(&data, &event("ok-1", "SessionEnd"))?;
     assert!(out.status.success() && out.stdout.is_empty());
     assert!(!file.exists());
+    Ok(())
+}
+
+#[test]
+fn hook_reads_an_event_with_windows_paths() -> Result<(), String> {
+    // What Claude Code on Windows sends: backslashed paths, JSON-escaped.
+    let dir = tempfile::tempdir().map_err(|e| e.to_string())?;
+    let data = dir.path().join("data");
+    let input = br#"{"session_id":"win-1","transcript_path":"C:\\Users\\kj\\.claude\\projects\\D--KJ-repo-samo\\win-1.jsonl","cwd":"D:\\KJ\\repo\\samo","hook_event_name":"UserPromptSubmit"}"#;
+    let out = hook(&data, input)?;
+    assert!(out.status.success() && out.stdout.is_empty());
+    let text = fs::read_to_string(data.join("sessions/win-1.json")).map_err(|e| e.to_string())?;
+    assert!(text.contains("\"state\":\"working\""), "{text}");
+    assert!(text.contains(r#""cwd":"D:\\KJ\\repo\\samo""#), "{text}");
     Ok(())
 }
 
