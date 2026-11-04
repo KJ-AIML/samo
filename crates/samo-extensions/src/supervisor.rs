@@ -151,7 +151,10 @@ pub(crate) fn one_shot(
 ) -> Result<(), String> {
     let timeout = config.one_shot_timeout;
     let _ = std::fs::create_dir_all(data_dir);
-    let mut child = Command::new(helper)
+    let mut command = Command::new(helper);
+    // As `serve`: its own group, and on Windows no console window flashing up (Samo has none to share).
+    own_process_group(&mut command);
+    let mut child = command
         .arg(verb)
         .env_clear()
         .envs(helper_env(data_dir, config))

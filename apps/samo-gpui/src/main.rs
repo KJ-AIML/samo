@@ -1,3 +1,7 @@
+// On Windows a windowed program: started from Explorer, the Start menu or at sign-in, no console window opens beside
+// Samo, and none can take it down when closed (ADR-006).
+#![cfg_attr(windows, windows_subsystem = "windows")]
+
 mod art;
 mod assets;
 mod charts;
