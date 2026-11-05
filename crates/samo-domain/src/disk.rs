@@ -157,6 +157,8 @@ pub fn classify_file_path(path: &str, is_app_bundle: bool) -> FileCategory {
     }
 }
 
+/// What "inside" means for projects; `enclosing` lists exactly these ancestors, and a test holds the two together.
+#[cfg(test)]
 fn is_subpath_of(child: &str, ancestor: &str) -> bool {
     if child == ancestor {
         return true;
@@ -167,6 +169,14 @@ fn is_subpath_of(child: &str, ancestor: &str) -> bool {
         format!("{ancestor}/")
     };
     child.starts_with(&prefix)
+}
+
+/// Every `ancestor` for which `is_subpath_of(path, ancestor)` holds, apart from `path` itself: at each `/`, the
+/// prefix before it (`C:/h/p`) and the prefix through it (`C:/`, `/`). Allocates nothing.
+fn enclosing(path: &str) -> impl Iterator<Item = &str> {
+    path.match_indices('/')
+        .flat_map(move |(at, _)| path.get(..at).into_iter().chain(path.get(..=at)))
+        .filter(move |ancestor| ancestor.len() < path.len())
 }
 
 fn immediate_child_folder(root_path: &str, entry_path: &str) -> Option<String> {
@@ -219,13 +229,12 @@ pub fn aggregate_scan_entries(
         }
     }
 
-    // Filter to outermost project roots so nested workspace crates don't double-count
-    let all_project_paths: Vec<String> = candidate_projects.keys().cloned().collect();
+    // Filter to outermost project roots so nested workspace crates don't double-count. A path's possible
+    // ancestors are looked up, not every pair compared: a developer's home has ~10,000 markers.
     let mut outermost_projects: BTreeMap<String, String> = BTreeMap::new();
     for (proj_path, kind) in &candidate_projects {
-        let has_outer_ancestor = all_project_paths
-            .iter()
-            .any(|other| other != proj_path && is_subpath_of(proj_path, other));
+        let has_outer_ancestor =
+            enclosing(proj_path).any(|other| candidate_projects.contains_key(other));
         if !has_outer_ancestor {
             outermost_projects.insert(proj_path.clone(), kind.clone());
         }
@@ -285,36 +294,34 @@ pub fn aggregate_scan_entries(
                     });
                 }
 
-                // Attribute to outermost project if inside one
-                for proj_root in outermost_projects.keys() {
-                    if is_subpath_of(&entry.path, proj_root) {
-                        if let Some((tot, art_map)) = project_totals.get_mut(proj_root) {
-                            *tot = tot.saturating_add(bytes);
-                            let prefix = format!("{}/", proj_root.trim_end_matches('/'));
-                            if let Some(rel) = entry.path.strip_prefix(&prefix) {
-                                // Find if any path segment inside the project is an artifact dir
-                                let mut accum_rel = String::new();
-                                for seg in rel.split('/') {
-                                    if accum_rel.is_empty() {
-                                        accum_rel.push_str(seg);
-                                    } else {
-                                        accum_rel.push('/');
-                                        accum_rel.push_str(seg);
-                                    }
-                                    if is_artifact_dir_name(seg) {
-                                        let art_full = format!(
-                                            "{}/{}",
-                                            proj_root.trim_end_matches('/'),
-                                            accum_rel
-                                        );
-                                        let art_slot = art_map.entry(art_full).or_insert(0);
-                                        *art_slot = art_slot.saturating_add(bytes);
-                                        break;
-                                    }
-                                }
+                // Attribute to the outermost project it is inside, if any. Outermost projects never nest, so at
+                // most one holds it: found among the file's own ancestors, not by trying every project.
+                let owner = enclosing(&entry.path)
+                    .chain(std::iter::once(entry.path.as_str()))
+                    .find(|ancestor| outermost_projects.contains_key(*ancestor));
+                if let Some(proj_root) = owner
+                    && let Some((tot, art_map)) = project_totals.get_mut(proj_root)
+                {
+                    *tot = tot.saturating_add(bytes);
+                    let prefix = format!("{}/", proj_root.trim_end_matches('/'));
+                    if let Some(rel) = entry.path.strip_prefix(&prefix) {
+                        // Find if any path segment inside the project is an artifact dir
+                        let mut accum_rel = String::new();
+                        for seg in rel.split('/') {
+                            if accum_rel.is_empty() {
+                                accum_rel.push_str(seg);
+                            } else {
+                                accum_rel.push('/');
+                                accum_rel.push_str(seg);
+                            }
+                            if is_artifact_dir_name(seg) {
+                                let art_full =
+                                    format!("{}/{}", proj_root.trim_end_matches('/'), accum_rel);
+                                let art_slot = art_map.entry(art_full).or_insert(0);
+                                *art_slot = art_slot.saturating_add(bytes);
+                                break;
                             }
                         }
-                        break;
                     }
                 }
             }
@@ -743,5 +750,144 @@ mod tests {
             snap.projects[0].artifacts.first().map(|a| a.path.as_str()),
             Some("C:/Users/kj/dev/app/target")
         );
+    }
+
+    fn dir(path: &str, marker: Option<&str>, inode: u64) -> RawDiskEntry {
+        RawDiskEntry {
+            path: path.into(),
+            name: path.rsplit('/').next().unwrap_or(path).into(),
+            parent_path: path.rsplit_once('/').map(|(p, _)| p.to_string()),
+            kind: RawEntryKind::Directory,
+            allocated_bytes: 0,
+            identity: FileNodeIdentity {
+                device_id: 1,
+                inode,
+            },
+            project_marker: marker.map(str::to_string),
+        }
+    }
+
+    fn file(path: &str, bytes: u64, inode: u64) -> RawDiskEntry {
+        RawDiskEntry {
+            path: path.into(),
+            name: path.rsplit('/').next().unwrap_or(path).into(),
+            parent_path: path.rsplit_once('/').map(|(p, _)| p.to_string()),
+            kind: RawEntryKind::File,
+            allocated_bytes: bytes,
+            identity: FileNodeIdentity {
+                device_id: 1,
+                inode,
+            },
+            project_marker: None,
+        }
+    }
+
+    fn project_totals(root: &str, entries: &[RawDiskEntry]) -> Vec<(String, u64)> {
+        let snap = aggregate_scan_entries(
+            "s".into(),
+            root.into(),
+            "v".into(),
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            entries,
+            ScanConfig::default(),
+        );
+        let mut totals: Vec<(String, u64)> = snap
+            .projects
+            .iter()
+            .map(|p| (p.root_path.clone(), p.total_bytes))
+            .collect();
+        totals.sort();
+        totals
+    }
+
+    #[test]
+    fn a_file_belongs_to_its_project_not_one_sharing_a_prefix() {
+        let entries = [
+            dir("C:/h/p1", Some("Node / JS"), 1),
+            dir("C:/h/p10", Some("Node / JS"), 2),
+            file("C:/h/p10/a.js", 100, 3),
+            file("C:/h/p1/b.js", 10, 4),
+            file("C:/h/p100.txt", 1, 5),
+        ];
+        assert_eq!(
+            project_totals("C:/h", &entries),
+            [("C:/h/p1".to_string(), 10), ("C:/h/p10".to_string(), 100)]
+        );
+    }
+
+    #[test]
+    fn a_project_at_a_drives_root_owns_what_is_under_it() {
+        let windows = [
+            dir("C:/", Some("Git Repository"), 1),
+            dir("C:/h/p", Some("Node / JS"), 2),
+            file("C:/h/p/x.js", 5, 3),
+            file("C:/y.txt", 7, 4),
+        ];
+        assert_eq!(project_totals("C:/", &windows), [("C:/".to_string(), 12)]);
+        let mac = [
+            dir("/", Some("Git Repository"), 1),
+            dir("/Users/kj/p", Some("Node / JS"), 2),
+            file("/Users/kj/p/x.js", 5, 3),
+        ];
+        assert_eq!(project_totals("/", &mac), [("/".to_string(), 5)]);
+    }
+
+    /// A developer's home holds about 1.8 million files and 10,000 project markers (every package in
+    /// `node_modules` has a `package.json`). Finding a file's project by trying every project took an hour there.
+    #[test]
+    fn aggregation_grows_with_files_not_files_times_projects() {
+        let projects = 1_500;
+        let mut entries: Vec<RawDiskEntry> = (0..projects)
+            .map(|p| dir(&format!("C:/h/n/p{p}"), Some("Node / JS"), p))
+            .collect();
+        for f in 0..60_000u64 {
+            let path = if f % 2 == 0 {
+                format!("C:/h/n/p{}/f{f}.js", f % projects)
+            } else {
+                format!("C:/h/other/f{f}.txt")
+            };
+            entries.push(file(&path, 1, projects + f));
+        }
+        let start = std::time::Instant::now();
+        let totals = project_totals("C:/h", &entries);
+        let took = start.elapsed();
+        assert_eq!(totals.len(), 1_500);
+        assert_eq!(totals.iter().map(|(_, b)| b).sum::<u64>(), 30_000);
+        assert!(took.as_secs_f64() < 5.0, "{took:?}");
+    }
+
+    #[test]
+    fn enclosing_lists_exactly_the_ancestors_is_subpath_of_accepts() {
+        let paths = [
+            "",
+            "/",
+            "/a",
+            "/a/",
+            "/a/b",
+            "/ab",
+            "C:",
+            "C:/",
+            "C:/h",
+            "C:/h/",
+            "C:/h/p1",
+            "C:/h/p10",
+            "C:/h/p1/f",
+            "C:/h/p1/",
+            "C:/h//x",
+            "C:/h/p1/node_modules/x.js",
+            "D:/h/p1",
+        ];
+        for child in paths {
+            for ancestor in paths {
+                let expected = child != ancestor && is_subpath_of(child, ancestor);
+                let listed = enclosing(child).any(|a| a == ancestor);
+                assert_eq!(listed, expected, "child {child:?}, ancestor {ancestor:?}");
+            }
+        }
     }
 }
