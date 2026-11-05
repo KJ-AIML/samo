@@ -9,7 +9,7 @@ jobs:
   check:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Check formatting and clippy
         run: |
           cargo fmt --all -- --check
@@ -18,7 +18,7 @@ jobs:
   db:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Run xtask verify (layers, purity, rls, commands-complete, tests)
         run: cargo run -p xtask -- verify
 
@@ -30,7 +30,7 @@ jobs:
       CARGO_PROFILE_DEV_DEBUG: "0"
       CARGO_INCREMENTAL: "0"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Check formatting, clippy, the static gates and tests on Windows
         shell: bash
         run: bash scripts/ci-windows.sh
