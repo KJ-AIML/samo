@@ -160,8 +160,9 @@ final class StitcherTests: XCTestCase {
         let done = Date()
         print("shots: fingerprints \(Int(printed.timeIntervalSince(start) * 1000)) ms, match \(Int(done.timeIntervalSince(printed) * 1000)) ms")
         #if DEBUG
-        // Unoptimised test builds are about fifty times slower; the helper Samo runs is a release build.
-        XCTAssertLessThan(done.timeIntervalSince(start), 1)
+        // Unoptimised test builds are about fifty times slower, so the release budget times fifty; the helper Samo
+        // runs is a release build. 1 s failed on a busy CI runner at 1.1 s.
+        XCTAssertLessThan(done.timeIntervalSince(start), 2.5)
         #else
         XCTAssertLessThan(done.timeIntervalSince(start), 0.05)
         #endif
