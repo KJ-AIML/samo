@@ -1,6 +1,6 @@
 # Devlog 0014 — Samo 0.5.0: Samo on Windows, its extensions, its store and Clips
 
-- **Date:** 2026-11-06
+- **Date:** 2026-11-05
 - **Asked by:** KJ: Samo works well on the Mac, so it should run on Windows too, all of it ("All of APP… I want it
   all", then "make all phase done"), planned as GitHub issues and built as PRs. Then "merge and release".
 - **Branches:** the stacked PRs #14, #15, #17, #18–#24, merged into `main` in order; this release from `main`.
@@ -51,3 +51,6 @@
   passed on a later run.
 - **Each git worktree built its own `target`** (about 5 GB each) and filled drive D:. Worktrees now share one
   `CARGO_TARGET_DIR`.
+- **`history.log` lines were written in pieces** (#26). `main`'s Windows CI for #23's merge read a half-written
+  `uninstall` line. #27 made the test wait for the line; after 0.5.1, each line also goes out in one write, so
+  lines appended at once never interleave.
