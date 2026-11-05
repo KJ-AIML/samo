@@ -304,13 +304,21 @@ fn install_update_uninstall_from_catalog() -> Fallible<()> {
     assert!(w.home().join("off-ran").exists() && w.home().join("uninstall-ran").exists());
     assert!(!w.root.ext_dir("hello").exists());
     assert!(Registry::load(&w.root).map_err(io)?.get("hello").is_none());
-    let history = fs::read_to_string(w.root.history_file()).map_err(io)?;
-    for event in ["install", "update", "uninstall"] {
-        assert!(
-            history.contains(&format!("\"event\":\"{event}\"")),
-            "{history}"
-        );
-    }
+    // The worker logs the uninstall just after Hello leaves the host: wait for the whole line, not the moment between
+    // (a Windows runner read `"event":"` half-written).
+    let logged = |event: &str| format!("\"event\":\"{event}\",\"id\":\"hello\"");
+    let all_logged = || {
+        fs::read_to_string(w.root.history_file()).is_ok_and(|history| {
+            ["install", "update", "uninstall"]
+                .iter()
+                .all(|e| history.contains(&logged(e)))
+        })
+    };
+    wait_for(
+        "the history to say install, update and uninstall",
+        5,
+        all_logged,
+    )?;
     host.shutdown_all();
     Ok(())
 }
