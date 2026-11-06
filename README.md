@@ -125,8 +125,9 @@ A few environment variables, handy for scripts and screenshots:
 
 - **Online only when you click.** No account, no telemetry, nothing about you sent anywhere. Samo goes online only
   when you open **Extensions** or **Settings** by a click, or press Refresh, Install, Update or Check now: then it
-  fetches its signed catalog, images and packages from GitHub. Never at launch, never in the background. The
-  optional web console listens on `127.0.0.1` only.
+  fetches its signed catalog, images and packages from GitHub. Never at launch, never in the background, except
+  one switch you turn on yourself: Claude Sessions' **Ask Anthropic for limits** (below). The optional web console
+  listens on `127.0.0.1` only.
 - **Only what KJ signed.** The store's catalog is signed, and every package, image and Samo update is checked
   against it before it is used.
 - **The Trash, never `rm`.** Before moving anything Samo checks it is still the same file (device and inode) it
@@ -150,10 +151,15 @@ Claude Code's documented hooks and status line).
   While one waits, the menu bar shows it beside the CPU figure (`23% !1`) and a pop-up says so, without taking
   the keyboard.
 - Today's tokens, per session and in all, read from Claude Code's transcripts (only today's part).
-- Your 5-hour and weekly plan limits, from Claude Code's status line, if you turn Plan limits on.
+- Your 5-hour and weekly plan limits, from Claude Code's status line, if you turn Plan limits on. Near the weekly
+  limit Anthropic may apply no 5-hour limit; the page then says *no 5-hour limit right now*.
 - **Connect** adds Samo's hooks to `~/.claude/settings.json`, after backing it up to `settings.json.samo-bak`;
   **Plan limits** sets Claude Code's status line, never replacing one you have. Both come out exactly when you
-  turn them off. It never goes online.
+  turn them off.
+- **Ask Anthropic for limits**, off until you turn it on, keeps the limits current outside a terminal too: every 5
+  minutes Samo asks Anthropic's usage page, as Claude Code's `/usage` does, with Claude Code's sign-in. Samo only
+  reads the sign-in (the Keychain's `Claude Code-credentials`, or `~/.claude/.credentials.json`); it never renews,
+  changes or keeps it. Otherwise Claude Sessions never goes online.
 - On Windows it runs from `SAMO_EXT_DEV_DIR` until the store comes (#10). `~/.claude` is `%USERPROFILE%\.claude`;
   the hooks run Samo's helper with no shell (Claude Code 2.1.139 or newer), and the status line works in Git Bash
   and PowerShell.

@@ -1,6 +1,6 @@
 id = "claude-sessions"
 name = "Claude Sessions"
-version = "0.2.3"
+version = "0.2.4"
 protocol = 1
 min_samo = "0.2.0"
 helper = "bin/samo-claude"
@@ -17,9 +17,14 @@ where = "~/.claude/settings.json"
 undo = "Turning Plan limits off, Off or Remove takes it out"
 
 [[changes]]
-what = "Reads today's Claude Code transcripts to count tokens; never changes them, never goes online"
+what = "Reads today's Claude Code transcripts to count tokens; never changes them"
 where = "~/.claude/projects"
 undo = "Nothing to undo"
+
+[[changes]]
+what = "Only while you turn on Ask Anthropic for limits: reads Claude Code's sign-in, never changing or renewing it, and asks Anthropic for your plan limits every 5 minutes"
+where = "api.anthropic.com/api/oauth/usage, with the sign-in in the Keychain (Claude Code-credentials) or ~/.claude/.credentials.json"
+undo = "Turn it off; nothing is kept"
 
 [[settings]]
 key = "connect"
@@ -28,6 +33,10 @@ label = "Connect to Claude Code"
 [[settings]]
 key = "plan_limits"
 label = "Plan limits"
+
+[[settings]]
+key = "ask_anthropic"
+label = "Ask Anthropic for limits"
 
 [[settings]]
 key = "popup_needs_you"
