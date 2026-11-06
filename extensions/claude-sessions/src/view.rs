@@ -26,6 +26,9 @@ pub struct Input<'a> {
     /// Today's transcripts are still being read, so the figure isn't complete yet.
     pub counting: bool,
     pub limits: Option<Limits>,
+    /// `limits` holds a report (from the status line), not only limits reached: a window it leaves out isn't
+    /// applied to the account right now.
+    pub reported: bool,
     pub switches: Switches,
     /// The last thing that went wrong (a setting that couldn't be changed), said once on the page.
     pub problem: Option<String>,
@@ -95,14 +98,22 @@ pub fn badge(rows: &[(Row, Option<Tokens>)]) -> (u32, String) {
     )
 }
 
-/// The quick panel's load bar: the 5-hour window's use, while Plan limits is on. Unknown until Claude Code
-/// reports it, and after it resets.
+/// The quick panel's load bar, while Plan limits is on: the 5-hour window's use, or the weekly's while Anthropic
+/// applies no 5-hour limit (KJ's account near its weekly limit, 2026-11-06). Unknown until Claude Code reports
+/// it, and after it resets.
 pub fn badge_meter(plan_limits: bool, limits: Option<&Limits>, now_ms: i64) -> Option<BadgeMeter> {
-    plan_limits.then(|| BadgeMeter {
-        label: "5h".into(),
-        fraction: match limits {
-            Some(l) => reading(l.five_hour.as_ref(), l.observed_at_ms, now_ms),
-            None => Reading::unsupported(UnsupportedReason::NotReported),
+    plan_limits.then(|| match limits {
+        Some(l) if l.five_hour.is_none() && l.seven_day.is_some() => BadgeMeter {
+            label: "wk".into(),
+            fraction: reading(l.seven_day.as_ref(), l.observed_at_ms, now_ms),
+        },
+        Some(l) => BadgeMeter {
+            label: "5h".into(),
+            fraction: reading(l.five_hour.as_ref(), l.observed_at_ms, now_ms),
+        },
+        None => BadgeMeter {
+            label: "5h".into(),
+            fraction: Reading::unsupported(UnsupportedReason::NotReported),
         },
     })
 }
@@ -137,8 +148,10 @@ fn age(ms: i64) -> String {
     }
 }
 
+/// One window's meter. `name` is how its note says it: `5-hour`, `weekly`.
 fn limit_meter(
     label: &str,
+    name: &str,
     window: Option<&crate::limits::Window>,
     limits: &Limits,
     input: &Input,
@@ -161,6 +174,11 @@ fn limit_meter(
         (Reading::Stopped { .. }, Some(w)) => format!(
             "reset at {}; waiting for Claude Code to report again",
             (input.clock)(w.resets_at.saturating_mul(1_000))
+        ),
+        // Claude Code reports a window whenever Anthropic sends it, so a report without it means there is none.
+        (_, None) if input.reported => format!(
+            "no {name} limit right now · as of {}",
+            (input.clock)(limits.observed_at_ms)
         ),
         _ => "not reported by Claude Code yet".to_string(),
     };
@@ -239,8 +257,20 @@ pub fn build(input: &Input) -> Vec<Widget> {
     });
     match (s.plan_limits, input.limits) {
         (true, Some(limits)) => {
-            view.push(limit_meter("5-hour", limits.five_hour.as_ref(), &limits, input));
-            view.push(limit_meter("Weekly", limits.seven_day.as_ref(), &limits, input));
+            view.push(limit_meter(
+                "5-hour",
+                "5-hour",
+                limits.five_hour.as_ref(),
+                &limits,
+                input,
+            ));
+            view.push(limit_meter(
+                "Weekly",
+                "weekly",
+                limits.seven_day.as_ref(),
+                &limits,
+                input,
+            ));
             view.push(Widget::Note {
                 text: "Claude Code reports your limits only when it replies in a terminal. In Cursor, VS \
                        Code, the desktop app or claude -p it doesn't, so the figures say how old they are. A \
@@ -354,6 +384,7 @@ mod tests {
                 cache_write: 200_000,
                 cache_read: 1_013_567,
             },
+            reported: true,
             limits: Some(Limits {
                 five_hour: Some(Window {
                     used_percentage: 34.0,
@@ -419,6 +450,7 @@ mod tests {
             counting: false,
             split: Tokens::default(),
             limits: Some(limits),
+            reported: true,
             switches: Switches {
                 plan_limits: true,
                 ..Switches::default()
@@ -473,6 +505,76 @@ mod tests {
         assert_eq!(
             badge_meter(true, Some(&limits), 2_000_001).map(|m| m.fraction),
             Some(Reading::stopped(2_000_000))
+        );
+    }
+
+    /// KJ's report of 2026-11-06 22:47: near the weekly limit, Anthropic sent no 5-hour window at all.
+    #[test]
+    fn a_report_without_a_window_says_there_is_none() {
+        let minute = 60_000;
+        let now = 1_000 * minute;
+        let clock = |ms: i64| format!("t{}", ms / minute);
+        let weekly_only = Limits {
+            five_hour: None,
+            seven_day: Some(Window {
+                used_percentage: 94.0,
+                resets_at: 9_000 * 60,
+                observed_at_ms: None,
+            }),
+            observed_at_ms: now - 2 * minute,
+        };
+        let notes = |limits: Limits, reported: bool| -> Vec<String> {
+            let input = Input {
+                rows: &[],
+                tokens: Reading::unsupported(UnsupportedReason::NotReported),
+                counting: false,
+                split: Tokens::default(),
+                limits: Some(limits),
+                reported,
+                switches: Switches {
+                    plan_limits: true,
+                    ..Switches::default()
+                },
+                problem: None,
+                now_ms: now,
+                clock: &clock,
+            };
+            build(&input)
+                .into_iter()
+                .filter_map(|w| match w {
+                    Widget::Meter { note, .. } => note,
+                    _ => None,
+                })
+                .collect()
+        };
+        assert_eq!(
+            notes(weekly_only, true),
+            vec![
+                "no 5-hour limit right now · as of t998".to_string(),
+                "resets t9000 · as of t998".to_string(),
+            ]
+        );
+        // Only a limit reached, from a transcript, with no report: nothing is known about the other window.
+        let reached = Limits {
+            five_hour: Some(Window {
+                used_percentage: 100.0,
+                resets_at: 1_100 * 60,
+                observed_at_ms: Some(now - minute),
+            }),
+            seven_day: None,
+            observed_at_ms: now - minute,
+        };
+        assert_eq!(
+            notes(reached, false)[1],
+            "not reported by Claude Code yet".to_string()
+        );
+
+        // The quick panel shows the weekly while there's no 5-hour limit.
+        let meter = badge_meter(true, Some(&weekly_only), now);
+        assert_eq!(meter.as_ref().map(|m| m.label.as_str()), Some("wk"));
+        assert_eq!(
+            meter.map(|m| m.fraction),
+            Some(Reading::available(0.94, now - 2 * minute))
         );
     }
 

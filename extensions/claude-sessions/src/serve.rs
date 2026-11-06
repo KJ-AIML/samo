@@ -328,6 +328,7 @@ impl Serve {
             split: tally.total(),
             counting: self.reader.behind(),
             limits,
+            reported: self.limits.is_some(),
             switches: Switches {
                 connected: self.active.connected,
                 plan_limits: self.active.plan_limits,
