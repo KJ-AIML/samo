@@ -2,6 +2,7 @@
 //! including how to write a time of day.
 
 use crate::limits::{Limits, observed_at, reading};
+use crate::online::Problem;
 use crate::sessions::{Row, State};
 use crate::usage::Tokens;
 use samo_ext_protocol::{BadgeMeter, Lamp, NoteKind, RowItem, Widget};
@@ -16,6 +17,15 @@ pub struct Switches {
     pub other_statusline: bool,
     pub popup_needs_you: bool,
     pub popup_finished: bool,
+    /// Ask Anthropic for limits.
+    pub ask_anthropic: bool,
+}
+
+/// The last time Samo asked Anthropic for the limits, and what went wrong, if anything.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Asked {
+    pub at_ms: i64,
+    pub problem: Option<Problem>,
 }
 
 pub struct Input<'a> {
@@ -30,6 +40,8 @@ pub struct Input<'a> {
     /// applied to the account right now.
     pub reported: bool,
     pub switches: Switches,
+    /// The last time Samo asked Anthropic, while Ask Anthropic for limits is on.
+    pub asked: Option<Asked>,
     /// The last thing that went wrong (a setting that couldn't be changed), said once on the page.
     pub problem: Option<String>,
     pub now_ms: i64,
@@ -189,6 +201,45 @@ fn limit_meter(
     }
 }
 
+/// What the page says about asking Anthropic, while the switch is on.
+fn asked_note(input: &Input) -> Widget {
+    let plain = |text: String| Widget::Note {
+        text,
+        kind: NoteKind::Plain,
+    };
+    let Some(asked) = &input.asked else {
+        return plain("Asking Anthropic for your limits…".into());
+    };
+    let at = (input.clock)(asked.at_ms);
+    let text = match &asked.problem {
+        None => {
+            return plain(
+                "Samo asks Anthropic for these every 5 minutes, with Claude Code's sign-in. A limit reached in any \
+                 session shows here at once."
+                    .into(),
+            );
+        }
+        Some(Problem::NoSignIn) => format!(
+            "Couldn't ask Anthropic at {at}: Claude Code isn't signed in with a Claude account. Samo tries again \
+             in 5 minutes."
+        ),
+        Some(Problem::Expired) => format!(
+            "Couldn't ask Anthropic at {at}: Claude Code's sign-in has expired. Samo never renews it; it asks again \
+             once Claude Code has, the next time you use it."
+        ),
+        Some(Problem::Refused { .. }) => format!(
+            "Anthropic didn't accept Claude Code's sign-in at {at}. Samo asks again once Claude Code signs in anew."
+        ),
+        Some(Problem::Failed(why)) => {
+            format!("Couldn't ask Anthropic at {at}: {why}. Samo tries again in 15 minutes.")
+        }
+    };
+    Widget::Note {
+        text,
+        kind: NoteKind::Error,
+    }
+}
+
 pub fn build(input: &Input) -> Vec<Widget> {
     let s = input.switches;
     let mut view = Vec::new();
@@ -255,7 +306,7 @@ pub fn build(input: &Input) -> Vec<Widget> {
         title: "PLAN LIMITS".into(),
         about: None,
     });
-    match (s.plan_limits, input.limits) {
+    match (s.plan_limits || s.ask_anthropic, input.limits) {
         (true, Some(limits)) => {
             view.push(limit_meter(
                 "5-hour",
@@ -271,14 +322,19 @@ pub fn build(input: &Input) -> Vec<Widget> {
                 &limits,
                 input,
             ));
-            view.push(Widget::Note {
-                text: "Claude Code reports your limits only when it replies in a terminal. In Cursor, VS \
-                       Code, the desktop app or claude -p it doesn't, so the figures say how old they are. A \
-                       limit reached in any session shows here at once."
-                    .into(),
-                kind: NoteKind::Plain,
+            view.push(if s.ask_anthropic {
+                asked_note(input)
+            } else {
+                Widget::Note {
+                    text: "Claude Code reports your limits only when it replies in a terminal. In Cursor, VS \
+                           Code, the desktop app or claude -p it doesn't, so the figures say how old they are. A \
+                           limit reached in any session shows here at once."
+                        .into(),
+                    kind: NoteKind::Plain,
+                }
             });
         }
+        (true, None) if s.ask_anthropic => view.push(asked_note(input)),
         (true, None) => view.push(Widget::Note {
             text: "Waiting for Claude Code to report your limits. They come with its next reply in a terminal \
                    (Pro and Max plans)."
@@ -314,6 +370,16 @@ pub fn build(input: &Input) -> Vec<Widget> {
             "Sets Claude Code's status line to show your limits. Claude Code then hides some footer hints."
                 .into()
         }),
+    });
+    view.push(Widget::Switch {
+        key: "ask_anthropic".into(),
+        label: "Ask Anthropic for limits".into(),
+        on: s.ask_anthropic,
+        note: Some(
+            "Every 5 minutes, with Claude Code's sign-in, so the figures stay current outside a terminal too. Samo \
+             only reads the sign-in; it never renews or changes it."
+                .into(),
+        ),
     });
     view.push(Widget::Switch {
         key: "popup_needs_you".into(),
@@ -400,7 +466,9 @@ mod tests {
                 other_statusline: false,
                 popup_needs_you: true,
                 popup_finished: false,
+                ask_anthropic: false,
             },
+            asked: None,
             problem: None,
             now_ms: 1_500_000,
             clock: &clock,
@@ -455,6 +523,7 @@ mod tests {
                 plan_limits: true,
                 ..Switches::default()
             },
+            asked: None,
             problem: None,
             now_ms: now,
             clock: &clock,
@@ -535,6 +604,7 @@ mod tests {
                     plan_limits: true,
                     ..Switches::default()
                 },
+                asked: None,
                 problem: None,
                 now_ms: now,
                 clock: &clock,
@@ -575,6 +645,105 @@ mod tests {
         assert_eq!(
             meter.map(|m| m.fraction),
             Some(Reading::available(0.94, now - 2 * minute))
+        );
+    }
+
+    #[test]
+    fn asking_anthropic_says_how_it_went() {
+        let minute = 60_000;
+        let now = 1_000 * minute;
+        let clock = |ms: i64| format!("t{}", ms / minute);
+        let page = |limits: Option<Limits>, asked: Option<Asked>| -> Vec<Widget> {
+            let input = Input {
+                rows: &[],
+                tokens: Reading::unsupported(UnsupportedReason::NotReported),
+                counting: false,
+                split: Tokens::default(),
+                limits,
+                reported: limits.is_some(),
+                switches: Switches {
+                    ask_anthropic: true,
+                    ..Switches::default()
+                },
+                asked,
+                problem: None,
+                now_ms: now,
+                clock: &clock,
+            };
+            build(&input)
+        };
+        let notes = |page: Vec<Widget>| -> Vec<(String, NoteKind)> {
+            page.into_iter()
+                .filter_map(|w| match w {
+                    Widget::Note { text, kind } => Some((text, kind)),
+                    _ => None,
+                })
+                .collect()
+        };
+        // On, before the first answer: limits show without the status line, and it says it's asking.
+        let first = notes(page(None, None));
+        assert_eq!(first[1].0, "Asking Anthropic for your limits…");
+        let answer = Limits {
+            five_hour: None,
+            seven_day: Some(Window {
+                used_percentage: 95.0,
+                resets_at: 9_000 * 60,
+                observed_at_ms: None,
+            }),
+            observed_at_ms: now,
+        };
+        let answered = page(
+            Some(answer),
+            Some(Asked {
+                at_ms: now,
+                problem: None,
+            }),
+        );
+        assert!(
+            answered
+                .iter()
+                .any(|w| matches!(w, Widget::Meter { note: Some(n), .. }
+            if n == "no 5-hour limit right now · as of t1000"))
+        );
+        assert!(
+            notes(answered)[1]
+                .0
+                .starts_with("Samo asks Anthropic for these every 5 minutes")
+        );
+        let expired = notes(page(
+            Some(answer),
+            Some(Asked {
+                at_ms: now,
+                problem: Some(Problem::Expired),
+            }),
+        ));
+        assert_eq!(expired[1].1, NoteKind::Error);
+        assert!(
+            expired[1]
+                .0
+                .contains("sign-in has expired. Samo never renews it")
+        );
+        let failed = notes(page(
+            None,
+            Some(Asked {
+                at_ms: now,
+                problem: Some(Problem::Failed("Anthropic answered 500".into())),
+            }),
+        ));
+        assert_eq!(
+            failed[1].0,
+            "Couldn't ask Anthropic at t1000: Anthropic answered 500. Samo tries again in 15 minutes."
+        );
+        // Its own switch, and the quick panel's bar, follow it with Plan limits off.
+        assert!(
+            page(None, None)
+                .iter()
+                .any(|w| matches!(w, Widget::Switch { key, on: true, .. }
+            if key == "ask_anthropic"))
+        );
+        assert_eq!(
+            badge_meter(true, Some(&answer), now).map(|m| m.label),
+            Some("wk".to_string())
         );
     }
 

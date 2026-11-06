@@ -96,6 +96,13 @@
   },
   {
     "widget": "switch",
+    "key": "ask_anthropic",
+    "label": "Ask Anthropic for limits",
+    "on": false,
+    "note": "Every 5 minutes, with Claude Code's sign-in, so the figures stay current outside a terminal too. Samo only reads the sign-in; it never renews or changes it."
+  },
+  {
+    "widget": "switch",
     "key": "popup_needs_you",
     "label": "Pop up when a session needs you",
     "on": true,
