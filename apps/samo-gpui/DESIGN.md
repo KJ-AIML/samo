@@ -56,7 +56,7 @@ for screenshots and tests, over Settings. Tests check that Cobalt is byte for by
 neutral, and every text pair at 4.5:1 in all four palettes.
 
 Samo adds the readout tokens (`glass`, `glass_line`, `glass_text`, `glass_text_2`,
-`phosphor` = Pale cobalt in dark and Cobalt in light, `phosphor_off`, `glass_signal`) and runs a step denser and crisper than Mesh:
+`phosphor` = Pale cobalt in dark and Cobalt in light, `phosphor_off`, `phosphor_ghost`, `glass_signal`) and runs a step denser and crisper than Mesh:
 
 | | Samo | (Mesh) |
 | --- | --- | --- |
@@ -73,7 +73,7 @@ Samo uses them when installed and falls back to the system face otherwise.
 
 | Component | File | Use it for |
 | --- | --- | --- |
-| Readout strip | `shell.rs` `readout_strip` | The four live figures, on every page. One row at every width. |
+| Readout strip | `shell.rs` `readout_strip` | The four live figures, on every page. One row at every width. Memory and Disk free carry a small share after the unit (`67%` used, `18%` free) and their bar is that same share; it steps away with the side labels under 190 px a cell. A figure's unlit dots are a quiet ghost (`phosphor_ghost`), not the meter's empty track |
 | Page head | `shell.rs` `page_head` | Dial + breadcrumbs (disk pages) + `h1` + one line + actions |
 | Dial chip | `art.rs` `dial_chip` | A page's icon in a ring with twelve ticks |
 | Logo mark | `art.rs` `logo_mark` | The gauge on an Ink disc |
@@ -218,6 +218,7 @@ Samo lives in the menu bar too (`src/menubar.rs`, via `tray-icon`'s safe `NSStat
 15. What only the OS knows (an app's icon, which processes are in the Dock) is asked on its own thread through safe bindings, never
     on the UI thread. An icon that isn't there yet is an empty place and one the OS doesn't have is a gear: never a stand-in
     icon, and on an OS that can't supply them, none.
+16. A readout cell says one thing: its figure, its small share and its bar are of the same quantity (Memory: used; Disk free: free).
 
 ## Decisions
 
@@ -239,3 +240,5 @@ Samo lives in the menu bar too (`src/menubar.rs`, via `tray-icon`'s safe `NSStat
 | Helpers roll up into their app on the Processes page | Nine rows named "Grok Bot Helper" say nothing; "Grok Bot, 9 processes, 1.4 GB" does. Quit stays per process so one click can't end an app's every helper | No: `process_groups.rs`, `layout_lines` |
 | The collector returns every process, not the busiest 150 | An app's total over only some of its helpers would be wrong | No: `PROCESS_ROWS_MAX` |
 | Icons through AppKit, read from its TIFF by our own small reader | AppKit's PNG call is `unsafe` in the bindings (R29), and `image` and gpui can't read its half-float TIFFs (icons came out blank) | No: `app_icons.rs` |
+| Disk free's bar shows the free share, and a `%` follows Memory and Disk | The figure is free GB, so a bar of the *used* share beside "18%" contradicted it; KJ asked for the % | No: `readouts()` in `shell.rs` |
+| The unlit dots of a figure are their own quiet colour | On the light panel they were as visible as the lit ones (1.26:1 against the glass) and "97.3" read as "97.8"; a test now keeps them under 1.2:1 | No: `phosphor_ghost` |

@@ -83,6 +83,8 @@ pub(crate) struct Readout {
     context: String,
     figure: Option<String>,
     unit: String,
+    /// A small share after the unit ("72%"), where there is a whole to take it of: what the figure and its bar are of.
+    share: Option<String>,
     /// Signal lamp: something is wrong.
     wrong: bool,
     /// Dithered lamp: this figure is Samo's suggestion.
@@ -493,9 +495,11 @@ impl SamoWorkspaceApp {
         let pad_x = if frame.layout.roomy() { S4 } else { S3 };
         let show_context = frame.layout.content_w / cols >= 190.0;
         let items = readouts(frame);
+        // The figure leaves room for its unit and, where there is room for it at all, its share ("72%").
+        let after_figure = 30.0 + if show_context { 34.0 } else { 0.0 };
         let dot_h = readout_dot_h(
             &items,
-            frame.layout.content_w / cols - 2.0 * pad_x - 30.0,
+            frame.layout.content_w / cols - 2.0 * pad_x - after_figure,
             30.0,
         );
 
@@ -1059,6 +1063,7 @@ pub(crate) fn readouts(frame: &Frame) -> Vec<Readout> {
             },
             figure: cpu.map(|v| format!("{v:.1}")),
             unit: "%".to_string(),
+            share: None,
             wrong: false,
             suggestion: false,
             visual: div()
@@ -1077,6 +1082,10 @@ pub(crate) fn readouts(frame: &Frame) -> Vec<Readout> {
                 .unwrap_or_default(),
             figure: mem_fig,
             unit: mem_unit.unwrap_or("GB").to_string(),
+            // Used, as the figure and its bar are, and as the Activity chart's Memory says.
+            share: memory
+                .as_ref()
+                .map(|m| percent(ratio(m.used_bytes, m.total_bytes))),
             wrong: mem_critical,
             suggestion: false,
             visual: meter(
@@ -1093,9 +1102,14 @@ pub(crate) fn readouts(frame: &Frame) -> Vec<Readout> {
                 .unwrap_or_default(),
             figure: disk_fig,
             unit: disk_unit.unwrap_or("GB").to_string(),
+            // Free, as the figure is; its bar is the free share too, so the cell says one thing three ways.
+            share: volume.map(|d| percent(ratio(d.volume_free_bytes, d.volume_total_bytes))),
             wrong: nearly_full,
             suggestion: false,
-            visual: meter(used, nearly_full),
+            visual: meter(
+                volume.map(|d| ratio(d.volume_free_bytes, d.volume_total_bytes)),
+                nearly_full,
+            ),
             go: NavSection::Storage,
         },
         Readout {
@@ -1110,6 +1124,7 @@ pub(crate) fn readouts(frame: &Frame) -> Vec<Readout> {
                 .unwrap_or_default(),
             figure: rec_fig,
             unit: rec_unit.unwrap_or("GB").to_string(),
+            share: None,
             wrong: false,
             suggestion: true,
             visual: meter(
@@ -1214,7 +1229,7 @@ pub(crate) fn readout_cell(
                     } else {
                         pal.glass_text_2
                     },
-                    pal.phosphor_off,
+                    pal.phosphor_ghost,
                 ))
                 .child(
                     div()
@@ -1222,7 +1237,16 @@ pub(crate) fn readout_cell(
                         .text_size(px(12.0))
                         .text_color(pal.glass_text_2)
                         .child(ro.unit),
-                ),
+                )
+                .when(show_context, |el| {
+                    el.children(ro.share.map(|share| {
+                        div()
+                            .font(mono(FontWeight::NORMAL))
+                            .text_size(px(T_LABEL))
+                            .text_color(pal.glass_text_2)
+                            .child(share)
+                    }))
+                }),
         )
         .child(div().h(px(14.0)).flex().items_end().child(ro.visual))
 }

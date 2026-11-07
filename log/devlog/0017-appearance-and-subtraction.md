@@ -97,3 +97,18 @@ the opposite of what I built. `glass_face()` is gone.
   is at least 3:1 on it, and its text and figures stay at 4.5:1 (the existing palette test). Graphite's neutrality
   test lists the glass again, because it follows the style again.
 - This reverses the design line "the readout is dark in both themes" (DESIGN.md §1, 2026-10-31). It was KJ's call.
+
+## Follow-up 3, same day: the light readout was hard to read, and a % after Memory and Disk
+KJ, with arrows on the figures of Memory, Disk free and Reclaimable: the numbers on the light panel are hard to read,
+and "a small % after Memory and Disk, what do you think?"
+
+- **Why it was hard.** The unlit dots of the dot-matrix figures used the same colour as a meter's empty track (14 % of
+  Cobalt). On near-black they vanish; on the light panel they were 1.26:1 against it, nearly as visible as the lit
+  dots, so "97.3" read as "97.8". They now have their own token, `phosphor_ghost` (5 % of deep Cobalt in light; the
+  meters' track is unchanged). A test keeps the ghost under 1.2:1 in every palette, and I checked that it fails on the
+  old value.
+- **The %.** Memory shows the share used (what the Activity chart's Memory says) and Disk free the share free (the
+  figure is free GB). Because "18%" beside a bar of 82 % lit would contradict it, Disk's bar now shows the free share
+  too: one cell, one quantity (DESIGN.md rule 16). It steps away with the side labels below 190 px a cell, and the
+  figures leave room for it. One line to revert if the old bar is wanted.
+- Reclaimable has no share (not asked for).

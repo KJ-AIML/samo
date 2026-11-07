@@ -134,6 +134,9 @@ pub struct Palette {
     pub glass_text_2: Hsla,
     pub phosphor: Hsla,
     pub phosphor_off: Hsla,
+    /// The unlit dots of a dot-matrix figure. Much quieter than `phosphor_off` (a meter's empty track) on the light
+    /// panel: there the unlit dots were nearly as visible as the lit ones and the digits blurred into a pattern.
+    pub phosphor_ghost: Hsla,
     /// A wrong figure on the readout: Signal on dark glass, a deeper orange on the light panel so it still reads.
     pub glass_signal: Hsla,
     /// The switch thumb and its face, the same in both themes.
@@ -205,6 +208,7 @@ fn light(t: Tone) -> Palette {
         glass_text_2: h(mix(t.ink, t.tint, 0.72)),
         phosphor: h(BLUE),
         phosphor_off: h(fade(BLUE, 0.14)),
+        phosphor_ghost: h(fade(BLUE_DEEP, 0.05)),
         glass_signal: h(ORANGE_INK),
         thumb: h(WHITE),
         thumb_face: h(t.ink),
@@ -289,6 +293,7 @@ fn dark(t: Tone) -> Palette {
         glass_text_2: h(mix(WHITE, mix(t.ink, BLACK, 0.18), 0.58)),
         phosphor: h(BLUE_LIGHT),
         phosphor_off: h(fade(BLUE_LIGHT, 0.10)),
+        phosphor_ghost: h(fade(BLUE_LIGHT, 0.10)),
         glass_signal: h(ORANGE),
         thumb: h(WHITE),
         thumb_face: h(t.ink),
@@ -790,6 +795,11 @@ pub fn display_path(path: &str) -> String {
     crate::places::display_path_from(path, &home_dir())
 }
 
+/// A share between 0 and 1 as a whole-number percentage: `0.719` is `72%`.
+pub fn percent(share: f32) -> String {
+    format!("{:.0}%", (share * 100.0).clamp(0.0, 100.0))
+}
+
 pub fn ratio(part: u64, whole: u64) -> f32 {
     if whole == 0 {
         0.0
@@ -816,6 +826,15 @@ mod tests {
         assert_eq!(format_uptime(59), "0m");
         assert_eq!(format_uptime(3_660), "1h 1m");
         assert_eq!(format_uptime(90_000), "1d 1h");
+    }
+
+    #[test]
+    fn a_share_is_a_whole_percent() {
+        assert_eq!(percent(0.719), "72%");
+        assert_eq!(percent(0.0), "0%");
+        assert_eq!(percent(1.0), "100%");
+        assert_eq!(percent(1.7), "100%", "never past a whole");
+        assert_eq!(percent(-0.2), "0%");
     }
 
     #[test]
@@ -964,6 +983,35 @@ mod tests {
                 assert!(
                     ratio >= 3.0,
                     "{style:?} {name}: a wrong figure is {ratio:.2}:1 on the readout, under 3:1"
+                );
+            }
+        }
+    }
+
+    /// The unlit dots of a figure stay a quiet ghost, whatever the palette: seen over the readout's glass they are
+    /// barely different from it (under 1.2:1), while the lit ones are far from it (4.5:1 and more, tested above). When
+    /// they weren't (light, 14%), "97.3" read as "97.8".
+    #[test]
+    fn the_unlit_dots_of_a_figure_stay_quiet() {
+        let over = |ghost: Hsla, glass: Hsla| {
+            let (g, b) = (ghost, glass);
+            let (gr, br) = (Rgba::from(g), Rgba::from(b));
+            let mix = |f: f32, back: f32| f * gr.a + back * (1.0 - gr.a);
+            Hsla::from(Rgba {
+                r: mix(gr.r, br.r),
+                g: mix(gr.g, br.g),
+                b: mix(gr.b, br.b),
+                a: 1.0,
+            })
+        };
+        for style in Style::ALL {
+            for dark in [false, true] {
+                let pal = palette_for(style, dark);
+                let ghost = over(pal.phosphor_ghost, pal.glass);
+                let ratio = contrast(ghost, pal.glass);
+                assert!(
+                    ratio < 1.2,
+                    "{style:?} dark={dark}: the unlit dots are {ratio:.2}:1 against the glass, not quiet"
                 );
             }
         }
