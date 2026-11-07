@@ -27,6 +27,7 @@ tray-icon.workspace = true
 [target.'cfg(target_os = "macos")'.dependencies]
 samo-macos.workspace = true
 objc2.workspace = true
+image.workspace = true
 # App icons and which processes are Dock applications (src/app_icons.rs): safe AppKit calls only.
 objc2-app-kit = { workspace = true, features = [
     "NSApplication",

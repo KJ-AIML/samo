@@ -743,6 +743,12 @@ impl SamoWorkspaceApp {
                         .gap(px(S3))
                         .border_b_1()
                         .border_color(pal.hairline)
+                        // Its app's icon (a helper wears its app's), so "com.apple.WebKit…" is told apart at a glance.
+                        .children(crate::processes::app_icon(
+                            &self.hub.icons,
+                            samo_domain::app_bundle_of(&proc_row.executable_path),
+                            20.0,
+                        ))
                         .child(
                             line(proc_row.name.clone(), FontWeight::MEDIUM, 13.5, pal.text)
                                 .flex_1(),

@@ -523,15 +523,6 @@ impl ProcessSort {
             Self::Pid => "pid",
         }
     }
-
-    fn label(self) -> &'static str {
-        match self {
-            Self::Memory => "memory",
-            Self::Cpu => "CPU",
-            Self::Disk => "disk I/O",
-            Self::Pid => "PID",
-        }
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -634,6 +625,8 @@ struct SamoWorkspaceApp {
     proc_rows: Arc<TelemetrySnapshot>,
     proc_cols: processes::Columns,
     proc_scroll: UniformListScrollHandle,
+    /// The Processes page's search, which apps are open, and what its list draws from.
+    proc_ui: processes::ProcUi,
     /// How much history Overview's live charts show, and where the pointer is over each.
     live_span: live::Span,
     live_hover: [live::ChartHover; 3],
@@ -750,6 +743,7 @@ impl SamoWorkspaceApp {
             proc_rows: placeholder.unwrap_or_else(|| Arc::new(hub::placeholder_telemetry())),
             proc_cols: processes::Columns::all(),
             proc_scroll: UniformListScrollHandle::new(),
+            proc_ui: processes::ProcUi::new(cx),
             live_span: live::Span::TwoMin,
             live_hover: Default::default(),
             store_ui: extensions_page::StoreUi::new(cx),
