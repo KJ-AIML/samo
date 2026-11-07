@@ -3,8 +3,12 @@
 //! Its own layer is in `apps/samo-gpui/DESIGN.md`: the ring, the readout (a dark instrument window with
 //! phosphor figures), the probe, and a denser, business-like scale. No hex appears outside this file.
 
-use gpui::{App, Font, FontFallbacks, FontFeatures, FontStyle, FontWeight, Hsla, Rgba};
+use crate::appearance::{Appearance, Mode, Style};
+use gpui::{
+    App, Font, FontFallbacks, FontFeatures, FontStyle, FontWeight, Hsla, Rgba, WindowAppearance,
+};
 use std::cell::Cell;
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, LazyLock, OnceLock};
 
 // ---------------------------------------------------------------- the nine brand colours
@@ -162,20 +166,20 @@ fn h(c: C) -> Hsla {
     c.into()
 }
 
-fn light() -> Palette {
+fn light(t: Tone) -> Palette {
     let card = WHITE;
     Palette {
         frame: h(WHITE),
-        stage: h(mix(INK, WHITE, 0.035)),
-        shell: h(mix(INK, WHITE, 0.06)),
+        stage: h(mix(t.ink, WHITE, 0.035)),
+        shell: h(mix(t.ink, WHITE, 0.06)),
         card: h(card),
-        card_hover: h(mix(INK, card, 0.05)),
-        text: h(INK),
-        text_2: h(mix(INK, BLUE_LIGHT, 0.72)),
-        hairline: h(fade(INK, 0.09)),
-        hairline_strong: h(fade(INK, 0.18)),
-        field_line: h(mix(INK, WHITE, 0.55)),
-        hover: h(fade(INK, 0.05)),
+        card_hover: h(mix(t.ink, card, 0.05)),
+        text: h(t.ink),
+        text_2: h(mix(t.ink, t.tint, 0.72)),
+        hairline: h(fade(t.ink, 0.09)),
+        hairline_strong: h(fade(t.ink, 0.18)),
+        field_line: h(mix(t.ink, WHITE, 0.55)),
+        hover: h(fade(t.ink, 0.05)),
         accent: h(BLUE),
         accent_text: h(BLUE),
         accent_wash: h(mix(BLUE, WHITE, 0.07)),
@@ -184,41 +188,41 @@ fn light() -> Palette {
         signal_text: h(ORANGE_INK),
         signal_wash: h(mix(ORANGE, WHITE, 0.13)),
         signal_line: h(mix(ORANGE, WHITE, 0.28)),
-        primary_bg: h(INK),
+        primary_bg: h(t.ink),
         primary_fg: h(WHITE),
-        primary_hover: h(mix(INK, WHITE, 0.84)),
-        dot: h(fade(INK, 0.11)),
-        shade_1: h(fade(INK, 0.07)),
-        shade_2: h(fade(INK, 0.05)),
-        shade_3: h(fade(INK, 0.16)),
-        shade_4: h(fade(INK, 0.34)),
-        backdrop: h(fade(INK, 0.30)),
-        glass: h(mix(INK, BLACK, 0.72)),
+        primary_hover: h(mix(t.ink, WHITE, 0.84)),
+        dot: h(fade(t.ink, 0.11)),
+        shade_1: h(fade(t.ink, 0.07)),
+        shade_2: h(fade(t.ink, 0.05)),
+        shade_3: h(fade(t.ink, 0.16)),
+        shade_4: h(fade(t.ink, 0.34)),
+        backdrop: h(fade(t.ink, 0.30)),
+        glass: h(mix(t.ink, BLACK, 0.72)),
         glass_line: h(fade(WHITE, 0.14)),
         glass_text: h(WHITE),
-        glass_text_2: h(mix(WHITE, mix(INK, BLACK, 0.72), 0.62)),
+        glass_text_2: h(mix(WHITE, mix(t.ink, BLACK, 0.72), 0.62)),
         phosphor: h(BLUE_LIGHT),
         phosphor_off: h(fade(BLUE_LIGHT, 0.12)),
         thumb: h(WHITE),
-        thumb_face: h(INK),
+        thumb_face: h(t.ink),
         cells: CellColors {
             mascot: CellTint {
                 o: h(BLACK),
-                f: h(INK),
-                h: h(mix(INK, WHITE, 0.62)),
-                s: h(mix(INK, BLACK, 0.55)),
-                v: h(INK),
-                d: h(INK),
+                f: h(t.ink),
+                h: h(mix(t.ink, WHITE, 0.62)),
+                s: h(mix(t.ink, BLACK, 0.55)),
+                v: h(t.ink),
+                d: h(t.ink),
                 eye: h(WHITE),
                 led: h(WHITE),
-                sign: h(INK),
+                sign: h(t.ink),
             },
             agent: CellTint {
-                o: h(mix(BLUE_DEEP, INK, 0.72)),
+                o: h(mix(BLUE_DEEP, t.ink, 0.72)),
                 f: h(BLUE),
                 h: h(mix(BLUE_LIGHT, BLUE, 0.5)),
                 s: h(BLUE_DEEP),
-                v: h(mix(INK, BLUE_DEEP, 0.82)),
+                v: h(mix(t.ink, BLUE_DEEP, 0.82)),
                 d: h(mix(BLUE_LIGHT, BLUE, 0.46)),
                 eye: h(mix(WHITE, BLUE_LIGHT, 0.78)),
                 led: h(mix(WHITE, BLUE_LIGHT, 0.78)),
@@ -227,12 +231,12 @@ fn light() -> Palette {
             agent_asleep_eye: h(fade(BLUE_LIGHT, 0.55)),
             agent_asleep_led: h(fade(BLUE_LIGHT, 0.30)),
             device: CellTint {
-                o: h(mix(INK, WHITE, 0.55)),
-                f: h(mix(INK, WHITE, 0.12)),
+                o: h(mix(t.ink, WHITE, 0.55)),
+                f: h(mix(t.ink, WHITE, 0.12)),
                 h: h(WHITE),
-                s: h(mix(INK, WHITE, 0.24)),
-                v: h(mix(INK, WHITE, 0.74)),
-                d: h(mix(INK, WHITE, 0.74)),
+                s: h(mix(t.ink, WHITE, 0.24)),
+                v: h(mix(t.ink, WHITE, 0.74)),
+                d: h(mix(t.ink, WHITE, 0.74)),
                 eye: h(WHITE),
                 led: h(BLUE),
                 sign: h(BLUE),
@@ -241,20 +245,20 @@ fn light() -> Palette {
     }
 }
 
-fn dark() -> Palette {
-    let card = mix(INK, BLACK, 0.68);
-    let text = mix(WHITE, INK, 0.92);
+fn dark(t: Tone) -> Palette {
+    let card = mix(t.ink, BLACK, 0.68);
+    let text = mix(WHITE, t.ink, 0.92);
     Palette {
-        frame: h(mix(INK, BLACK, 0.26)),
-        stage: h(mix(INK, BLACK, 0.42)),
-        shell: h(mix(INK, BLACK, 0.54)),
+        frame: h(mix(t.ink, BLACK, 0.26)),
+        stage: h(mix(t.ink, BLACK, 0.42)),
+        shell: h(mix(t.ink, BLACK, 0.54)),
         card: h(card),
         card_hover: h(mix(text, card, 0.05)),
         text: h(text),
-        text_2: h(mix(WHITE, INK, 0.62)),
+        text_2: h(mix(WHITE, t.ink, 0.62)),
         hairline: h(fade(WHITE, 0.09)),
         hairline_strong: h(fade(WHITE, 0.17)),
-        field_line: h(mix(WHITE, INK, 0.44)),
+        field_line: h(mix(WHITE, t.ink, 0.44)),
         hover: h(fade(WHITE, 0.06)),
         accent: h(mix(BLUE, BLUE_LIGHT, 0.38)),
         accent_text: h(BLUE_LIGHT),
@@ -265,7 +269,7 @@ fn dark() -> Palette {
         signal_wash: h(mix(ORANGE, card, 0.16)),
         signal_line: h(mix(ORANGE, card, 0.34)),
         primary_bg: h(text),
-        primary_fg: h(INK),
+        primary_fg: h(t.ink),
         primary_hover: h(mix(text, card, 0.86)),
         dot: h(fade(WHITE, 0.09)),
         shade_1: h(fade(BLACK, 0.40)),
@@ -273,22 +277,22 @@ fn dark() -> Palette {
         shade_3: h(fade(BLACK, 0.55)),
         shade_4: h(fade(BLACK, 0.70)),
         backdrop: h(fade(BLACK, 0.50)),
-        glass: h(mix(INK, BLACK, 0.18)),
+        glass: h(mix(t.ink, BLACK, 0.18)),
         glass_line: h(fade(WHITE, 0.12)),
         glass_text: h(WHITE),
-        glass_text_2: h(mix(WHITE, mix(INK, BLACK, 0.18), 0.58)),
+        glass_text_2: h(mix(WHITE, mix(t.ink, BLACK, 0.18), 0.58)),
         phosphor: h(BLUE_LIGHT),
         phosphor_off: h(fade(BLUE_LIGHT, 0.10)),
         thumb: h(WHITE),
-        thumb_face: h(INK),
+        thumb_face: h(t.ink),
         cells: CellColors {
             mascot: CellTint {
-                o: h(mix(WHITE, INK, 0.62)),
-                f: h(mix(WHITE, INK, 0.30)),
-                h: h(mix(WHITE, INK, 0.54)),
-                s: h(mix(WHITE, INK, 0.18)),
-                v: h(INK),
-                d: h(INK),
+                o: h(mix(WHITE, t.ink, 0.62)),
+                f: h(mix(WHITE, t.ink, 0.30)),
+                h: h(mix(WHITE, t.ink, 0.54)),
+                s: h(mix(WHITE, t.ink, 0.18)),
+                v: h(t.ink),
+                d: h(t.ink),
                 eye: h(WHITE),
                 led: h(WHITE),
                 sign: h(WHITE),
@@ -298,7 +302,7 @@ fn dark() -> Palette {
                 f: h(mix(BLUE, BLUE_LIGHT, 0.62)),
                 h: h(mix(BLUE_LIGHT, BLUE, 0.62)),
                 s: h(mix(BLUE, BLUE_DEEP, 0.70)),
-                v: h(mix(INK, BLACK, 0.70)),
+                v: h(mix(t.ink, BLACK, 0.70)),
                 d: h(mix(BLUE_LIGHT, BLUE, 0.74)),
                 eye: h(mix(WHITE, BLUE_LIGHT, 0.78)),
                 led: h(mix(WHITE, BLUE_LIGHT, 0.78)),
@@ -307,12 +311,12 @@ fn dark() -> Palette {
             agent_asleep_eye: h(fade(BLUE_LIGHT, 0.55)),
             agent_asleep_led: h(fade(BLUE_LIGHT, 0.30)),
             device: CellTint {
-                o: h(mix(WHITE, INK, 0.55)),
-                f: h(mix(WHITE, INK, 0.26)),
-                h: h(mix(WHITE, INK, 0.40)),
-                s: h(mix(WHITE, INK, 0.14)),
-                v: h(mix(BLACK, INK, 0.40)),
-                d: h(mix(BLACK, INK, 0.40)),
+                o: h(mix(WHITE, t.ink, 0.55)),
+                f: h(mix(WHITE, t.ink, 0.26)),
+                h: h(mix(WHITE, t.ink, 0.40)),
+                s: h(mix(WHITE, t.ink, 0.14)),
+                v: h(mix(BLACK, t.ink, 0.40)),
+                d: h(mix(BLACK, t.ink, 0.40)),
                 eye: h(WHITE),
                 led: h(BLUE),
                 sign: h(BLUE),
@@ -321,14 +325,84 @@ fn dark() -> Palette {
     }
 }
 
-static LIGHT: LazyLock<Palette> = LazyLock::new(light);
-static DARK: LazyLock<Palette> = LazyLock::new(dark);
+/// What a style changes: the neutral that every surface, line and text colour is mixed from, and the colour the
+/// secondary text leans toward in light. Cobalt, Signal and the characters' own colours are the family's, the
+/// same in every style, so Cobalt still means "selected" and "Samo suggests" everywhere.
+#[derive(Clone, Copy)]
+struct Tone {
+    ink: C,
+    tint: C,
+}
+
+fn tone(style: Style) -> Tone {
+    match style {
+        Style::Cobalt => Tone {
+            ink: INK,
+            tint: BLUE_LIGHT,
+        },
+        // Ink's lightness with the blue taken out: only black and white, mixed.
+        Style::Graphite => Tone {
+            ink: mix(WHITE, BLACK, 0.165),
+            tint: WHITE,
+        },
+    }
+}
+
+/// Every style in light, then in dark, in `Style::ALL`'s order (see `palette_index`).
+static PALETTES: [LazyLock<Palette>; 4] = [
+    LazyLock::new(|| light(tone(Style::Cobalt))),
+    LazyLock::new(|| dark(tone(Style::Cobalt))),
+    LazyLock::new(|| light(tone(Style::Graphite))),
+    LazyLock::new(|| dark(tone(Style::Graphite))),
+];
+
+fn palette_index(style: Style, dark: bool) -> usize {
+    Style::ALL.iter().position(|s| *s == style).unwrap_or(0) * 2 + usize::from(dark)
+}
+
+/// A style's palette in light or dark, whatever is current: Settings draws each style's swatch with it.
+pub fn palette_for(style: Style, dark: bool) -> &'static Palette {
+    &PALETTES[palette_index(style, dark)]
+}
 
 thread_local! {
     static IS_DARK: Cell<bool> = const { Cell::new(false) };
 }
 
-/// `SAMO_THEME=light|dark` pins a theme; anything else follows the system, as Mesh's does.
+// What you chose in Settings → Appearance, as positions in `Mode::ALL` and `Style::ALL`. Atomics, not a
+// thread-local: Settings sets them on the main thread, but every Samo window reads them as it draws.
+static MODE: AtomicU8 = AtomicU8::new(0);
+static STYLE: AtomicU8 = AtomicU8::new(0);
+
+/// Takes what was chosen (at launch from `appearance.txt`, and again when you change it in Settings).
+pub fn set_appearance(a: Appearance) {
+    let at = |found: Option<usize>| u8::try_from(found.unwrap_or(0)).unwrap_or(0);
+    MODE.store(
+        at(Mode::ALL.iter().position(|m| *m == a.mode)),
+        Ordering::Relaxed,
+    );
+    STYLE.store(
+        at(Style::ALL.iter().position(|s| *s == a.style)),
+        Ordering::Relaxed,
+    );
+}
+
+/// What was chosen: Settings marks it. (`SAMO_THEME` and `SAMO_STYLE` still win over it on screen.)
+pub fn appearance() -> Appearance {
+    Appearance {
+        mode: Mode::ALL
+            .get(usize::from(MODE.load(Ordering::Relaxed)))
+            .copied()
+            .unwrap_or_default(),
+        style: Style::ALL
+            .get(usize::from(STYLE.load(Ordering::Relaxed)))
+            .copied()
+            .unwrap_or_default(),
+    }
+}
+
+/// `SAMO_THEME=light|dark` pins light or dark whatever Settings says (for screenshots and tests); anything else
+/// leaves it to Settings, which by default follows the system, as Mesh's does.
 pub fn pinned_dark() -> Option<bool> {
     static PINNED: LazyLock<Option<bool>> = LazyLock::new(|| {
         match std::env::var("SAMO_THEME")
@@ -344,7 +418,39 @@ pub fn pinned_dark() -> Option<bool> {
     *PINNED
 }
 
-/// Set once per frame from the window's appearance (the system's light or dark).
+/// `SAMO_STYLE=cobalt|graphite` pins a style the same way.
+fn pinned_style() -> Option<Style> {
+    static PINNED: LazyLock<Option<Style>> = LazyLock::new(|| {
+        Style::from_key(
+            std::env::var("SAMO_STYLE")
+                .unwrap_or_default()
+                .to_ascii_lowercase()
+                .as_str(),
+        )
+    });
+    *PINNED
+}
+
+/// Light or dark: what's pinned, else what you chose, else (if you chose "System") what the system says.
+pub fn resolve_dark(pinned: Option<bool>, mode: Mode, system_dark: bool) -> bool {
+    pinned.unwrap_or(match mode {
+        Mode::System => system_dark,
+        Mode::Light => false,
+        Mode::Dark => true,
+    })
+}
+
+/// The first thing every Samo window does as it draws (the window, the menu bar's panel, a pop-up): settle light
+/// or dark from the window's own appearance, so a change in Settings or in System Settings shows at once.
+pub fn follow(system: WindowAppearance) {
+    let system_dark = matches!(
+        system,
+        WindowAppearance::Dark | WindowAppearance::VibrantDark
+    );
+    set_dark(resolve_dark(pinned_dark(), appearance().mode, system_dark));
+}
+
+/// Set once per frame by `follow`.
 pub fn set_dark(dark: bool) {
     IS_DARK.with(|d| d.set(dark));
 }
@@ -353,9 +459,14 @@ pub fn is_dark() -> bool {
     IS_DARK.with(Cell::get)
 }
 
+/// The style in use: pinned, else the chosen one.
+pub fn style() -> Style {
+    pinned_style().unwrap_or_else(|| appearance().style)
+}
+
 /// The palette for the current appearance.
 pub fn p() -> &'static Palette {
-    if is_dark() { &DARK } else { &LIGHT }
+    palette_for(style(), is_dark())
 }
 
 /// File categories, in their fixed order. Colour follows the category, never its rank; the order keeps
@@ -716,6 +827,160 @@ mod tests {
         assert_eq!(mesh_hash("kj"), 4_253_240_210);
         assert_eq!(mesh_hash("you@example.com"), 2_405_931_571);
         assert_eq!(mesh_hash(""), 431_477_908);
+    }
+
+    // ------------------------------------------------------------ appearance and styles
+
+    #[test]
+    fn light_or_dark_comes_from_the_pin_then_your_choice_then_the_system() {
+        use Mode::*;
+        // "System" follows the system whichever way it goes.
+        assert!(resolve_dark(None, System, true));
+        assert!(!resolve_dark(None, System, false));
+        // A fixed mode ignores the system.
+        assert!(!resolve_dark(None, Light, true));
+        assert!(resolve_dark(None, Dark, false));
+        // SAMO_THEME beats everything.
+        assert!(resolve_dark(Some(true), Light, false));
+        assert!(!resolve_dark(Some(false), Dark, true));
+    }
+
+    #[test]
+    fn what_you_choose_is_what_is_read_back() {
+        let before = appearance();
+        for mode in Mode::ALL {
+            for style in Style::ALL {
+                let a = Appearance { mode, style };
+                set_appearance(a);
+                assert_eq!(appearance(), a);
+            }
+        }
+        set_appearance(before);
+    }
+
+    #[test]
+    fn cobalt_is_still_exactly_what_samo_shipped() {
+        let (light, dark) = (
+            palette_for(Style::Cobalt, false),
+            palette_for(Style::Cobalt, true),
+        );
+        // The values the palettes had before styles existed (see `mixes_match_css_color_mix`).
+        assert_eq!(light.stage, h(mix(INK, WHITE, 0.035)));
+        assert_eq!(light.text, h(INK));
+        assert_eq!(light.text_2, h(mix(INK, BLUE_LIGHT, 0.72)));
+        assert_eq!(dark.card, h(mix(INK, BLACK, 0.68)));
+        assert_eq!(dark.text_2, h(mix(WHITE, INK, 0.62)));
+        assert_eq!(light.accent, h(BLUE));
+    }
+
+    #[test]
+    fn each_style_has_its_own_light_and_dark() {
+        for dark in [false, true] {
+            assert_ne!(
+                palette_for(Style::Cobalt, dark).stage,
+                palette_for(Style::Graphite, dark).stage,
+                "the styles differ (dark = {dark})"
+            );
+        }
+        for style in Style::ALL {
+            assert_ne!(
+                palette_for(style, false).card,
+                palette_for(style, true).card,
+                "{style:?}: light and dark differ"
+            );
+        }
+    }
+
+    /// Graphite is colourless where Cobalt is slate: every surface and text colour has equal red, green and blue.
+    #[test]
+    fn graphite_has_no_tint_in_its_neutrals() {
+        for dark in [false, true] {
+            let pal = palette_for(Style::Graphite, dark);
+            for (name, colour) in [
+                ("frame", pal.frame),
+                ("stage", pal.stage),
+                ("shell", pal.shell),
+                ("card", pal.card),
+                ("card_hover", pal.card_hover),
+                ("text", pal.text),
+                ("text_2", pal.text_2),
+                ("field_line", pal.field_line),
+                ("glass", pal.glass),
+                ("primary_bg", pal.primary_bg),
+            ] {
+                let c = Rgba::from(colour);
+                assert!(
+                    (c.r - c.g).abs() < 0.004 && (c.g - c.b).abs() < 0.004,
+                    "Graphite {name} (dark = {dark}) is tinted: {c:?}"
+                );
+            }
+        }
+        // And Cobalt's slate really is tinted, so the two are not the same grey.
+        let c = Rgba::from(palette_for(Style::Cobalt, false).text_2);
+        assert!(c.b - c.r > 0.05);
+    }
+
+    /// WCAG relative luminance and contrast ratio of two opaque colours.
+    fn contrast(a: Hsla, b: Hsla) -> f32 {
+        let lum = |c: Hsla| {
+            let c = Rgba::from(c);
+            let lin = |v: f32| {
+                if v <= 0.03928 {
+                    v / 12.92
+                } else {
+                    ((v + 0.055) / 1.055).powf(2.4)
+                }
+            };
+            0.2126 * lin(c.r) + 0.7152 * lin(c.g) + 0.0722 * lin(c.b)
+        };
+        let (la, lb) = (lum(a), lum(b));
+        (la.max(lb) + 0.05) / (la.min(lb) + 0.05)
+    }
+
+    /// The ratio itself is right (so the test below can fail): black on white is 21:1, and a mid grey on white
+    /// is far under 4.5:1.
+    #[test]
+    fn the_contrast_measure_measures() {
+        assert!((contrast(h(BLACK), h(WHITE)) - 21.0).abs() < 0.01);
+        assert!(contrast(h(mix(WHITE, BLACK, 0.7)), h(WHITE)) < 3.0);
+        assert!((contrast(h(WHITE), h(WHITE)) - 1.0).abs() < 0.001);
+    }
+
+    /// Every pair of text and the surface it is drawn on reads at WCAG AA (4.5:1), in all four palettes.
+    #[test]
+    fn text_is_readable_on_what_it_sits_on_in_every_palette() {
+        for style in Style::ALL {
+            for dark in [false, true] {
+                let pal = palette_for(style, dark);
+                let pairs = [
+                    ("text on card", pal.text, pal.card),
+                    ("text on stage", pal.text, pal.stage),
+                    ("text on frame", pal.text, pal.frame),
+                    ("text on shell", pal.text, pal.shell),
+                    ("text_2 on card", pal.text_2, pal.card),
+                    ("text_2 on stage", pal.text_2, pal.stage),
+                    ("text_2 on frame", pal.text_2, pal.frame),
+                    ("text_2 on shell", pal.text_2, pal.shell),
+                    ("accent_text on card", pal.accent_text, pal.card),
+                    ("accent_text on stage", pal.accent_text, pal.stage),
+                    ("accent_text on its wash", pal.accent_text, pal.accent_wash),
+                    ("signal_text on card", pal.signal_text, pal.card),
+                    ("signal_text on its wash", pal.signal_text, pal.signal_wash),
+                    ("primary_fg on primary_bg", pal.primary_fg, pal.primary_bg),
+                    ("glass_text on glass", pal.glass_text, pal.glass),
+                    ("glass_text_2 on glass", pal.glass_text_2, pal.glass),
+                    ("phosphor on glass", pal.phosphor, pal.glass),
+                ];
+                for (name, fg, bg) in pairs {
+                    let ratio = contrast(fg, bg);
+                    assert!(
+                        ratio >= 4.5,
+                        "{style:?} {} — {name} is {ratio:.2}:1, under 4.5:1",
+                        if dark { "dark" } else { "light" }
+                    );
+                }
+            }
+        }
     }
 
     #[test]

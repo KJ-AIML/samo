@@ -2,6 +2,7 @@
 // Samo, and none can take it down when closed (ADR-006).
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
+mod appearance;
 mod art;
 mod assets;
 mod charts;
@@ -37,8 +38,8 @@ use futures::StreamExt;
 use gpui::{
     App, Application, Bounds, Context, FocusHandle, FontWeight, Global, IntoElement, KeyBinding,
     KeyDownEvent, Menu, MenuItem, ParentElement, Render, SharedString, Styled, TitlebarOptions,
-    UniformListScrollHandle, Window, WindowAppearance, WindowBounds, WindowHandle, WindowOptions,
-    actions, div, point, prelude::*, px, size,
+    UniformListScrollHandle, Window, WindowBounds, WindowHandle, WindowOptions, actions, div,
+    point, prelude::*, px, size,
 };
 use hub::Hub;
 use layout::Layout;
@@ -1094,12 +1095,7 @@ impl SamoWorkspaceApp {
 
 impl Render for SamoWorkspaceApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        theme::set_dark(theme::pinned_dark().unwrap_or_else(|| {
-            matches!(
-                window.appearance(),
-                WindowAppearance::Dark | WindowAppearance::VibrantDark
-            )
-        }));
+        theme::follow(window.appearance());
         let pal = theme::p();
         let layout = Layout::for_window(f32::from(window.viewport_size().width));
 
@@ -1172,6 +1168,8 @@ fn main() {
     app.on_reopen(|cx| open_main(cx, None));
     app.run(|cx: &mut App| {
         theme::init_fonts(cx);
+        // What you chose in Settings → Appearance, before the first window draws.
+        theme::set_appearance(appearance::load());
         text_input::bind_keys(cx);
         cx.on_action(|_: &Quit, cx| quit(cx));
         cx.on_action(|_: &ShowWindow, cx| open_main(cx, None));

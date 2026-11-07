@@ -14,9 +14,9 @@ use crate::theme::*;
 use crate::{AppState, NavSection, open_main};
 use gpui::{
     Animation, AnimationExt, App, Bounds, Context, FontWeight, Hsla, IntoElement, MouseButton,
-    MouseExitEvent, ParentElement, Render, Styled, Window, WindowAppearance,
-    WindowBackgroundAppearance, WindowBounds, WindowKind, WindowOptions, canvas, div,
-    ease_out_quint, point, prelude::*, px, size,
+    MouseExitEvent, ParentElement, Render, Styled, Window, WindowBackgroundAppearance,
+    WindowBounds, WindowKind, WindowOptions, canvas, div, ease_out_quint, point, prelude::*, px,
+    size,
 };
 use std::time::Duration;
 
@@ -281,12 +281,7 @@ fn kind_mark(kind: PopupKind) -> gpui::AnyElement {
 
 impl Render for PopupView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        set_dark(pinned_dark().unwrap_or_else(|| {
-            matches!(
-                window.appearance(),
-                WindowAppearance::Dark | WindowAppearance::VibrantDark
-            )
-        }));
+        crate::theme::follow(window.appearance());
         let pal = p();
         let kind = self.popup.kind;
         let edge = kind_color(kind);

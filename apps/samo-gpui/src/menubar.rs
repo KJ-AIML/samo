@@ -15,8 +15,8 @@ use crate::{AppState, Frame, NavSection, SamoWorkspaceApp, open_main, snapshot};
 use futures::StreamExt;
 use gpui::{
     App, Bounds, Context, FontWeight, IntoElement, ParentElement, Render, Styled, Subscription,
-    Window, WindowAppearance, WindowBackgroundAppearance, WindowBounds, WindowKind, WindowOptions,
-    div, point, prelude::*, px, size,
+    Window, WindowBackgroundAppearance, WindowBounds, WindowKind, WindowOptions, div, point,
+    prelude::*, px, size,
 };
 use samo_primitives::Reading;
 use std::time::{Duration, Instant};
@@ -387,12 +387,7 @@ impl QuickPanel {
 
 impl Render for QuickPanel {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        set_dark(pinned_dark().unwrap_or_else(|| {
-            matches!(
-                window.appearance(),
-                WindowAppearance::Dark | WindowAppearance::VibrantDark
-            )
-        }));
+        crate::theme::follow(window.appearance());
         let pal = p();
         let hub = cx.global::<AppState>().hub.clone();
         let Some(frame) = snapshot(&hub, Layout::for_window(PANEL_W)) else {
