@@ -79,7 +79,21 @@ at the Memory and Disk free cells).
   at the top while the cards moved under it.)
 - **It did change colour,** three ways: light vs dark (slate about `#1A1E25` in light, near-black in dark, from
   before this work), Cobalt vs Graphite (my addition), and Signal orange for a wrong figure (kept on purpose).
-- **Now it is one face.** `glass_face()` gives every palette the same glass, line, text and phosphor (the old dark
+- **Then one face (superseded below).** `glass_face()` gave every palette the same glass, line, text and phosphor (the old dark
   values), so light mode's readout is darker than it was. A test checks all four palettes are equal and darker than
   their stage; I also sampled the rendered pixels in a capture of each palette: `(6, 8, 9)` at three points in all four.
 - The Graphite-is-neutral test no longer lists the readout's glass, on purpose.
+
+## Follow-up 2, same day: no, it should follow the theme
+I had read "should not changes colors" as "keep the readout fixed" and made it one near-black in all four palettes.
+KJ, looking at it in light mode: "why is it still black, the top panel? doesn't it change with the theme?" That was
+the opposite of what I built. `glass_face()` is gone.
+
+- **Dark:** near-black glass, white labels, pale-cobalt figures, Signal for a wrong figure (as before this work).
+- **Light:** a recessed panel at the shell's tone (so a little darker than the stage), ink labels, Cobalt
+  dot-matrix figures. A wrong figure uses a new token, `glass_signal` (a deeper orange in light), because plain
+  Signal is too faint on a light panel; the readout, its lamps and its meters all use it.
+- Tests: the readout is lighter in light than in dark in both styles, always darker than its stage, a wrong figure
+  is at least 3:1 on it, and its text and figures stay at 4.5:1 (the existing palette test). Graphite's neutrality
+  test lists the glass again, because it follows the style again.
+- This reverses the design line "the readout is dark in both themes" (DESIGN.md §1, 2026-10-31). It was KJ's call.

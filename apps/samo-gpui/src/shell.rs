@@ -1034,7 +1034,11 @@ pub(crate) fn readouts(frame: &Frame) -> Vec<Readout> {
     let meter = |r: Option<f32>, wrong: bool| {
         led_meter(
             r,
-            if wrong { pal.signal } else { pal.phosphor },
+            if wrong {
+                pal.glass_signal
+            } else {
+                pal.phosphor
+            },
             pal.phosphor_off,
             4.0,
         )
@@ -1157,10 +1161,18 @@ pub(crate) fn readout_cell(
     } else {
         div()
             .size(px(6.0))
-            .bg(if ro.wrong { pal.signal } else { pal.phosphor })
+            .bg(if ro.wrong {
+                pal.glass_signal
+            } else {
+                pal.phosphor
+            })
             .into_any_element()
     };
-    let figure_color = if ro.wrong { pal.signal } else { pal.phosphor };
+    let figure_color = if ro.wrong {
+        pal.glass_signal
+    } else {
+        pal.phosphor
+    };
     let mut hover_bg = pal.glass_text;
     hover_bg.a = 0.04;
     div()
