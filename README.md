@@ -36,8 +36,9 @@ is measured is solid, and anything you remove goes to the Trash, with Undo.
 - **Space you can walk into.** A circle map of the folder, coloured by kind of file. Click a circle to go inside,
   *Up* to come back; recent folders open instantly.
 - **Build junk, found.** Every project under the folder, ranked by what Samo could clear, with the artifacts named.
-- **Processes.** A fast, virtualised table you can sort; rows hold still under the pointer so a row can't move
-  under a click.
+- **Processes.** Apps, not a flat list: each app's helpers are rolled up into it ("Grok Bot, 9 processes"), with its
+  icon on the Mac, applications above background processes, a search box and a bar under CPU and Memory. A fast,
+  virtualised table you can sort; rows hold still under the pointer so a row can't move under a click.
 - **In the menu bar.** Samo's probe shows the CPU load beside it; click it for a quick panel without opening the
   app. Close the window and Samo keeps running there.
 - **Honest readings.** A sensor that stopped leaves a gap in the chart, never a made-up line. Unknown is `--`, not `0`.
@@ -105,7 +106,7 @@ To make the zip from the source (Windows 11, the MSVC Rust toolchain): `cargo ru
 | **Overview** | How the Mac is doing right now, and where this folder's space went |
 | **Projects** | Which projects carry the most build output, and what clearing it would give back |
 | **Storage** | The folder as a map: click into folders, reveal them in Finder, move them to the Trash |
-| **Processes** | Every process by memory, CPU, disk or PID; quit one (Samo checks it's still the same process first) |
+| **Processes** | Every process, grouped by app with its icon (Mac), by memory, CPU, disk or PID, with a search; quit one process (Samo checks it's still the same process first) |
 | **Performance** | CPU history, each core, memory in detail, disk and network rates |
 
 - **Pick what to measure** from the folder menu in a page's header: your standard folders (Home, Desktop,

@@ -99,6 +99,7 @@ Samo uses them when installed and falls back to the system face otherwise.
 | Store list | `extensions_page.rs`, `store_view.rs` | One card of rows: a 40 pt icon, the name with `by author` in mono, the summary clipped to one line, a state tag (*installed*, *update* in Cobalt, *dev*, *off*, *needs a newer Samo*) and a chevron. Segments (All · Installed · Updates) and the search above; a line on where the list came from (*Offline: showing the store as of 14:02*) |
 | Store detail | `extensions_page.rs` | A back link, then a card: a 72 pt icon, name, *signed* or *dev*, a mono line of facts (version, author, size, categories), Homepage, and on the right one Primary (Install, Update to x, Install signed version) beside a Danger Uninstall, then Open and the switch. Asks before replacing a dev build or uninstalling (naming the backup it keeps). Screenshots one at a time on the glass with ‹ › and *1 of 3*; About as paragraphs and Cobalt-square bullets; What it changes; What's new |
 | Settings | `settings_page.rs` | The gear at the foot of the sidebar, under a gap (no group label). A list, not cards: a group is its `h2` and rows split by hairlines; a narrow window drops a row's control under its name. **Appearance**: Mode as a segmented switch; Style as tiles, each drawing a small Samo in that style in the light or dark in use (the one in use has a Cobalt ring *and* a check). A choice shows at once in every Samo window and is kept; a failed write is said on the page. **Updates**: one row, the headline (*Samo 0.3.0 is available* / *You have the latest Samo*) over a mono status (*Samo 0.2.0 · checked 14:02*), with Check now and the Primary *Install 0.3.0 and restart* (or why it can't, with the release page) beside it; What's new as bullets. On Windows, a **This PC** group first |
+| Processes list | `processes.rs`, `app_icons.rs`, `samo-domain` `process_groups.rs` | Apps, not a flat list: helpers are rolled up into their app ("Grok Bot · 9 processes", the totals of all nine), applications (the OS's Dock apps) under one heading and background processes under another, each with its count. An app's icon beside its name on the Mac, a gear for what is in no app, nothing on Windows. Click an app to open it and see each process; a search box (name, path or PID) opens every app so a match inside one is seen. CPU and Memory carry a thin bar under the figure: the biggest on screen is the longest, with a floor so a quiet Mac isn't all full bars. Quit is offered for one process at a time, never for a whole app, and re-checks PID and start time (R4) |
 
 ## 6. Folders, the map, and colour
 
@@ -179,6 +180,11 @@ Samo lives in the menu bar too (`src/menubar.rs`, via `tray-icon`'s safe `NSStat
 - Scans build what the pages need (`DiskView`: rankings, the suggestion set) on the scan thread, once.
 - Store images are decoded by gpui off the UI thread, only after their size was read from their header; leaving a
   detail page drops its screenshots from gpui's textures and caches (memory stays flat after 20 pages).
+- App icons, and which processes are Dock applications, are asked of AppKit (safe bindings only, R29) on a worker thread of their own
+  (`app_icons.rs`), never on the UI thread; the page asks for an icon on every frame, gets what is ready or a queued load,
+  and the worker wakes the UI when one arrives. An icon is the smallest of the OS's pictures that is at least 64 px, as an
+  8-bit PNG (16 KB of texture), cached up to 512 apps. AppKit hands over half-float TIFFs that neither `image` nor gpui can read,
+  so `app_icons.rs` reads that one layout itself. The Dock's applications are looked at every 2 s and wake the UI only if they changed.
 - The process table is virtualised: only the rows on screen are built. While the pointer is over it, its rows hold
   still so a row can't move under a click; a tag says when updates are being held.
 - The thermal state is one `NSProcessInfo` call on the sampler thread (no sensors, no privileges).
@@ -209,6 +215,9 @@ Samo lives in the menu bar too (`src/menubar.rs`, via `tray-icon`'s safe `NSStat
     text pair at 4.5:1.
 14. The readout follows the theme, and is always a little darker than the stage it sits in so it reads as recessed.
     A wrong figure on it uses `glass_signal`, never `signal` directly: plain orange is too faint on the light panel.
+15. What only the OS knows (an app's icon, which processes are in the Dock) is asked on its own thread through safe bindings, never
+    on the UI thread. An icon that isn't there yet is an empty place and one the OS doesn't have is a gear: never a stand-in
+    icon, and on an OS that can't supply them, none.
 
 ## Decisions
 
@@ -227,3 +236,6 @@ Samo lives in the menu bar too (`src/menubar.rs`, via `tray-icon`'s safe `NSStat
 | Mode and style in `appearance.txt` | Like `locations.txt`: a plain file, nothing online, and a bad file is just the defaults | No |
 | The sidebar keeps its Disk row, without the bar | The Disk is one of the four characters (§3); the bar repeated the readout's | No |
 | The readout follows the theme (it was dark in both until 2026-11-07) | KJ: a black slab in a light window looked wrong and "should change with the theme". Its figures and its wrong-figure colour have a light and a dark form | No: `light()` and `dark()` in `theme.rs` |
+| Helpers roll up into their app on the Processes page | Nine rows named "Grok Bot Helper" say nothing; "Grok Bot, 9 processes, 1.4 GB" does. Quit stays per process so one click can't end an app's every helper | No: `process_groups.rs`, `layout_lines` |
+| The collector returns every process, not the busiest 150 | An app's total over only some of its helpers would be wrong | No: `PROCESS_ROWS_MAX` |
+| Icons through AppKit, read from its TIFF by our own small reader | AppKit's PNG call is `unsafe` in the bindings (R29), and `image` and gpui can't read its half-float TIFFs (icons came out blank) | No: `app_icons.rs` |
