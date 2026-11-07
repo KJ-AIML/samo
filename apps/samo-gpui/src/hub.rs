@@ -105,11 +105,14 @@ pub struct Hub {
     pub ext: Arc<OnceLock<samo_extensions::Host>>,
     /// The store's worker: the catalog, its images, installs and updates. It goes online only for a click.
     pub store: Arc<OnceLock<samo_extensions::worker::StoreWorker>>,
+    /// App icons and the OS's list of Dock applications, from a worker of their own (macOS).
+    pub icons: crate::app_icons::AppIcons,
 }
 
 impl Hub {
     pub fn new(scan_root: String, wake_ui: UnboundedSender<()>) -> Self {
         Self {
+            icons: crate::app_icons::AppIcons::start(wake_ui.clone()),
             shared: Arc::new(Mutex::new(SharedState {
                 scan_root,
                 scan_generation: 0,

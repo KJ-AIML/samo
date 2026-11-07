@@ -36,8 +36,9 @@ is measured is solid, and anything you remove goes to the Trash, with Undo.
 - **Space you can walk into.** A circle map of the folder, coloured by kind of file. Click a circle to go inside,
   *Up* to come back; recent folders open instantly.
 - **Build junk, found.** Every project under the folder, ranked by what Samo could clear, with the artifacts named.
-- **Processes.** A fast, virtualised table you can sort; rows hold still under the pointer so a row can't move
-  under a click.
+- **Processes.** Apps, not a flat list: each app's helpers are rolled up into it ("Grok Bot, 9 processes"), with its
+  icon on the Mac, applications above background processes, a search box and a bar under CPU and Memory. A fast,
+  virtualised table you can sort; rows hold still under the pointer so a row can't move under a click.
 - **In the menu bar.** Samo's probe shows the CPU load beside it; click it for a quick panel without opening the
   app. Close the window and Samo keeps running there.
 - **Honest readings.** A sensor that stopped leaves a gap in the chart, never a made-up line. Unknown is `--`, not `0`.
@@ -105,13 +106,16 @@ To make the zip from the source (Windows 11, the MSVC Rust toolchain): `cargo ru
 | **Overview** | How the Mac is doing right now, and where this folder's space went |
 | **Projects** | Which projects carry the most build output, and what clearing it would give back |
 | **Storage** | The folder as a map: click into folders, reveal them in Finder, move them to the Trash |
-| **Processes** | Every process by memory, CPU, disk or PID; quit one (Samo checks it's still the same process first) |
+| **Processes** | Every process, grouped by app with its icon (Mac), by memory, CPU, disk or PID, with a search; quit one process (Samo checks it's still the same process first) |
 | **Performance** | CPU history, each core, memory in detail, disk and network rates |
 
 - **Pick what to measure** from the folder menu in a page's header: your standard folders (Home, Desktop,
   Documents, Downloads, Developer, Applications) and any folder you add with **Choose folder…**. Added folders are
   remembered in `~/Library/Application Support/Samo/locations.txt` and can be removed from the same menu.
 - **⌘0** brings the window back, **⌘Q** quits, **Esc** closes a menu or dialog.
+- **Look** is in **Settings → Appearance**: the mode (System, Light or Dark) and the style (Cobalt, Samo's own, or
+  Graphite, true greys). It shows at once, in the menu bar panel too, and is remembered in
+  `~/Library/Application Support/Samo/appearance.txt` (`%APPDATA%\Samo\appearance.txt` on Windows).
 
 A few environment variables, handy for scripts and screenshots:
 
@@ -119,7 +123,8 @@ A few environment variables, handy for scripts and screenshots:
 | --- | --- |
 | `SAMO_DEFAULT_SCAN_ROOT` | The folder to measure first (default: `~/Developer` if it exists, else your home folder) |
 | `SAMO_START_PAGE` | `overview`, `projects`, `storage`, `processes`, `performance`, `extensions` or `settings` |
-| `SAMO_THEME` | `light` or `dark` instead of following the system |
+| `SAMO_THEME` | `light` or `dark`, over what Settings says |
+| `SAMO_STYLE` | `cobalt` or `graphite`, over what Settings says |
 
 ## Safety and privacy
 

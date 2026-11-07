@@ -122,7 +122,9 @@ impl SystemCollector {
         let all_procs = collect_process_rows(&self.sys, self.self_pid);
         let total_processes = all_procs.len();
         let mut filtered = filter_and_sort_processes(&all_procs, include_self, search, sort_by);
-        filtered.truncate(150);
+        // Every process, not the busiest 150: the Processes page rolls helpers up into their app, and a total over
+        // only some of an app's helpers would be wrong. A Mac has under a thousand; a row is a few hundred bytes.
+        filtered.truncate(PROCESS_ROWS_MAX);
 
         let latest = self.ring_buffer.latest().unwrap_or_else(|| TelemetryPoint {
             timestamp_ms: chrono::Utc::now().timestamp_millis(),
@@ -388,6 +390,9 @@ fn build_network_rates(networks: &Networks, local_ip: &str, elapsed_secs: f64) -
         local_ip: local_ip.to_string(),
     }
 }
+
+/// More than any machine runs; the list is cut here only so a runaway can't grow a snapshot without end.
+const PROCESS_ROWS_MAX: usize = 4096;
 
 fn collect_process_rows(sys: &System, self_pid: u32) -> Vec<ProcessRow> {
     let mut rows = Vec::with_capacity(sys.processes().len());

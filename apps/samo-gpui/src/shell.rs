@@ -5,7 +5,7 @@
 
 use crate::art::{
     Mood, Who, cell, dashed_rule, dial_chip, dither_block, dot_number, dot_width, led_meter,
-    logo_mark, measure_grid,
+    logo_mark,
 };
 use crate::charts::LineChart;
 use crate::components::*;
@@ -83,6 +83,8 @@ pub(crate) struct Readout {
     context: String,
     figure: Option<String>,
     unit: String,
+    /// A small share after the unit ("72%"), where there is a whole to take it of: what the figure and its bar are of.
+    share: Option<String>,
     /// Signal lamp: something is wrong.
     wrong: bool,
     /// Dithered lamp: this figure is Samo's suggestion.
@@ -100,7 +102,6 @@ impl SamoWorkspaceApp {
         }
         let pal = p();
         let project_count = frame.view().map(|v| v.snap.projects.len());
-        let process_count = frame.telemetry.total_processes;
         let sub = if frame.telemetry.system.hostname.is_empty() {
             format!("{} instrument", crate::words::COMPUTER)
         } else {
@@ -154,11 +155,9 @@ impl SamoWorkspaceApp {
                     .gap(px(2.0))
                     .child(rail_label("Monitor", true))
                     .children(NavSection::ALL.into_iter().map(|section| {
+                        // Projects' count is its own; Processes' lives in the probe's line ("Watching 685 processes").
                         let badge = match section {
                             NavSection::Projects => project_count.map(|n| n.to_string()),
-                            NavSection::Processes if process_count > 0 => {
-                                Some(format_count(process_count as u64))
-                            }
                             _ => None,
                         };
                         self.nav_link(section, section.title().to_string(), badge, cx)
@@ -174,7 +173,8 @@ impl SamoWorkspaceApp {
                         updates_badge(frame),
                         cx,
                     ))
-                    .child(rail_label("Samo", false))
+                    // Settings is the only item here, so it has a gap above it, not a "SAMO" label.
+                    .child(div().h(px(S4)).flex_shrink_0())
                     .child(self.nav_link(NavSection::Settings, "Settings".to_string(), None, cx)),
             )
             .child(self.side_foot(frame))
@@ -386,8 +386,6 @@ impl SamoWorkspaceApp {
                     .px(px(10.0))
                     .rounded(px(R_SHELL - 2.0))
                     .bg(pal.shell)
-                    .border_1()
-                    .border_color(pal.hairline)
                     .child(row(
                         Who::Samo,
                         samo_mood(frame),
@@ -395,20 +393,12 @@ impl SamoWorkspaceApp {
                         samo_status(frame),
                     )),
             )
-            .child(
-                div()
-                    .px(px(10.0))
-                    .flex()
-                    .flex_col()
-                    .gap(px(6.0))
-                    .child(row(Who::Disk, disk_mood, volume_name, volume_words))
-                    .child(led_meter(
-                        used,
-                        if nearly_full { pal.signal } else { pal.accent },
-                        pal.dot,
-                        5.0,
-                    )),
-            )
+            .child(div().px(px(10.0)).flex().flex_col().gap(px(6.0)).child(row(
+                Who::Disk,
+                disk_mood,
+                volume_name,
+                volume_words,
+            )))
             .child(div().px(px(10.0)).child(row(
                 Who::Person(person_tint(&user)),
                 Mood::Idle,
@@ -469,10 +459,7 @@ impl SamoWorkspaceApp {
                     .flex_col()
                     .rounded(px(R_STAGE))
                     .bg(pal.stage)
-                    .border_1()
-                    .border_color(pal.hairline)
                     .overflow_hidden()
-                    .child(measure_grid(320.0))
                     .child(
                         div()
                             .flex_shrink_0()
@@ -508,9 +495,11 @@ impl SamoWorkspaceApp {
         let pad_x = if frame.layout.roomy() { S4 } else { S3 };
         let show_context = frame.layout.content_w / cols >= 190.0;
         let items = readouts(frame);
+        // The figure leaves room for its unit and, where there is room for it at all, its share ("72%").
+        let after_figure = 30.0 + if show_context { 34.0 } else { 0.0 };
         let dot_h = readout_dot_h(
             &items,
-            frame.layout.content_w / cols - 2.0 * pad_x - 30.0,
+            frame.layout.content_w / cols - 2.0 * pad_x - after_figure,
             30.0,
         );
 
@@ -1049,7 +1038,11 @@ pub(crate) fn readouts(frame: &Frame) -> Vec<Readout> {
     let meter = |r: Option<f32>, wrong: bool| {
         led_meter(
             r,
-            if wrong { pal.signal } else { pal.phosphor },
+            if wrong {
+                pal.glass_signal
+            } else {
+                pal.phosphor
+            },
             pal.phosphor_off,
             4.0,
         )
@@ -1070,6 +1063,7 @@ pub(crate) fn readouts(frame: &Frame) -> Vec<Readout> {
             },
             figure: cpu.map(|v| format!("{v:.1}")),
             unit: "%".to_string(),
+            share: None,
             wrong: false,
             suggestion: false,
             visual: div()
@@ -1088,6 +1082,10 @@ pub(crate) fn readouts(frame: &Frame) -> Vec<Readout> {
                 .unwrap_or_default(),
             figure: mem_fig,
             unit: mem_unit.unwrap_or("GB").to_string(),
+            // Used, as the figure and its bar are, and as the Activity chart's Memory says.
+            share: memory
+                .as_ref()
+                .map(|m| percent(ratio(m.used_bytes, m.total_bytes))),
             wrong: mem_critical,
             suggestion: false,
             visual: meter(
@@ -1104,9 +1102,14 @@ pub(crate) fn readouts(frame: &Frame) -> Vec<Readout> {
                 .unwrap_or_default(),
             figure: disk_fig,
             unit: disk_unit.unwrap_or("GB").to_string(),
+            // Free, as the figure is; its bar is the free share too, so the cell says one thing three ways.
+            share: volume.map(|d| percent(ratio(d.volume_free_bytes, d.volume_total_bytes))),
             wrong: nearly_full,
             suggestion: false,
-            visual: meter(used, nearly_full),
+            visual: meter(
+                volume.map(|d| ratio(d.volume_free_bytes, d.volume_total_bytes)),
+                nearly_full,
+            ),
             go: NavSection::Storage,
         },
         Readout {
@@ -1121,6 +1124,7 @@ pub(crate) fn readouts(frame: &Frame) -> Vec<Readout> {
                 .unwrap_or_default(),
             figure: rec_fig,
             unit: rec_unit.unwrap_or("GB").to_string(),
+            share: None,
             wrong: false,
             suggestion: true,
             visual: meter(
@@ -1152,7 +1156,6 @@ pub(crate) fn glass_panel() -> Div {
         .bg(pal.glass)
         .border_1()
         .border_color(pal.glass_line)
-        .shadow(shadow_card())
         .flex()
         .flex_col()
         .overflow_hidden()
@@ -1173,10 +1176,18 @@ pub(crate) fn readout_cell(
     } else {
         div()
             .size(px(6.0))
-            .bg(if ro.wrong { pal.signal } else { pal.phosphor })
+            .bg(if ro.wrong {
+                pal.glass_signal
+            } else {
+                pal.phosphor
+            })
             .into_any_element()
     };
-    let figure_color = if ro.wrong { pal.signal } else { pal.phosphor };
+    let figure_color = if ro.wrong {
+        pal.glass_signal
+    } else {
+        pal.phosphor
+    };
     let mut hover_bg = pal.glass_text;
     hover_bg.a = 0.04;
     div()
@@ -1218,7 +1229,7 @@ pub(crate) fn readout_cell(
                     } else {
                         pal.glass_text_2
                     },
-                    pal.phosphor_off,
+                    pal.phosphor_ghost,
                 ))
                 .child(
                     div()
@@ -1226,7 +1237,16 @@ pub(crate) fn readout_cell(
                         .text_size(px(12.0))
                         .text_color(pal.glass_text_2)
                         .child(ro.unit),
-                ),
+                )
+                .when(show_context, |el| {
+                    el.children(ro.share.map(|share| {
+                        div()
+                            .font(mono(FontWeight::NORMAL))
+                            .text_size(px(T_LABEL))
+                            .text_color(pal.glass_text_2)
+                            .child(share)
+                    }))
+                }),
         )
         .child(div().h(px(14.0)).flex().items_end().child(ro.visual))
 }

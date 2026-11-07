@@ -2,8 +2,7 @@
 
 use crate::theme::*;
 use gpui::{
-    Bounds, Canvas, Hsla, PathBuilder, Pixels, Point, Styled, canvas, fill, linear_color_stop,
-    linear_gradient, point, px, size,
+    Bounds, Canvas, Hsla, PathBuilder, Pixels, Point, Styled, canvas, fill, point, px, size,
 };
 use std::cell::Cell;
 use std::rc::Rc;
@@ -16,7 +15,7 @@ pub type ChartBounds = Rc<Cell<Option<Bounds<Pixels>>>>;
 pub type Samples = Vec<(usize, Option<f32>)>;
 
 pub struct LineChart {
-    /// One or more lines on one scale, each with its colour. The first also gets a wash beneath it.
+    /// One or more lines on one scale, each with its colour. Lines only: a fill under one says nothing the line doesn't.
     pub lines: Vec<(Samples, Hsla)>,
     /// How many slots the full width holds.
     pub capacity: usize,
@@ -116,9 +115,8 @@ impl LineChart {
                     let y = oy + inset + (h - inset * 2.0) * (1.0 - (v / top).clamp(0.0, 1.0));
                     point(px(x), px(y))
                 };
-                let baseline = oy + h;
 
-                for (n, (samples, color)) in lines.iter().enumerate() {
+                for (samples, color) in lines.iter() {
                     // Split into contiguous runs so gaps stay visible.
                     let mut runs: Vec<Vec<Point<Pixels>>> = Vec::new();
                     let mut current: Vec<Point<Pixels>> = Vec::new();
@@ -139,32 +137,6 @@ impl LineChart {
                     }
 
                     for run in &runs {
-                        if n == 0 {
-                            let mut wash_top = *color;
-                            wash_top.a = 0.16;
-                            let mut wash_bottom = *color;
-                            wash_bottom.a = 0.0;
-                            let mut area = PathBuilder::fill();
-                            if let (Some(first), Some(last)) = (run.first(), run.last()) {
-                                area.move_to(point(first.x, px(baseline)));
-                                for p in run {
-                                    area.line_to(*p);
-                                }
-                                area.line_to(point(last.x, px(baseline)));
-                                area.close();
-                            }
-                            if let Ok(path) = area.build() {
-                                window.paint_path(
-                                    path,
-                                    linear_gradient(
-                                        180.0,
-                                        linear_color_stop(wash_top, 0.0),
-                                        linear_color_stop(wash_bottom, 1.0),
-                                    ),
-                                );
-                            }
-                        }
-
                         let mut stroke = PathBuilder::stroke(px(2.0));
                         for (i, p) in run.iter().enumerate() {
                             if i == 0 {

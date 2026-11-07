@@ -2,6 +2,8 @@
 // Samo, and none can take it down when closed (ADR-006).
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
+mod app_icons;
+mod appearance;
 mod art;
 mod assets;
 mod charts;
@@ -37,8 +39,8 @@ use futures::StreamExt;
 use gpui::{
     App, Application, Bounds, Context, FocusHandle, FontWeight, Global, IntoElement, KeyBinding,
     KeyDownEvent, Menu, MenuItem, ParentElement, Render, SharedString, Styled, TitlebarOptions,
-    UniformListScrollHandle, Window, WindowAppearance, WindowBounds, WindowHandle, WindowOptions,
-    actions, div, point, prelude::*, px, size,
+    UniformListScrollHandle, Window, WindowBounds, WindowHandle, WindowOptions, actions, div,
+    point, prelude::*, px, size,
 };
 use hub::Hub;
 use layout::Layout;
@@ -521,15 +523,6 @@ impl ProcessSort {
             Self::Pid => "pid",
         }
     }
-
-    fn label(self) -> &'static str {
-        match self {
-            Self::Memory => "memory",
-            Self::Cpu => "CPU",
-            Self::Disk => "disk I/O",
-            Self::Pid => "PID",
-        }
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -632,11 +625,15 @@ struct SamoWorkspaceApp {
     proc_rows: Arc<TelemetrySnapshot>,
     proc_cols: processes::Columns,
     proc_scroll: UniformListScrollHandle,
+    /// The Processes page's search, which apps are open, and what its list draws from.
+    proc_ui: processes::ProcUi,
     /// How much history Overview's live charts show, and where the pointer is over each.
     live_span: live::Span,
     live_hover: [live::ChartHover; 3],
     /// The store's list and detail page.
     store_ui: extensions_page::StoreUi,
+    /// What saving your Appearance choice last said, if it failed (Settings).
+    appearance_note: Option<String>,
     /// What installing Samo for this user or Start at sign-in last said, on Windows (Settings).
     #[cfg(windows)]
     install_note: Option<String>,
@@ -746,9 +743,11 @@ impl SamoWorkspaceApp {
             proc_rows: placeholder.unwrap_or_else(|| Arc::new(hub::placeholder_telemetry())),
             proc_cols: processes::Columns::all(),
             proc_scroll: UniformListScrollHandle::new(),
+            proc_ui: processes::ProcUi::new(cx),
             live_span: live::Span::TwoMin,
             live_hover: Default::default(),
             store_ui: extensions_page::StoreUi::new(cx),
+            appearance_note: None,
             #[cfg(windows)]
             install_note: None,
         }
@@ -1094,12 +1093,7 @@ impl SamoWorkspaceApp {
 
 impl Render for SamoWorkspaceApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        theme::set_dark(theme::pinned_dark().unwrap_or_else(|| {
-            matches!(
-                window.appearance(),
-                WindowAppearance::Dark | WindowAppearance::VibrantDark
-            )
-        }));
+        theme::follow(window.appearance());
         let pal = theme::p();
         let layout = Layout::for_window(f32::from(window.viewport_size().width));
 
@@ -1172,6 +1166,8 @@ fn main() {
     app.on_reopen(|cx| open_main(cx, None));
     app.run(|cx: &mut App| {
         theme::init_fonts(cx);
+        // What you chose in Settings → Appearance, before the first window draws.
+        theme::set_appearance(appearance::load());
         text_input::bind_keys(cx);
         cx.on_action(|_: &Quit, cx| quit(cx));
         cx.on_action(|_: &ShowWindow, cx| open_main(cx, None));

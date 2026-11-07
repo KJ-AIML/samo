@@ -10,7 +10,9 @@ identity, because it does a different job: **Samo is an instrument that measures
 A calm frame with an instrument's face.
 
 - **The readout is the face.** Pinned at the top of every page is a dark instrument window with phosphor
-  dot-matrix figures: CPU, memory, disk free, and what Samo suggests reclaiming. It is dark in both themes.
+  dot-matrix figures: CPU, memory, disk free, and what Samo suggests reclaiming. It follows the theme: near-black
+  glass with pale-cobalt figures in dark, a light recessed panel with Cobalt figures in light (KJ, 2026-11-07: a black
+  slab in a light window looked wrong). It is the same on every page. A wrong figure is Signal (`glass_signal`).
 - **The ring is the shape.** Disks are platters and gauges are dials, so Samo's shapes are rings: the gauge mark,
   the dial each page's icon sits on, the disk ring on Overview, the circle map on Storage. (Mesh uses hexagons.)
 - **Samo measures; you decide.** What Samo *suggests* (build artifacts it thinks are safe to clear) is drawn in
@@ -42,8 +44,19 @@ Cells move in whole-pixel steps, only while Samo is scanning (see §10).
 ## 4. Tokens (`src/theme.rs`)
 
 Every colour is mixed from the nine Talvyn colours with `color-mix(in srgb, …)` maths, as a light/dark pair; no hex
-appears anywhere else. Samo adds the readout tokens (`glass`, `glass_line`, `glass_text`, `glass_text_2`,
-`phosphor` = Pale cobalt, `phosphor_off`) and runs a step denser and crisper than Mesh:
+appears anywhere else.
+
+**Two styles**, each a light/dark pair, chosen in Settings → Appearance with a mode (System, Light, Dark; kept in
+`appearance.txt`). **Cobalt** is Samo's own: Ink-tinted slate neutrals. **Graphite** is true greys with more depth: in
+light a grey canvas under white cards, in dark a charcoal instead of near-black. A style only moves the greys (a
+`Tone` in `theme.rs`: the neutral, the dark neutral, what secondary text leans toward, how far the light stage sits
+from white, how much orange stays in dark Signal text). Cobalt, Signal and the characters are the family's in every
+style, so Cobalt still means "selected" and "Samo suggests" in both. `SAMO_THEME` and `SAMO_STYLE` pin a mode or style
+for screenshots and tests, over Settings. Tests check that Cobalt is byte for byte what shipped, that Graphite is
+neutral, and every text pair at 4.5:1 in all four palettes.
+
+Samo adds the readout tokens (`glass`, `glass_line`, `glass_text`, `glass_text_2`,
+`phosphor` = Pale cobalt in dark and Cobalt in light, `phosphor_off`, `phosphor_ghost`, `glass_signal`) and runs a step denser and crisper than Mesh:
 
 | | Samo | (Mesh) |
 | --- | --- | --- |
@@ -60,7 +73,7 @@ Samo uses them when installed and falls back to the system face otherwise.
 
 | Component | File | Use it for |
 | --- | --- | --- |
-| Readout strip | `shell.rs` `readout_strip` | The four live figures, on every page. One row at every width. |
+| Readout strip | `shell.rs` `readout_strip` | The four live figures, on every page. One row at every width. Memory and Disk free carry a small share after the unit (`67%` used, `18%` free) and their bar is that same share; it steps away with the side labels under 190 px a cell. A figure's unlit dots are a quiet ghost (`phosphor_ghost`), not the meter's empty track |
 | Page head | `shell.rs` `page_head` | Dial + breadcrumbs (disk pages) + `h1` + one line + actions |
 | Dial chip | `art.rs` `dial_chip` | A page's icon in a ring with twelve ticks |
 | Logo mark | `art.rs` `logo_mark` | The gauge on an Ink disc |
@@ -69,11 +82,11 @@ Samo uses them when installed and falls back to the system face otherwise.
 | LED meter / column | `art.rs` `led_meter`, `led_column` | A share of a whole. `None` lights nothing. |
 | Split bar | `art.rs` `split_bar` | Source (solid) vs. what Samo suggests clearing (dither) |
 | Dither frame / block | `art.rs` `dither_frame`, `dither_block` | A suggested chip or circle; legend and title swatches. Cards keep their ordinary border. |
-| Line chart | `charts.rs` `LineChart` | One or more lines on one scale (never two scales); 2 px lines, the first washed; a crosshair with an 8 px ringed dot per line |
-| Segmented switch | `components.rs` `segments`, `segment` | A small set of choices in a card's head (a time span, a sort) |
+| Line chart | `charts.rs` `LineChart` | One or more lines on one scale (never two scales); 2 px lines, no fill under them; a crosshair with an 8 px ringed dot per line |
+| Segmented switch | `components.rs` `segments`, `segment` | A small set of choices: in a card's head (a time span, a sort) or beside a setting (Mode) |
 | Section rule | `components.rs` `section_rule` | Splits a page into what it's about: `THIS MAC · LIVE`, `SPACE` |
-| Measuring grid | `art.rs` `measure_grid` | The stage's top and the map's ground |
-| Card, card head, h1, h2 | `components.rs` | Grouped content. A count chip is Cobalt mono. |
+| Measuring grid | `art.rs` `measure_grid` | The Storage map's ground. Not the stage: its dots, on every page, blurred "dots = Samo suggests" |
+| Card, card head, h1, h2 | `components.rs` | Grouped content. A card is a surface and a hairline ring, with no shadow. A count chip is Cobalt mono. |
 | Button | `components.rs` `button` | `Primary` (one per view) · `Default` · `Danger` (Signal text, never filled) · `Link`; `compact` inside rows |
 | Busy button | `components.rs` `busy_button` | A primary action that is running: three pixels run along it |
 | Tag | `components.rs` `tag` | Mono state labels; `lamp` adds the square lamp |
@@ -85,7 +98,8 @@ Samo uses them when installed and falls back to the system face otherwise.
 | Text field | `text_input.rs` | One line (the store's search): a `CONTROL_H` field on the card colour, Cobalt line when focused, Cobalt caret, Cobalt-wash selection; Escape clears |
 | Store list | `extensions_page.rs`, `store_view.rs` | One card of rows: a 40 pt icon, the name with `by author` in mono, the summary clipped to one line, a state tag (*installed*, *update* in Cobalt, *dev*, *off*, *needs a newer Samo*) and a chevron. Segments (All · Installed · Updates) and the search above; a line on where the list came from (*Offline: showing the store as of 14:02*) |
 | Store detail | `extensions_page.rs` | A back link, then a card: a 72 pt icon, name, *signed* or *dev*, a mono line of facts (version, author, size, categories), Homepage, and on the right one Primary (Install, Update to x, Install signed version) beside a Danger Uninstall, then Open and the switch. Asks before replacing a dev build or uninstalling (naming the backup it keeps). Screenshots one at a time on the glass with ‹ › and *1 of 3*; About as paragraphs and Cobalt-square bullets; What it changes; What's new |
-| Settings | `settings_page.rs` | The gear at the foot of the sidebar under SAMO. Updates: a card with the headline (*Samo 0.3.0 is available* / *You have the latest Samo*), a mono status (*Samo 0.2.0 · checked 14:02*), the Primary *Install 0.3.0 and restart* (or why it can't, with the release page), What's new as bullets |
+| Settings | `settings_page.rs` | The gear at the foot of the sidebar, under a gap (no group label). A list, not cards: a group is its `h2` and rows split by hairlines; a narrow window drops a row's control under its name. **Appearance**: Mode as a segmented switch; Style as tiles, each drawing a small Samo in that style in the light or dark in use (the one in use has a Cobalt ring *and* a check). A choice shows at once in every Samo window and is kept; a failed write is said on the page. **Updates**: one row, the headline (*Samo 0.3.0 is available* / *You have the latest Samo*) over a mono status (*Samo 0.2.0 · checked 14:02*), with Check now and the Primary *Install 0.3.0 and restart* (or why it can't, with the release page) beside it; What's new as bullets. On Windows, a **This PC** group first |
+| Processes list | `processes.rs`, `app_icons.rs`, `samo-domain` `process_groups.rs` | Apps, not a flat list: helpers are rolled up into their app ("Grok Bot · 9 processes", the totals of all nine), applications (the OS's Dock apps) under one heading and background processes under another, each with its count. An app's icon beside its name on the Mac, a gear for what is in no app, nothing on Windows. Click an app to open it and see each process; a search box (name, path or PID) opens every app so a match inside one is seen. CPU and Memory carry a thin bar under the figure: the biggest on screen is the longest, with a floor so a quiet Mac isn't all full bars. Quit is offered for one process at a time, never for a whole app, and re-checks PID and start time (R4) |
 
 ## 6. Folders, the map, and colour
 
@@ -166,6 +180,11 @@ Samo lives in the menu bar too (`src/menubar.rs`, via `tray-icon`'s safe `NSStat
 - Scans build what the pages need (`DiskView`: rankings, the suggestion set) on the scan thread, once.
 - Store images are decoded by gpui off the UI thread, only after their size was read from their header; leaving a
   detail page drops its screenshots from gpui's textures and caches (memory stays flat after 20 pages).
+- App icons, and which processes are Dock applications, are asked of AppKit (safe bindings only, R29) on a worker thread of their own
+  (`app_icons.rs`), never on the UI thread; the page asks for an icon on every frame, gets what is ready or a queued load,
+  and the worker wakes the UI when one arrives. An icon is the smallest of the OS's pictures that is at least 64 px, as an
+  8-bit PNG (16 KB of texture), cached up to 512 apps. AppKit hands over half-float TIFFs that neither `image` nor gpui can read,
+  so `app_icons.rs` reads that one layout itself. The Dock's applications are looked at every 2 s and wake the UI only if they changed.
 - The process table is virtualised: only the rows on screen are built. While the pointer is over it, its rows hold
   still so a row can't move under a click; a tag says when updates are being held.
 - The thermal state is one `NSProcessInfo` call on the sampler thread (no sensors, no privileges).
@@ -188,6 +207,18 @@ Samo lives in the menu bar too (`src/menubar.rs`, via `tray-icon`'s safe `NSStat
     readout's glass for anything over the screen, the mono face for figures, Cobalt for what is chosen. Its windows
     never take a click they weren't asked for, and a note near the pointer fades by itself. Clips' list at ⇧⌘C sits on
     the same glass: the selected row in a Pale cobalt wash, ⌘1–⌘9 and figures in mono, a pin in Pale cobalt.
+11. Only what floats casts a shadow (a menu, a dialog, a tooltip, a chart's note). A card's ring lifts it; no blurred
+    shadows under cards or the readout, and no dotted decoration across the stage.
+12. Say a thing once per screen: a label doesn't repeat the heading beside it, and a number (a count, free space) is
+    drawn in one place.
+13. A new style is a `Tone`, not new colours. It must pass the palette tests: neutral where it says it is, and every
+    text pair at 4.5:1.
+14. The readout follows the theme, and is always a little darker than the stage it sits in so it reads as recessed.
+    A wrong figure on it uses `glass_signal`, never `signal` directly: plain orange is too faint on the light panel.
+15. What only the OS knows (an app's icon, which processes are in the Dock) is asked on its own thread through safe bindings, never
+    on the UI thread. An icon that isn't there yet is an empty place and one the OS doesn't have is a gear: never a stand-in
+    icon, and on an OS that can't supply them, none.
+16. A readout cell says one thing: its figure, its small share and its bar are of the same quantity (Memory: used; Disk free: free).
 
 ## Decisions
 
@@ -201,3 +232,13 @@ Samo lives in the menu bar too (`src/menubar.rs`, via `tray-icon`'s safe `NSStat
 | Held rows while pointing | A process row must not move under a "Quit" click | No |
 | Live section on Overview | Watching the Mac shouldn't wait on a disk scan; one page answers "how is it doing" and "where did the space go" | No: `live.rs` |
 | No dither border on cards | A dotted frame around a whole card read as noise and broke the card family; the dither stays on marks | No |
+| No card or readout shadows, no stage grid, no stage ring | Three layers did one job (lift a block off the page); the ring alone does it. The grid's dots blurred "dots = Samo suggests" | No: `card()`, `glass_panel()`, `render_stage` |
+| Graphite as a second style, moving only the greys | KJ asked for another style; Cobalt, Signal and the characters keep their meaning in both. A trace of grey was invisible, so it has real depth | No: `Tone` in `theme.rs` |
+| Mode and style in `appearance.txt` | Like `locations.txt`: a plain file, nothing online, and a bad file is just the defaults | No |
+| The sidebar keeps its Disk row, without the bar | The Disk is one of the four characters (§3); the bar repeated the readout's | No |
+| The readout follows the theme (it was dark in both until 2026-11-07) | KJ: a black slab in a light window looked wrong and "should change with the theme". Its figures and its wrong-figure colour have a light and a dark form | No: `light()` and `dark()` in `theme.rs` |
+| Helpers roll up into their app on the Processes page | Nine rows named "Grok Bot Helper" say nothing; "Grok Bot, 9 processes, 1.4 GB" does. Quit stays per process so one click can't end an app's every helper | No: `process_groups.rs`, `layout_lines` |
+| The collector returns every process, not the busiest 150 | An app's total over only some of its helpers would be wrong | No: `PROCESS_ROWS_MAX` |
+| Icons through AppKit, read from its TIFF by our own small reader | AppKit's PNG call is `unsafe` in the bindings (R29), and `image` and gpui can't read its half-float TIFFs (icons came out blank) | No: `app_icons.rs` |
+| Disk free's bar shows the free share, and a `%` follows Memory and Disk | The figure is free GB, so a bar of the *used* share beside "18%" contradicted it; KJ asked for the % | No: `readouts()` in `shell.rs` |
+| The unlit dots of a figure are their own quiet colour | On the light panel they were as visible as the lit ones (1.26:1 against the glass) and "97.3" read as "97.8"; a test now keeps them under 1.2:1 | No: `phosphor_ghost` |
