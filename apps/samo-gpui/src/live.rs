@@ -747,16 +747,12 @@ impl SamoWorkspaceApp {
                             line(proc_row.name.clone(), FontWeight::MEDIUM, 13.5, pal.text)
                                 .flex_1(),
                         )
-                        .child(figure_cell(
-                            format!("{:.1}%", proc_row.cpu_pct),
-                            54.0,
-                            by_cpu,
-                        ))
-                        .child(figure_cell(
-                            format_bytes(proc_row.memory_bytes),
-                            76.0,
-                            !by_cpu,
-                        ))
+                        // Only the figure the switch picked: both squeezed the name (three rows read "com.apple.We…").
+                        .child(if by_cpu {
+                            figure_cell(format!("{:.1}%", proc_row.cpu_pct), 54.0, true)
+                        } else {
+                            figure_cell(format_bytes(proc_row.memory_bytes), 76.0, true)
+                        })
                 }))
         };
         ends(
@@ -768,17 +764,9 @@ impl SamoWorkspaceApp {
                 ))
                 .child(body),
             div().pt(px(S2)).flex().flex_row().justify_end().child(
-                button(
-                    "ov-all-procs",
-                    format!(
-                        "All {} processes",
-                        format_count(frame.telemetry.total_processes as u64)
-                    ),
-                    None,
-                    Variant::Link,
-                    true,
-                )
-                .on_click(cx.listener(|this, _, _, cx| this.set_nav(NavSection::Processes, cx))),
+                button("ov-all-procs", "All processes", None, Variant::Link, true).on_click(
+                    cx.listener(|this, _, _, cx| this.set_nav(NavSection::Processes, cx)),
+                ),
             ),
         )
     }

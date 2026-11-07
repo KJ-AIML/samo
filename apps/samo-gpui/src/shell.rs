@@ -100,7 +100,6 @@ impl SamoWorkspaceApp {
         }
         let pal = p();
         let project_count = frame.view().map(|v| v.snap.projects.len());
-        let process_count = frame.telemetry.total_processes;
         let sub = if frame.telemetry.system.hostname.is_empty() {
             format!("{} instrument", crate::words::COMPUTER)
         } else {
@@ -154,11 +153,9 @@ impl SamoWorkspaceApp {
                     .gap(px(2.0))
                     .child(rail_label("Monitor", true))
                     .children(NavSection::ALL.into_iter().map(|section| {
+                        // Projects' count is its own; Processes' lives in the probe's line ("Watching 685 processes").
                         let badge = match section {
                             NavSection::Projects => project_count.map(|n| n.to_string()),
-                            NavSection::Processes if process_count > 0 => {
-                                Some(format_count(process_count as u64))
-                            }
                             _ => None,
                         };
                         self.nav_link(section, section.title().to_string(), badge, cx)
@@ -174,7 +171,8 @@ impl SamoWorkspaceApp {
                         updates_badge(frame),
                         cx,
                     ))
-                    .child(rail_label("Samo", false))
+                    // Settings is the only item here, so it has a gap above it, not a "SAMO" label.
+                    .child(div().h(px(S4)).flex_shrink_0())
                     .child(self.nav_link(NavSection::Settings, "Settings".to_string(), None, cx)),
             )
             .child(self.side_foot(frame))
@@ -393,20 +391,12 @@ impl SamoWorkspaceApp {
                         samo_status(frame),
                     )),
             )
-            .child(
-                div()
-                    .px(px(10.0))
-                    .flex()
-                    .flex_col()
-                    .gap(px(6.0))
-                    .child(row(Who::Disk, disk_mood, volume_name, volume_words))
-                    .child(led_meter(
-                        used,
-                        if nearly_full { pal.signal } else { pal.accent },
-                        pal.dot,
-                        5.0,
-                    )),
-            )
+            .child(div().px(px(10.0)).flex().flex_col().gap(px(6.0)).child(row(
+                Who::Disk,
+                disk_mood,
+                volume_name,
+                volume_words,
+            )))
             .child(div().px(px(10.0)).child(row(
                 Who::Person(person_tint(&user)),
                 Mood::Idle,
