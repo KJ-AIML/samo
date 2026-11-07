@@ -112,6 +112,9 @@ To make the zip from the source (Windows 11, the MSVC Rust toolchain): `cargo ru
   Documents, Downloads, Developer, Applications) and any folder you add with **Choose folder…**. Added folders are
   remembered in `~/Library/Application Support/Samo/locations.txt` and can be removed from the same menu.
 - **⌘0** brings the window back, **⌘Q** quits, **Esc** closes a menu or dialog.
+- **Look** is in **Settings → Appearance**: the mode (System, Light or Dark) and the style (Cobalt, Samo's own, or
+  Graphite, true greys). It shows at once, in the menu bar panel too, and is remembered in
+  `~/Library/Application Support/Samo/appearance.txt` (`%APPDATA%\Samo\appearance.txt` on Windows).
 
 A few environment variables, handy for scripts and screenshots:
 
@@ -119,7 +122,8 @@ A few environment variables, handy for scripts and screenshots:
 | --- | --- |
 | `SAMO_DEFAULT_SCAN_ROOT` | The folder to measure first (default: `~/Developer` if it exists, else your home folder) |
 | `SAMO_START_PAGE` | `overview`, `projects`, `storage`, `processes`, `performance`, `extensions` or `settings` |
-| `SAMO_THEME` | `light` or `dark` instead of following the system |
+| `SAMO_THEME` | `light` or `dark`, over what Settings says |
+| `SAMO_STYLE` | `cobalt` or `graphite`, over what Settings says |
 
 ## Safety and privacy
 

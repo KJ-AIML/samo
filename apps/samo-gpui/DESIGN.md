@@ -42,7 +42,18 @@ Cells move in whole-pixel steps, only while Samo is scanning (see §10).
 ## 4. Tokens (`src/theme.rs`)
 
 Every colour is mixed from the nine Talvyn colours with `color-mix(in srgb, …)` maths, as a light/dark pair; no hex
-appears anywhere else. Samo adds the readout tokens (`glass`, `glass_line`, `glass_text`, `glass_text_2`,
+appears anywhere else.
+
+**Two styles**, each a light/dark pair, chosen in Settings → Appearance with a mode (System, Light, Dark; kept in
+`appearance.txt`). **Cobalt** is Samo's own: Ink-tinted slate neutrals. **Graphite** is true greys with more depth: in
+light a grey canvas under white cards, in dark a charcoal instead of near-black. A style only moves the greys (a
+`Tone` in `theme.rs`: the neutral, the dark neutral, what secondary text leans toward, how far the light stage sits
+from white, how much orange stays in dark Signal text). Cobalt, Signal and the characters are the family's in every
+style, so Cobalt still means "selected" and "Samo suggests" in both. `SAMO_THEME` and `SAMO_STYLE` pin a mode or style
+for screenshots and tests, over Settings. Tests check that Cobalt is byte for byte what shipped, that Graphite is
+neutral, and every text pair at 4.5:1 in all four palettes.
+
+Samo adds the readout tokens (`glass`, `glass_line`, `glass_text`, `glass_text_2`,
 `phosphor` = Pale cobalt, `phosphor_off`) and runs a step denser and crisper than Mesh:
 
 | | Samo | (Mesh) |
@@ -69,11 +80,11 @@ Samo uses them when installed and falls back to the system face otherwise.
 | LED meter / column | `art.rs` `led_meter`, `led_column` | A share of a whole. `None` lights nothing. |
 | Split bar | `art.rs` `split_bar` | Source (solid) vs. what Samo suggests clearing (dither) |
 | Dither frame / block | `art.rs` `dither_frame`, `dither_block` | A suggested chip or circle; legend and title swatches. Cards keep their ordinary border. |
-| Line chart | `charts.rs` `LineChart` | One or more lines on one scale (never two scales); 2 px lines, the first washed; a crosshair with an 8 px ringed dot per line |
-| Segmented switch | `components.rs` `segments`, `segment` | A small set of choices in a card's head (a time span, a sort) |
+| Line chart | `charts.rs` `LineChart` | One or more lines on one scale (never two scales); 2 px lines, no fill under them; a crosshair with an 8 px ringed dot per line |
+| Segmented switch | `components.rs` `segments`, `segment` | A small set of choices: in a card's head (a time span, a sort) or beside a setting (Mode) |
 | Section rule | `components.rs` `section_rule` | Splits a page into what it's about: `THIS MAC · LIVE`, `SPACE` |
-| Measuring grid | `art.rs` `measure_grid` | The stage's top and the map's ground |
-| Card, card head, h1, h2 | `components.rs` | Grouped content. A count chip is Cobalt mono. |
+| Measuring grid | `art.rs` `measure_grid` | The Storage map's ground. Not the stage: its dots, on every page, blurred "dots = Samo suggests" |
+| Card, card head, h1, h2 | `components.rs` | Grouped content. A card is a surface and a hairline ring, with no shadow. A count chip is Cobalt mono. |
 | Button | `components.rs` `button` | `Primary` (one per view) · `Default` · `Danger` (Signal text, never filled) · `Link`; `compact` inside rows |
 | Busy button | `components.rs` `busy_button` | A primary action that is running: three pixels run along it |
 | Tag | `components.rs` `tag` | Mono state labels; `lamp` adds the square lamp |
@@ -85,7 +96,7 @@ Samo uses them when installed and falls back to the system face otherwise.
 | Text field | `text_input.rs` | One line (the store's search): a `CONTROL_H` field on the card colour, Cobalt line when focused, Cobalt caret, Cobalt-wash selection; Escape clears |
 | Store list | `extensions_page.rs`, `store_view.rs` | One card of rows: a 40 pt icon, the name with `by author` in mono, the summary clipped to one line, a state tag (*installed*, *update* in Cobalt, *dev*, *off*, *needs a newer Samo*) and a chevron. Segments (All · Installed · Updates) and the search above; a line on where the list came from (*Offline: showing the store as of 14:02*) |
 | Store detail | `extensions_page.rs` | A back link, then a card: a 72 pt icon, name, *signed* or *dev*, a mono line of facts (version, author, size, categories), Homepage, and on the right one Primary (Install, Update to x, Install signed version) beside a Danger Uninstall, then Open and the switch. Asks before replacing a dev build or uninstalling (naming the backup it keeps). Screenshots one at a time on the glass with ‹ › and *1 of 3*; About as paragraphs and Cobalt-square bullets; What it changes; What's new |
-| Settings | `settings_page.rs` | The gear at the foot of the sidebar under SAMO. Updates: a card with the headline (*Samo 0.3.0 is available* / *You have the latest Samo*), a mono status (*Samo 0.2.0 · checked 14:02*), the Primary *Install 0.3.0 and restart* (or why it can't, with the release page), What's new as bullets |
+| Settings | `settings_page.rs` | The gear at the foot of the sidebar, under a gap (no group label). A list, not cards: a group is its `h2` and rows split by hairlines; a narrow window drops a row's control under its name. **Appearance**: Mode as a segmented switch; Style as tiles, each drawing a small Samo in that style in the light or dark in use (the one in use has a Cobalt ring *and* a check). A choice shows at once in every Samo window and is kept; a failed write is said on the page. **Updates**: one row, the headline (*Samo 0.3.0 is available* / *You have the latest Samo*) over a mono status (*Samo 0.2.0 · checked 14:02*), with Check now and the Primary *Install 0.3.0 and restart* (or why it can't, with the release page) beside it; What's new as bullets. On Windows, a **This PC** group first |
 
 ## 6. Folders, the map, and colour
 
@@ -188,6 +199,12 @@ Samo lives in the menu bar too (`src/menubar.rs`, via `tray-icon`'s safe `NSStat
     readout's glass for anything over the screen, the mono face for figures, Cobalt for what is chosen. Its windows
     never take a click they weren't asked for, and a note near the pointer fades by itself. Clips' list at ⇧⌘C sits on
     the same glass: the selected row in a Pale cobalt wash, ⌘1–⌘9 and figures in mono, a pin in Pale cobalt.
+11. Only what floats casts a shadow (a menu, a dialog, a tooltip, a chart's note). A card's ring lifts it; no blurred
+    shadows under cards or the readout, and no dotted decoration across the stage.
+12. Say a thing once per screen: a label doesn't repeat the heading beside it, and a number (a count, free space) is
+    drawn in one place.
+13. A new style is a `Tone`, not new colours. It must pass the palette tests: neutral where it says it is, and every
+    text pair at 4.5:1.
 
 ## Decisions
 
@@ -201,3 +218,7 @@ Samo lives in the menu bar too (`src/menubar.rs`, via `tray-icon`'s safe `NSStat
 | Held rows while pointing | A process row must not move under a "Quit" click | No |
 | Live section on Overview | Watching the Mac shouldn't wait on a disk scan; one page answers "how is it doing" and "where did the space go" | No: `live.rs` |
 | No dither border on cards | A dotted frame around a whole card read as noise and broke the card family; the dither stays on marks | No |
+| No card or readout shadows, no stage grid, no stage ring | Three layers did one job (lift a block off the page); the ring alone does it. The grid's dots blurred "dots = Samo suggests" | No: `card()`, `glass_panel()`, `render_stage` |
+| Graphite as a second style, moving only the greys | KJ asked for another style; Cobalt, Signal and the characters keep their meaning in both. A trace of grey was invisible, so it has real depth | No: `Tone` in `theme.rs` |
+| Mode and style in `appearance.txt` | Like `locations.txt`: a plain file, nothing online, and a bad file is just the defaults | No |
+| The sidebar keeps its Disk row, without the bar | The Disk is one of the four characters (§3); the bar repeated the readout's | No |
