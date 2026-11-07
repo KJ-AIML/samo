@@ -170,8 +170,8 @@ fn light(t: Tone) -> Palette {
     let card = WHITE;
     Palette {
         frame: h(WHITE),
-        stage: h(mix(t.ink, WHITE, 0.035)),
-        shell: h(mix(t.ink, WHITE, 0.06)),
+        stage: h(mix(t.ink, WHITE, 0.035 * t.depth)),
+        shell: h(mix(t.ink, WHITE, 0.06 * t.depth)),
         card: h(card),
         card_hover: h(mix(t.ink, card, 0.05)),
         text: h(t.ink),
@@ -246,6 +246,10 @@ fn light(t: Tone) -> Palette {
 }
 
 fn dark(t: Tone) -> Palette {
+    let t = Tone {
+        ink: t.dark_ink,
+        ..t
+    };
     let card = mix(t.ink, BLACK, 0.68);
     let text = mix(WHITE, t.ink, 0.92);
     Palette {
@@ -265,7 +269,7 @@ fn dark(t: Tone) -> Palette {
         accent_wash: h(mix(BLUE, card, 0.24)),
         accent_line: h(mix(BLUE_LIGHT, card, 0.22)),
         signal: h(ORANGE),
-        signal_text: h(mix(ORANGE, WHITE, 0.70)),
+        signal_text: h(mix(ORANGE, WHITE, t.signal)),
         signal_wash: h(mix(ORANGE, card, 0.16)),
         signal_line: h(mix(ORANGE, card, 0.34)),
         primary_bg: h(text),
@@ -325,25 +329,39 @@ fn dark(t: Tone) -> Palette {
     }
 }
 
-/// What a style changes: the neutral that every surface, line and text colour is mixed from, and the colour the
-/// secondary text leans toward in light. Cobalt, Signal and the characters' own colours are the family's, the
-/// same in every style, so Cobalt still means "selected" and "Samo suggests" everywhere.
+/// What a style changes. Cobalt, Signal and the characters' own colours are the family's, the same in every style,
+/// so Cobalt still means "selected" and "Samo suggests" everywhere; a style only moves the greys.
 #[derive(Clone, Copy)]
 struct Tone {
+    /// The neutral light mixes its text and lines from.
     ink: C,
+    /// The neutral dark builds its surfaces from: the lighter it is, the lighter the charcoal.
+    dark_ink: C,
+    /// What the secondary text leans toward in light.
     tint: C,
+    /// How far the light stage and shell sit from white (1 is Cobalt's: a trace of grey).
+    depth: f32,
+    /// How much orange stays in Signal text in dark (the rest is white): lighter surfaces need lighter text.
+    signal: f32,
 }
 
 fn tone(style: Style) -> Tone {
     match style {
         Style::Cobalt => Tone {
             ink: INK,
+            dark_ink: INK,
             tint: BLUE_LIGHT,
+            depth: 1.0,
+            signal: 0.70,
         },
-        // Ink's lightness with the blue taken out: only black and white, mixed.
+        // True greys (only black and white, mixed), and more of them: in light a grey canvas the white cards stand
+        // out from, in dark a charcoal instead of near-black.
         Style::Graphite => Tone {
             ink: mix(WHITE, BLACK, 0.165),
-            tint: WHITE,
+            dark_ink: mix(WHITE, BLACK, 0.29),
+            tint: mix(WHITE, BLACK, 0.8),
+            depth: 2.4,
+            signal: 0.62,
         },
     }
 }

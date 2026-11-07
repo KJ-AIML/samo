@@ -45,7 +45,7 @@ pub enum Style {
     /// Samo's own: Ink-tinted neutrals (a slate with a trace of blue) and white cards.
     #[default]
     Cobalt,
-    /// A colourless frame: true greys, so Cobalt is the only colour left on the page.
+    /// True greys with more depth: a grey canvas under white cards in light, charcoal in dark. No blue in the frame.
     Graphite,
 }
 
@@ -70,7 +70,7 @@ impl Style {
     pub fn about(self) -> &'static str {
         match self {
             Style::Cobalt => "Slate neutrals with a trace of blue. Samo's own.",
-            Style::Graphite => "True greys. Cobalt is the only colour left.",
+            Style::Graphite => "Neutral greys with more depth. No blue in the frame.",
         }
     }
 

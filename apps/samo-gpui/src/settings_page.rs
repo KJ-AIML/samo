@@ -4,12 +4,16 @@
 //! This is one of the two files allowed to make a `UserAction` (R12, the `network` gate): only in what a click
 //! runs. Shown at launch (`SAMO_START_PAGE=settings`), it uses the store's cache and never goes online.
 
+use crate::appearance::{Appearance, Mode, Style};
 use crate::components::*;
 use crate::shell::{Head, Page};
 use crate::store_view::{Here, SAMO_VERSION, Segment, update_count};
 use crate::theme::*;
 use crate::{Frame, NavSection, SamoWorkspaceApp};
-use gpui::{Context, Div, FontWeight, IntoElement, ParentElement, Styled, div, prelude::*, px};
+use gpui::{
+    Context, Div, FontWeight, IntoElement, ParentElement, SharedString, Stateful, Styled, div,
+    prelude::*, px,
+};
 use samo_domain::store::{SamoRelease, newer, this_platform};
 use samo_extensions::net::UserAction;
 use samo_extensions::update::can_update;
@@ -103,8 +107,8 @@ pub fn update_words(
 }
 
 /// Samo on Windows updates with its installer, which comes later (#10). The page says so, with no button that would
-/// do nothing, and nothing is checked or fetched (ADR-006 R28).
-fn updates_come_later() -> Page {
+/// do nothing, and nothing is checked or fetched (ADR-006 R28). Appearance works everywhere, so it is still here.
+fn updates_come_later(appearance: Div) -> Page {
     Page {
         head: Head {
             icon: "gear",
@@ -113,12 +117,165 @@ fn updates_come_later() -> Page {
             crumbs: false,
             actions: Vec::new(),
         },
-        body: div().child(section_rule("Updates", None)).child(card().child(empty(
-            "Samo on Windows updates with its installer, which comes in a later version. Until then, nothing is \
-             checked or fetched.",
-        ))),
+        body: div()
+            .flex()
+            .flex_col()
+            .gap(px(S6))
+            .child(appearance)
+            .child(group("Updates").child(setting_row(
+                div()
+                    .font(body(FontWeight::NORMAL))
+                    .text_size(px(T_BODY))
+                    .text_color(p().text_2)
+                    .child(
+                        "Samo on Windows updates with its installer, which comes in a later version. Until \
+                         then, nothing is checked or fetched.",
+                    ),
+                div(),
+            ))),
         fill: false,
     }
+}
+
+/// A group of settings: its name, then its rows split by hairlines. Settings is a list, so no cards.
+fn group(title: &str) -> Div {
+    div()
+        .flex()
+        .flex_col()
+        .child(div().pb(px(S2)).child(h2(title.to_string())))
+}
+
+/// One setting: what it is on the left, its control on the right. A narrow window drops the control under it.
+fn setting_row(left: impl IntoElement, right: impl IntoElement) -> Div {
+    div()
+        .py(px(S3 + 2.0))
+        .flex()
+        .flex_row()
+        .flex_wrap()
+        .items_center()
+        .gap(px(S3))
+        .border_t_1()
+        .border_color(p().hairline)
+        .child(div().flex_1().min_w(px(220.0)).child(left))
+        .child(div().flex_shrink_0().child(right))
+}
+
+/// A setting's name with a quiet line under it saying what it does.
+fn labelled(title: &str, hint: &str) -> Div {
+    let pal = p();
+    div()
+        .flex()
+        .flex_col()
+        .gap(px(2.0))
+        .child(
+            div()
+                .font(body(FontWeight::MEDIUM))
+                .text_size(px(T_BODY))
+                .text_color(pal.text)
+                .child(title.to_string()),
+        )
+        .child(
+            div()
+                .font(body(FontWeight::NORMAL))
+                .text_size(px(T_META))
+                .text_color(pal.text_2)
+                .child(hint.to_string()),
+        )
+}
+
+/// A style to pick: a small Samo drawn in that style (in the light or dark you are using now), its name, and one
+/// line. The one in use has a Cobalt ring and a check, so it never rests on colour alone.
+fn style_tile(id: SharedString, style: Style, on: bool) -> Stateful<Div> {
+    let pal = p();
+    let sample = palette_for(style, is_dark());
+    // Everything in the preview has a fixed size, so nothing in it has to grow (DESIGN.md rule 8).
+    let readout = div()
+        .h(px(14.0))
+        .px(px(4.0))
+        .flex()
+        .items_center()
+        .rounded(px(3.0))
+        .bg(sample.glass)
+        .child(div().w(px(34.0)).h(px(3.0)).bg(sample.phosphor));
+    let card = div()
+        .h(px(20.0))
+        .px(px(5.0))
+        .flex()
+        .items_center()
+        .rounded(px(4.0))
+        .bg(sample.card)
+        .border_1()
+        .border_color(sample.hairline)
+        .child(div().w(px(26.0)).h(px(3.0)).bg(sample.accent));
+    let preview = div()
+        .h(px(64.0))
+        .p(px(6.0))
+        .flex()
+        .flex_row()
+        .gap(px(6.0))
+        .rounded(px(R_CONTROL))
+        .bg(sample.frame)
+        .child(
+            div()
+                .w(px(20.0))
+                .h(px(52.0))
+                .rounded(px(R_CHIP - 2.0))
+                .bg(sample.shell),
+        )
+        .child(
+            div()
+                .flex_1()
+                .h(px(52.0))
+                .p(px(5.0))
+                .flex()
+                .flex_col()
+                .gap(px(4.0))
+                .rounded(px(R_CHIP))
+                .bg(sample.stage)
+                .border_1()
+                .border_color(sample.hairline)
+                .child(readout)
+                .child(card),
+        );
+    div()
+        .id(id)
+        .flex_1()
+        .min_w(px(200.0))
+        .max_w(px(320.0))
+        .p(px(S3))
+        .flex()
+        .flex_col()
+        .gap(px(S2))
+        .rounded(px(R_CARD))
+        .bg(pal.card)
+        .border_2()
+        .border_color(if on { pal.accent } else { pal.hairline_strong })
+        .when(!on, |el| {
+            el.cursor_pointer().hover(|s| s.border_color(pal.text_2))
+        })
+        .child(preview)
+        .child(
+            div()
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap(px(S2))
+                .child(
+                    div()
+                        .font(body(FontWeight::SEMIBOLD))
+                        .text_size(px(T_BODY))
+                        .text_color(pal.text)
+                        .child(style.label()),
+                )
+                .when(on, |el| el.child(icon("check", 14.0, pal.accent_text))),
+        )
+        .child(
+            div()
+                .font(body(FontWeight::NORMAL))
+                .text_size(px(T_META))
+                .text_color(pal.text_2)
+                .child(style.about()),
+        )
 }
 
 /// What Settings says about where Samo is, on Windows: installed for this user, or run from `folder` (where its
@@ -202,9 +359,7 @@ impl SamoWorkspaceApp {
                 }
             }))
         };
-        let mut content = card()
-            .child(words)
-            .child(div().flex().flex_row().child(action));
+        let mut content = div().flex().flex_col().child(setting_row(words, action));
         if let Some(note) = &self.install_note {
             content = content.child(error_line(note));
         }
@@ -228,9 +383,88 @@ impl SamoWorkspaceApp {
         }
     }
 
+    /// Keeps a new choice for next launch and draws every Samo window with it now (the window, the menu bar's
+    /// panel and any pop-up). A write that fails is said here; the choice still holds until Samo quits.
+    fn choose_appearance(&mut self, next: Appearance, cx: &mut Context<Self>) {
+        set_appearance(next);
+        self.appearance_note = crate::appearance::save(next)
+            .err()
+            .map(|e| format!("Samo couldn't keep that for next time: {e}."));
+        cx.refresh_windows();
+        cx.notify();
+    }
+
+    /// Mode, then style. Works the same on every OS.
+    fn appearance_section(&self, cx: &mut Context<Self>) -> Div {
+        let pal = p();
+        let chosen = appearance();
+        let mode = segments(Mode::ALL.into_iter().map(|m| {
+            segment(
+                SharedString::from(format!("mode-{}", m.key())),
+                m.label(),
+                m == chosen.mode,
+            )
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.choose_appearance(
+                    Appearance {
+                        mode: m,
+                        ..appearance()
+                    },
+                    cx,
+                )
+            }))
+        }));
+        let tiles =
+            div()
+                .flex()
+                .flex_row()
+                .flex_wrap()
+                .gap(px(S3))
+                .children(Style::ALL.into_iter().map(|s| {
+                    style_tile(
+                        SharedString::from(format!("style-{}", s.key())),
+                        s,
+                        s == chosen.style,
+                    )
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.choose_appearance(
+                            Appearance {
+                                style: s,
+                                ..appearance()
+                            },
+                            cx,
+                        )
+                    }))
+                }));
+        let block = group("Appearance")
+            .child(setting_row(
+                labelled("Mode", "Follow the system, or stay light or dark."),
+                mode,
+            ))
+            .child(
+                div()
+                    .py(px(S3 + 2.0))
+                    .flex()
+                    .flex_col()
+                    .gap(px(S3))
+                    .border_t_1()
+                    .border_color(pal.hairline)
+                    .child(labelled(
+                        "Style",
+                        "Both are mixed from the same nine colours; only the greys differ.",
+                    ))
+                    .child(tiles),
+            );
+        match &self.appearance_note {
+            Some(note) => block.child(error_line(note)),
+            None => block,
+        }
+    }
+
     pub(crate) fn render_settings(&mut self, frame: &Frame, cx: &mut Context<Self>) -> Page {
+        let appearance = self.appearance_section(cx);
         if !samo_extensions::SAMO_UPDATES_ON_THIS_OS {
-            return updates_come_later();
+            return updates_come_later(appearance);
         }
         let view: &StoreView = &frame.store;
         let exe = std::env::current_exe().ok();
@@ -258,14 +492,11 @@ impl SamoWorkspaceApp {
             .filter(|w| !w.trim().is_empty());
         let updates = update_count(view.catalog.as_deref(), &frame.ext, Here::now());
 
-        let body = div().flex().flex_col().gap(px(S4));
+        let body = div().flex().flex_col().gap(px(S6)).child(appearance);
         #[cfg(windows)]
+        let body = body.child(group("This PC").child(self.install_card(cx)));
         let body = body
-            .child(section_rule("This PC", None))
-            .child(self.install_card(cx));
-        let body = body
-            .child(section_rule("Updates", None))
-            .child(self.updates_card(&words, whats_new, view.refreshing, exe, cx))
+            .child(self.updates_block(&words, whats_new, view.refreshing, exe, cx))
             .when(updates > 0, |el| {
                 let label = if updates == 1 {
                     "1 extension has an update".to_string()
@@ -293,33 +524,17 @@ impl SamoWorkspaceApp {
             head: Head {
                 icon: "gear",
                 title: "Settings".to_string(),
-                sub: "Samo checks for updates only when you open this page or the store."
-                    .to_string(),
+                sub: format!("Samo {SAMO_VERSION}."),
                 crumbs: false,
-                actions: vec![
-                    button(
-                        "settings-check",
-                        "Check now",
-                        Some("refresh"),
-                        Variant::Default,
-                        false,
-                    )
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.settings_submit(
-                            StoreJob::Refresh { force: true },
-                            UserAction::clicked(),
-                        );
-                        cx.notify();
-                    }))
-                    .into_any_element(),
-                ],
+                actions: Vec::new(),
             },
             body,
             fill: false,
         }
     }
 
-    fn updates_card(
+    /// Updates as settings rows: where Samo stands and what you can do about it, with Check now beside it.
+    fn updates_block(
         &self,
         words: &UpdateWords,
         whats_new: Option<String>,
@@ -328,9 +543,9 @@ impl SamoWorkspaceApp {
         cx: &mut Context<Self>,
     ) -> Div {
         let pal = p();
-        let action: gpui::AnyElement = match &words.action {
-            UpdateAction::None => div().into_any_element(),
-            UpdateAction::Busy(label) => busy_button(label).into_any_element(),
+        let action: Option<gpui::AnyElement> = match &words.action {
+            UpdateAction::None => None,
+            UpdateAction::Busy(label) => Some(busy_button(label).into_any_element()),
             UpdateAction::Install { version } => {
                 let label = format!("Install {version} and restart");
                 button(
@@ -350,6 +565,7 @@ impl SamoWorkspaceApp {
                     cx.notify();
                 }))
                 .into_any_element()
+                .into()
             }
             UpdateAction::Disabled(_) => button(
                 "settings-releases",
@@ -359,54 +575,74 @@ impl SamoWorkspaceApp {
                 false,
             )
             .on_click(|_, _, cx| cx.open_url(RELEASES_URL))
-            .into_any_element(),
+            .into_any_element()
+            .into(),
         };
-        card()
-            .gap(px(S3))
+        let check = button(
+            "settings-check",
+            "Check now",
+            Some("refresh"),
+            Variant::Default,
+            false,
+        )
+        .on_click(cx.listener(|this, _, _, cx| {
+            this.settings_submit(StoreJob::Refresh { force: true }, UserAction::clicked());
+            cx.notify();
+        }));
+        let state = div()
+            .flex()
+            .flex_col()
+            .gap(px(2.0))
             .child(
                 div()
-                    .flex()
-                    .flex_row()
-                    .items_center()
-                    .gap(px(S4))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w(px(0.0))
-                            .flex()
-                            .flex_col()
-                            .gap(px(S1))
-                            .child(h2(words.headline.clone()))
-                            .child(
-                                div()
-                                    .font(mono(FontWeight::NORMAL))
-                                    .text_size(px(T_META))
-                                    .text_color(pal.text_2)
-                                    .child(if checking {
-                                        "Checking the store…".to_string()
-                                    } else {
-                                        words.status.clone()
-                                    }),
-                            ),
-                    )
-                    .child(action),
+                    .font(body(FontWeight::MEDIUM))
+                    .text_size(px(T_BODY))
+                    .text_color(pal.text)
+                    .child(words.headline.clone()),
             )
+            .child(
+                div()
+                    .font(mono(FontWeight::NORMAL))
+                    .text_size(px(T_META))
+                    .text_color(pal.text_2)
+                    .child(if checking {
+                        "Checking the store…".to_string()
+                    } else {
+                        words.status.clone()
+                    }),
+            );
+        let controls = div()
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap(px(S2))
+            .child(check)
+            .children(action);
+        let note = |text: String| {
+            div()
+                .pb(px(S3))
+                .font(body(FontWeight::NORMAL))
+                .text_size(px(T_META))
+                .text_color(pal.text_2)
+                .child(text)
+        };
+        group("Updates")
+            .child(setting_row(state, controls))
             .children(match &words.action {
-                UpdateAction::Disabled(why) => Some(
-                    div()
-                        .font(body(FontWeight::NORMAL))
-                        .text_size(px(T_META))
-                        .text_color(pal.text_2)
-                        .child(format!("{why}. Download it from the release page instead.")),
-                ),
+                UpdateAction::Disabled(why) => Some(note(format!(
+                    "{why}. Download it from the release page instead."
+                ))),
                 _ => None,
             })
             .children(words.error.clone().map(|e| error_line(&e)))
             .children(whats_new.map(|w| {
                 div()
+                    .py(px(S3))
                     .flex()
                     .flex_col()
                     .gap(px(S2))
+                    .border_t_1()
+                    .border_color(pal.hairline)
                     .child(mono_label("What's new", pal.text_2))
                     .children(
                         crate::store_view::description_blocks(&w)
@@ -414,6 +650,9 @@ impl SamoWorkspaceApp {
                             .map(crate::extensions_page::block),
                     )
             }))
+            .child(note(
+                "Samo checks for updates only when you open this page or the store.".to_string(),
+            ))
     }
 }
 
