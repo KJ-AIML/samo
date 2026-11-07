@@ -18,6 +18,8 @@ pub const ON_THIS_OS: bool = cfg!(target_os = "macos");
 /// More than a Mac has apps running; the cache stops growing here so it can't grow without end.
 const MAX_ICONS: usize = 512;
 
+// `Ready` and `Missing` are set by the macOS worker; nothing sets them where there isn't one.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 #[derive(Clone)]
 enum Slot {
     /// Asked for; the worker has it.
