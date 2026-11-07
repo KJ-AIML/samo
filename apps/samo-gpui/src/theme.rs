@@ -126,7 +126,7 @@ pub struct Palette {
     pub shade_3: Hsla,
     pub shade_4: Hsla,
     pub backdrop: Hsla,
-    /// The readout: a recessed instrument window with phosphor figures, dark in both themes.
+    /// The readout: a recessed instrument window with phosphor figures. The same in every palette (`glass_face`).
     pub glass: Hsla,
     pub glass_line: Hsla,
     pub glass_text: Hsla,
@@ -165,7 +165,33 @@ fn h(c: C) -> Hsla {
     c.into()
 }
 
+/// The readout's face. It is an instrument's window, not a surface of the page, so it is the same in light and dark
+/// and in every style, like a gauge that doesn't change with the room: near-black (darker than the darkest stage, so
+/// it always reads as recessed), white labels, pale-cobalt phosphor. Only a wrong figure leaves it, in Signal, and
+/// the readout draws that itself.
+struct GlassFace {
+    glass: Hsla,
+    line: Hsla,
+    text: Hsla,
+    text_2: Hsla,
+    phosphor: Hsla,
+    phosphor_off: Hsla,
+}
+
+fn glass_face() -> GlassFace {
+    let glass = mix(INK, BLACK, 0.18);
+    GlassFace {
+        glass: h(glass),
+        line: h(fade(WHITE, 0.12)),
+        text: h(WHITE),
+        text_2: h(mix(WHITE, glass, 0.58)),
+        phosphor: h(BLUE_LIGHT),
+        phosphor_off: h(fade(BLUE_LIGHT, 0.10)),
+    }
+}
+
 fn light(t: Tone) -> Palette {
+    let g = glass_face();
     let card = WHITE;
     Palette {
         frame: h(WHITE),
@@ -195,12 +221,12 @@ fn light(t: Tone) -> Palette {
         shade_3: h(fade(t.ink, 0.16)),
         shade_4: h(fade(t.ink, 0.34)),
         backdrop: h(fade(t.ink, 0.30)),
-        glass: h(mix(t.ink, BLACK, 0.72)),
-        glass_line: h(fade(WHITE, 0.14)),
-        glass_text: h(WHITE),
-        glass_text_2: h(mix(WHITE, mix(t.ink, BLACK, 0.72), 0.62)),
-        phosphor: h(BLUE_LIGHT),
-        phosphor_off: h(fade(BLUE_LIGHT, 0.12)),
+        glass: g.glass,
+        glass_line: g.line,
+        glass_text: g.text,
+        glass_text_2: g.text_2,
+        phosphor: g.phosphor,
+        phosphor_off: g.phosphor_off,
         thumb: h(WHITE),
         thumb_face: h(t.ink),
         cells: CellColors {
@@ -244,6 +270,7 @@ fn light(t: Tone) -> Palette {
 }
 
 fn dark(t: Tone) -> Palette {
+    let g = glass_face();
     let t = Tone {
         ink: t.dark_ink,
         ..t
@@ -278,12 +305,12 @@ fn dark(t: Tone) -> Palette {
         shade_3: h(fade(BLACK, 0.55)),
         shade_4: h(fade(BLACK, 0.70)),
         backdrop: h(fade(BLACK, 0.50)),
-        glass: h(mix(t.ink, BLACK, 0.18)),
-        glass_line: h(fade(WHITE, 0.12)),
-        glass_text: h(WHITE),
-        glass_text_2: h(mix(WHITE, mix(t.ink, BLACK, 0.18), 0.58)),
-        phosphor: h(BLUE_LIGHT),
-        phosphor_off: h(fade(BLUE_LIGHT, 0.10)),
+        glass: g.glass,
+        glass_line: g.line,
+        glass_text: g.text,
+        glass_text_2: g.text_2,
+        phosphor: g.phosphor,
+        phosphor_off: g.phosphor_off,
         thumb: h(WHITE),
         thumb_face: h(t.ink),
         cells: CellColors {
@@ -907,6 +934,7 @@ mod tests {
     }
 
     /// Graphite is colourless where Cobalt is slate: every surface and text colour has equal red, green and blue.
+    /// (Not the readout: it is the same in every style, see `the_readout_is_the_same_in_every_palette_and_recessed`.)
     #[test]
     fn graphite_has_no_tint_in_its_neutrals() {
         for dark in [false, true] {
@@ -920,7 +948,6 @@ mod tests {
                 ("text", pal.text),
                 ("text_2", pal.text_2),
                 ("field_line", pal.field_line),
-                ("glass", pal.glass),
                 ("primary_bg", pal.primary_bg),
             ] {
                 let c = Rgba::from(colour);
@@ -933,6 +960,44 @@ mod tests {
         // And Cobalt's slate really is tinted, so the two are not the same grey.
         let c = Rgba::from(palette_for(Style::Cobalt, false).text_2);
         assert!(c.b - c.r > 0.05);
+    }
+
+    /// The readout is Samo's face: one set of colours in light and dark and in every style, and always darker than the
+    /// stage it sits on, so it reads as a recessed window.
+    #[test]
+    fn the_readout_is_the_same_in_every_palette_and_recessed() {
+        let first = palette_for(Style::ALL[0], false);
+        for style in Style::ALL {
+            for dark in [false, true] {
+                let pal = palette_for(style, dark);
+                assert_eq!(pal.glass, first.glass, "{style:?} dark={dark}: glass");
+                assert_eq!(
+                    pal.glass_line, first.glass_line,
+                    "{style:?} dark={dark}: line"
+                );
+                assert_eq!(
+                    pal.glass_text, first.glass_text,
+                    "{style:?} dark={dark}: text"
+                );
+                assert_eq!(
+                    pal.glass_text_2, first.glass_text_2,
+                    "{style:?} dark={dark}: text_2"
+                );
+                assert_eq!(
+                    pal.phosphor, first.phosphor,
+                    "{style:?} dark={dark}: phosphor"
+                );
+                assert_eq!(
+                    pal.phosphor_off, first.phosphor_off,
+                    "{style:?} dark={dark}: off"
+                );
+                let (g, st) = (Rgba::from(pal.glass), Rgba::from(pal.stage));
+                assert!(
+                    g.r + g.g + g.b < st.r + st.g + st.b,
+                    "{style:?} dark={dark}: the readout is not darker than its stage"
+                );
+            }
+        }
     }
 
     /// WCAG relative luminance and contrast ratio of two opaque colours.

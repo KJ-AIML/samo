@@ -69,3 +69,17 @@ What is Samo's own and stays: the dot-matrix readout, the probe, the rings, dith
 - Shots and Clips (Swift) windows still follow macOS's appearance, not Samo's choice.
 - Pages other than Overview and Settings; narrow windows.
 - README's screenshots (`docs/media`) show the old look with shadows and the grid. Not replaced: they are public.
+
+## Follow-up, same day: the readout stays the same
+KJ, testing the build: "this main metric should follow me to all pages, and should not changes colors?" (two arrows
+at the Memory and Disk free cells).
+
+- **It already follows.** Every page is drawn by one `render_stage`, which puts the readout above the scrolling
+  page; the menu bar panel uses the same glass. (One of my own captures happened to be scrolled: the readout stayed
+  at the top while the cards moved under it.)
+- **It did change colour,** three ways: light vs dark (slate about `#1A1E25` in light, near-black in dark, from
+  before this work), Cobalt vs Graphite (my addition), and Signal orange for a wrong figure (kept on purpose).
+- **Now it is one face.** `glass_face()` gives every palette the same glass, line, text and phosphor (the old dark
+  values), so light mode's readout is darker than it was. A test checks all four palettes are equal and darker than
+  their stage; I also sampled the rendered pixels in a capture of each palette: `(6, 8, 9)` at three points in all four.
+- The Graphite-is-neutral test no longer lists the readout's glass, on purpose.

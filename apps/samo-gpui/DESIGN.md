@@ -10,7 +10,8 @@ identity, because it does a different job: **Samo is an instrument that measures
 A calm frame with an instrument's face.
 
 - **The readout is the face.** Pinned at the top of every page is a dark instrument window with phosphor
-  dot-matrix figures: CPU, memory, disk free, and what Samo suggests reclaiming. It is dark in both themes.
+  dot-matrix figures: CPU, memory, disk free, and what Samo suggests reclaiming. It is one fixed face: the same
+  near-black glass on every page, in light and dark and in every style. Only a wrong figure leaves it, in Signal.
 - **The ring is the shape.** Disks are platters and gauges are dials, so Samo's shapes are rings: the gauge mark,
   the dial each page's icon sits on, the disk ring on Overview, the circle map on Storage. (Mesh uses hexagons.)
 - **Samo measures; you decide.** What Samo *suggests* (build artifacts it thinks are safe to clear) is drawn in
@@ -53,7 +54,7 @@ style, so Cobalt still means "selected" and "Samo suggests" in both. `SAMO_THEME
 for screenshots and tests, over Settings. Tests check that Cobalt is byte for byte what shipped, that Graphite is
 neutral, and every text pair at 4.5:1 in all four palettes.
 
-Samo adds the readout tokens (`glass`, `glass_line`, `glass_text`, `glass_text_2`,
+The readout is not part of a style: `glass_face()` gives every palette the same tokens (tested). Samo adds the readout tokens (`glass`, `glass_line`, `glass_text`, `glass_text_2`,
 `phosphor` = Pale cobalt, `phosphor_off`) and runs a step denser and crisper than Mesh:
 
 | | Samo | (Mesh) |
@@ -205,6 +206,8 @@ Samo lives in the menu bar too (`src/menubar.rs`, via `tray-icon`'s safe `NSStat
     drawn in one place.
 13. A new style is a `Tone`, not new colours. It must pass the palette tests: neutral where it says it is, and every
     text pair at 4.5:1.
+14. The readout is the same in every palette: one glass, one phosphor, darker than the darkest stage. Only a wrong
+    figure leaves it, in Signal.
 
 ## Decisions
 
@@ -222,3 +225,4 @@ Samo lives in the menu bar too (`src/menubar.rs`, via `tray-icon`'s safe `NSStat
 | Graphite as a second style, moving only the greys | KJ asked for another style; Cobalt, Signal and the characters keep their meaning in both. A trace of grey was invisible, so it has real depth | No: `Tone` in `theme.rs` |
 | Mode and style in `appearance.txt` | Like `locations.txt`: a plain file, nothing online, and a bad file is just the defaults | No |
 | The sidebar keeps its Disk row, without the bar | The Disk is one of the four characters (§3); the bar repeated the readout's | No |
+| The readout is one fixed face in every palette | It is an instrument's window, not a surface of the page: a gauge doesn't change with the room, and four slightly different readouts read as a bug | No: `glass_face()` |
