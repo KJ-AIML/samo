@@ -2,18 +2,20 @@
 //!
 //! It watches `data/sessions/` (one `stat` every 250 ms), checks Claude Code's processes every 5 s, reads the
 //! day's transcripts within a budget, and picks up `limits.json`. It sends Samo the page and the badge only when
-//! they change, and a pop-up when a session starts waiting or a long turn finishes. It exits when Samo says
-//! `shutdown` or closes its stdin.
+//! they change, and a pop-up when a session starts waiting or a long turn finishes. While Ask Anthropic for
+//! limits is on, it asks Anthropic for them every 5 minutes on a thread of its own (`online`) and saves them to
+//! `limits.json`, as the status line does. It exits when Samo says `shutdown` or closes its stdin.
 
 use crate::ancestry;
 use crate::connection::{self, Places};
 use crate::hook::now_ms;
 use crate::limits::Limits;
+use crate::online::{self, Problem};
 use crate::paths;
 use crate::popups::{Policy, Wanted};
 use crate::sessions::{SessionFile, derive};
 use crate::transcripts::Reader;
-use crate::view::{self, Input, Switches};
+use crate::view::{self, Asked, Input, Switches};
 use samo_ext_protocol::{
     BadgeMeter, HelperMsg, HostMsg, PROTOCOL_VERSION, decode_host_line, encode,
 };
@@ -23,7 +25,7 @@ use std::fs::{self, File, TryLockError};
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
-use std::sync::mpsc::{self, RecvTimeoutError};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, TryRecvError};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime};
 
@@ -36,11 +38,14 @@ const SWEEP_EVERY: Duration = Duration::from_secs(5 * 60);
 /// The page is sent at most this often when only durations changed.
 const VIEW_EVERY: Duration = Duration::from_secs(1);
 
-/// The pop-up switches, kept in `data/prefs.json`.
+/// The switches Samo keeps itself, in `data/prefs.json`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 struct Prefs {
     popup_needs_you: bool,
     popup_finished: bool,
+    /// Off until you turn it on; files from before 0.2.4 don't have it.
+    #[serde(default)]
+    ask_anthropic: bool,
 }
 
 impl Default for Prefs {
@@ -48,8 +53,20 @@ impl Default for Prefs {
         Self {
             popup_needs_you: true,
             popup_finished: true,
+            ask_anthropic: false,
         }
     }
+}
+
+/// Asking Anthropic for the limits, while the switch is on.
+#[derive(Default)]
+struct Asking {
+    /// When to ask next; `None` is now.
+    next: Option<Instant>,
+    running: Option<Receiver<Result<Limits, Problem>>>,
+    /// A sign-in Anthropic refused, not sent again.
+    refused: Option<u64>,
+    last: Option<Asked>,
 }
 
 fn modified(path: &Path) -> Option<SystemTime> {
@@ -120,6 +137,7 @@ struct Serve {
     sent_view: String,
     sent_view_at: Option<Instant>,
     sent_badge: Option<(u32, String, Option<BadgeMeter>)>,
+    asking: Asking,
 }
 
 impl Serve {
@@ -150,6 +168,7 @@ impl Serve {
             sent_view: String::new(),
             sent_view_at: None,
             sent_badge: None,
+            asking: Asking::default(),
         }
     }
 
@@ -180,6 +199,17 @@ impl Serve {
                 self.prefs.popup_finished = v;
                 self.save_prefs();
                 Ok("")
+            }
+            ("ask_anthropic", v) => {
+                self.prefs.ask_anthropic = v;
+                self.save_prefs();
+                // On: ask now. Off: an answer still on its way is dropped.
+                self.asking = Asking::default();
+                Ok(if v {
+                    "ask-anthropic-on"
+                } else {
+                    "ask-anthropic-off"
+                })
             }
             _ => Ok(""),
         };
@@ -240,6 +270,58 @@ impl Serve {
         changed
     }
 
+    /// While the switch is on: takes in an answer, and asks again when it's time. True when the page changes.
+    fn ask_anthropic(&mut self, now: i64) -> bool {
+        if !self.prefs.ask_anthropic {
+            return false;
+        }
+        if let Some(running) = &self.asking.running {
+            let result = match running.try_recv() {
+                Ok(result) => result,
+                Err(TryRecvError::Empty) => return false,
+                Err(TryRecvError::Disconnected) => {
+                    Err(Problem::Failed("Samo's request stopped".into()))
+                }
+            };
+            self.asking.running = None;
+            let wait = match &result {
+                Ok(limits) => {
+                    crate::statusline::save(&self.places.data, limits);
+                    self.asking.refused = None;
+                    online::EVERY
+                }
+                Err(Problem::Refused { sign_in }) => {
+                    self.asking.refused = Some(*sign_in);
+                    online::EVERY
+                }
+                Err(Problem::NoSignIn | Problem::Expired) => online::EVERY,
+                Err(Problem::Failed(_)) => online::AFTER_FAILURE,
+            };
+            self.asking.next = Some(Instant::now() + wait);
+            self.asking.last = Some(Asked {
+                at_ms: now,
+                problem: result.err(),
+            });
+            return true;
+        }
+        if self.asking.next.is_none_or(|t| Instant::now() >= t) {
+            let (tx, rx) = mpsc::channel();
+            let home = self.places.home.clone();
+            let refused = self.asking.refused;
+            let spawned = thread::Builder::new()
+                .name("ask-anthropic".into())
+                .spawn(move || {
+                    let _ = tx.send(online::ask(&home, refused, now_ms));
+                });
+            if spawned.is_ok() {
+                self.asking.running = Some(rx);
+            } else {
+                self.asking.next = Some(Instant::now() + online::AFTER_FAILURE);
+            }
+        }
+        false
+    }
+
     /// Forgets sessions whose Claude Code process is gone, and their files.
     fn check_liveness(&mut self) -> bool {
         let ids: Vec<(String, samo_primitives::ProcessIdentity)> = self
@@ -298,6 +380,7 @@ impl Serve {
             self.reader.sweep();
         }
         self.reader.read_new(READ_BUDGET);
+        state_changed |= self.ask_anthropic(now);
         let limits_path = self.places.data.join("limits.json");
         let limits_seen = modified(&limits_path);
         if limits_seen != self.limits_seen {
@@ -328,13 +411,16 @@ impl Serve {
             split: tally.total(),
             counting: self.reader.behind(),
             limits,
+            reported: self.limits.is_some(),
             switches: Switches {
                 connected: self.active.connected,
                 plan_limits: self.active.plan_limits,
                 other_statusline: self.active.other_statusline,
                 popup_needs_you: self.prefs.popup_needs_you,
                 popup_finished: self.prefs.popup_finished,
+                ask_anthropic: self.prefs.ask_anthropic,
             },
+            asked: self.asking.last.clone(),
             problem: self.problem.clone(),
             now_ms: now,
             clock: &time_of_day,
@@ -348,7 +434,11 @@ impl Serve {
             }
         }
         let (count, summary) = view::badge(&rows);
-        let meter = view::badge_meter(self.active.plan_limits, limits.as_ref(), now);
+        let meter = view::badge_meter(
+            self.active.plan_limits || self.prefs.ask_anthropic,
+            limits.as_ref(),
+            now,
+        );
         let badge = (count, summary, meter);
         if self.sent_badge.as_ref() != Some(&badge) {
             self.sent_badge = Some(badge.clone());
@@ -455,6 +545,21 @@ pub fn run() -> ExitCode {
 mod tests {
     use super::*;
     use chrono::{FixedOffset, TimeZone};
+
+    #[test]
+    fn prefs_from_before_ask_anthropic_still_read() -> Result<(), String> {
+        let old: Prefs = serde_json::from_str(r#"{"popup_needs_you":false,"popup_finished":true}"#)
+            .map_err(|e| e.to_string())?;
+        assert_eq!(
+            old,
+            Prefs {
+                popup_needs_you: false,
+                popup_finished: true,
+                ask_anthropic: false,
+            }
+        );
+        Ok(())
+    }
 
     #[test]
     fn times_say_the_day_unless_it_is_today() -> Result<(), String> {

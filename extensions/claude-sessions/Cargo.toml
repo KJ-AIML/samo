@@ -1,6 +1,6 @@
 [package]
 name = "samo-claude"
-version = "0.2.3"
+version = "0.2.4"
 edition.workspace = true
 license.workspace = true
 publish = false
@@ -25,6 +25,8 @@ serde.workspace = true
 serde_json = { workspace = true, features = ["preserve_order"] }
 sysinfo.workspace = true
 chrono.workspace = true
+# Only in src/online.rs, while Ask Anthropic for limits is on (ADR-002 C3 as amended; the network gate checks).
+ureq = { version = "3", default-features = false, features = ["rustls"] }
 
 [dev-dependencies]
 samo-extensions.workspace = true

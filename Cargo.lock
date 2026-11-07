@@ -4468,7 +4468,7 @@ dependencies = [
 
 [[package]]
 name = "samo-claude"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "chrono",
  "samo-domain",
@@ -4480,6 +4480,7 @@ dependencies = [
  "serde_json",
  "sysinfo",
  "tempfile",
+ "ureq",
 ]
 
 [[package]]

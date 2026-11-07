@@ -6,7 +6,8 @@
 use std::fs;
 use std::path::Path;
 
-/// HTTP client crates. Only `samo-extensions` may list one (`ureq`), for the downloads you ask for.
+/// HTTP client crates. Only `samo-extensions` may list one (`ureq`), for the downloads you ask for, and
+/// `samo-claude`, for Ask Anthropic for limits (ADR-002 C3 as amended 2026-11-06), in one file.
 const HTTP_CLIENTS: &[&str] = &[
     "ureq",
     "reqwest",
@@ -26,7 +27,7 @@ const CLICK_SITES: &[&str] = &[
 ];
 
 fn allowed_http(crate_name: &str, dep: &str) -> bool {
-    crate_name == "samo-extensions" && dep == "ureq"
+    matches!(crate_name, "samo-extensions" | "samo-claude") && dep == "ureq"
 }
 
 /// Every dependency a manifest lists under `[dependencies]`, `[target.….dependencies]` or `[dependencies.<name>]`.
@@ -61,7 +62,7 @@ pub fn check_manifest(crate_name: &str, cargo_toml: &str) -> Result<(), String> 
     for dep in direct_dependencies(cargo_toml) {
         if HTTP_CLIENTS.contains(&dep.as_str()) && !allowed_http(crate_name, &dep) {
             return Err(format!(
-                "R6 network violation: `{crate_name}` depends on HTTP client `{dep}` (only `samo-extensions` may use `ureq`)"
+                "R6 network violation: `{crate_name}` depends on HTTP client `{dep}` (only `samo-extensions` and `samo-claude` may use `ureq`)"
             ));
         }
     }
@@ -161,9 +162,34 @@ pub fn check_swift_source(rel_path: &str, content: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Claude Sessions never goes online.
+/// The one file in Claude Sessions that may go online, while Ask Anthropic for limits is on.
+const CLAUDE_ONLINE_FILE: &str = "extensions/claude-sessions/src/online.rs";
+/// The one address it may ask.
+const CLAUDE_USAGE_URL: &str = "https://api.anthropic.com/api/oauth/usage";
+
+/// Claude Sessions goes online only in `online.rs`, and only to Anthropic's usage page (ADR-002 C3 as amended).
 pub fn check_claude_source(rel_path: &str, content: &str) -> Result<(), String> {
-    check_offline_source("Claude Sessions", rel_path, content)
+    check_offline_source("Claude Sessions", rel_path, content)?;
+    let code = shipped(rel_path, content);
+    if rel_path != CLAUDE_ONLINE_FILE {
+        if has_word(code, "ureq") {
+            return Err(format!(
+                "R6 network violation in `{rel_path}`: Claude Sessions may use `ureq` only in {CLAUDE_ONLINE_FILE}"
+            ));
+        }
+        return Ok(());
+    }
+    let other = code.match_indices("http").any(|(i, _)| {
+        let rest = code.get(i..).unwrap_or_default();
+        (rest.starts_with("http://") || rest.starts_with("https://"))
+            && !rest.starts_with(CLAUDE_USAGE_URL)
+    });
+    if other {
+        return Err(format!(
+            "R6 network violation in `{rel_path}`: Claude Sessions may ask only {CLAUDE_USAGE_URL}"
+        ));
+    }
+    Ok(())
 }
 
 /// Clips for Windows keeps everything on this PC (ADR-005 R23).
@@ -252,8 +278,9 @@ mod tests {
 ureq = { version = "3", default-features = false }
 "#;
         assert!(check_manifest("samo-extensions", ureq).is_ok());
+        assert!(check_manifest("samo-claude", ureq).is_ok());
         assert!(check_manifest("samo-gpui", ureq).is_err());
-        assert!(check_manifest("samo-claude", ureq).is_err());
+        assert!(check_manifest("samo-clips-windows", ureq).is_err());
 
         let reqwest = "[dependencies]\nreqwest = \"0.12\"\n";
         assert!(check_manifest("samo-extensions", reqwest).is_err());
@@ -383,6 +410,34 @@ ureq = { version = "3", default-features = false }
         assert!(check_claude_source(path, "use std::net::TcpStream;").is_err());
         assert!(check_claude_source(path, "let s = UdpSocket::bind(a);").is_err());
         assert!(check_claude_source(path, "use std::fs;").is_ok());
+    }
+
+    /// Ask Anthropic for limits: `ureq` only in `online.rs`, and only to the usage page (ADR-002 C3 as amended).
+    #[test]
+    fn claude_sessions_goes_online_only_in_one_file_to_one_address() {
+        let online = CLAUDE_ONLINE_FILE;
+        let serve = "extensions/claude-sessions/src/serve.rs";
+        let fetch = "use ureq::Agent;\npub const USAGE_URL: &str = \"https://api.anthropic.com/api/oauth/usage\";\n";
+        assert!(check_claude_source(online, fetch).is_ok());
+        assert!(check_claude_source(serve, fetch).is_err());
+        assert!(check_claude_source(serve, "let r = ureq::get(u).call();").is_err());
+        // `online::ask` from serve is fine; a name that merely contains the word isn't `ureq`.
+        assert!(
+            check_claude_source(serve, "online::ask(&home, None, now_ms); let ureqs = 1;").is_ok()
+        );
+        let elsewhere = "const U: &str = \"https://example.com/collect\";\n";
+        assert!(check_claude_source(online, elsewhere).is_err());
+        assert!(
+            check_claude_source(
+                online,
+                "const U: &str = \"http://api.anthropic.com/api/oauth/usage\";"
+            )
+            .is_err()
+        );
+        // Its own tests may say anything; they don't ship.
+        let tests = "fn f() {}\n#[cfg(test)]\nmod tests {\n    const U: &str = \"https://example.com\";\n}\n";
+        assert!(check_claude_source(online, tests).is_ok());
+        assert!(check_claude_source(online, "use std::net::TcpStream;").is_err());
     }
 
     /// Clips keeps everything on this PC (ADR-005 R23): no sockets in its Rust either.

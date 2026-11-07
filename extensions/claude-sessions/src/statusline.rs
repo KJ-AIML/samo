@@ -20,6 +20,17 @@ fn previous(dir: &Path) -> Option<Limits> {
     serde_json::from_slice(&bytes).ok()
 }
 
+/// Replaces `limits.json` in `dir` in one step, so `serve` never reads half of it.
+pub fn save(dir: &Path, limits: &Limits) {
+    let Ok(text) = serde_json::to_vec(limits) else {
+        return;
+    };
+    let tmp = dir.join(format!(".limits.{}.tmp", std::process::id()));
+    if fs::write(&tmp, text).is_ok() && fs::rename(&tmp, dir.join("limits.json")).is_err() {
+        let _ = fs::remove_file(&tmp);
+    }
+}
+
 pub fn run() {
     let (tx, rx) = mpsc::channel();
     let _ = thread::Builder::new().spawn(move || {
@@ -37,12 +48,8 @@ pub fn run() {
     if limits.any()
         && let Some(dir) = paths::data_dir()
         && fs::create_dir_all(&dir).is_ok()
-        && let Ok(text) = serde_json::to_vec(&limits.keeping(previous(&dir).as_ref()))
     {
-        let tmp = dir.join(format!(".limits.{}.tmp", std::process::id()));
-        if fs::write(&tmp, text).is_ok() && fs::rename(&tmp, dir.join("limits.json")).is_err() {
-            let _ = fs::remove_file(&tmp);
-        }
+        save(&dir, &limits.keeping(previous(&dir).as_ref()));
     }
     let mut out = std::io::stdout().lock();
     let _ = writeln!(out, "{}", status_text(&limits));

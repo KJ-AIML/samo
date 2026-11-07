@@ -1,7 +1,9 @@
 # ADR-002: Samo Extensions, with Claude Sessions as the first one
 
 **Date:** 2026-10-31
-**Status:** Accepted by KJ on 2026-10-31 ("ok"), with the [call]s as written
+**Status:** Accepted by KJ on 2026-10-31 ("ok"), with the [call]s as written. **Amended 2026-11-06** (KJ chose
+"Both", then "Still add online fetch"): Claude Sessions may ask Anthropic for plan limits while a switch you turn on
+says so (C3 item 6, R6, devlog 0016).
 **Product:** Samo (`samo`)
 **Changes:** ADR-001 §3 S6 ("does not cover: plugin widgets") and the README's "Local only … nothing sent anywhere".
 
@@ -34,7 +36,8 @@ first, extension later".
   development.
 - **Not a remote control for Claude Code.** Claude Sessions watches. It never answers a question, approves a
   permission or sends input.
-- **Not a reason for Samo to be online.** Samo uses the network only when you press a button.
+- **Not a reason for Samo to be online.** Samo uses the network only when you press a button, or, for Claude
+  Sessions' **Ask Anthropic for limits**, while a switch you turned on says so (amended 2026-11-06).
 
 **Why it is new rather than a reuse:**
 - Samo has no extension mechanism; ADR-001 S6 excluded plugin widgets.
@@ -60,7 +63,9 @@ didn't ask for.
 - **[call]** Extensions that draw their own UI (web views, their own GPUI code). They get a fixed set of Samo
   components.
 - **[call]** Background update checks. Updates are found when you press **Check**.
-- **[call]** Glance's network usage check (`api.anthropic.com/api/oauth/usage`) and reading Claude Code's login.
+- ~~**[call]** Glance's network usage check (`api.anthropic.com/api/oauth/usage`) and reading Claude Code's login.~~
+  Reversed by KJ on 2026-11-06: Claude Sessions' own **Ask Anthropic for limits**, off by default (C3 item 6). None
+  of Glance's code is used.
 - **[call]** Jumping from a pop-up to the session's terminal or editor window.
 - **[call]** Session history beyond today. Windows and Linux.
 - **[call]** Claude Code installs that move their config with `CLAUDE_CONFIG_DIR`. Connect writes `~/.claude/settings.json`.
@@ -74,7 +79,7 @@ These are **[call]**s until KJ says what would make the product a failure (open 
 4. **Claude Sessions gets in Claude Code's way.** It slows Claude Code down, blocks it, or changes what Claude sees.
 5. **Samo lies about a session.** It says *working* for a session that died, or `0` tokens when it couldn't read
    them. (Extends ADR-001 anti-goal 3.)
-6. **Samo goes online without being asked.**
+6. **Samo goes online without being asked.** A switch you turned on is asking (amended 2026-11-06, C3 item 6).
 
 ---
 
@@ -331,6 +336,21 @@ Colour follows DESIGN.md. *Needs you* is Ink with `!`, not Signal: waiting isn't
    - A note says limits update from terminal sessions only, because Claude Code doesn't document a status line in
      VS Code or the desktop app.
 5. **Turning it off** removes `statusLine` only if it is still exactly Samo's command.
+6. **Ask Anthropic for limits** (amended 2026-11-06, devlog 0016). The status line runs only in a terminal, so
+   limits go stale in Cursor, VS Code, the desktop app and `claude -p`. A second switch, off by default and declared
+   in the manifest's `[[changes]]`:
+   - While it is on, `samo-claude serve` asks `GET https://api.anthropic.com/api/oauth/usage` every 5 minutes (15
+     after a failure), on its own thread, as Claude Code's `/usage` does, and saves the answer to `limits.json` like
+     the status line. Turning it off drops an answer still on its way.
+   - Claude Code's sign-in is only read: on the Mac from the Keychain item `Claude Code-credentials` with
+     `/usr/bin/security`, as Claude Code reads it, else `~/.claude/.credentials.json`. It is never refreshed, written,
+     logged or kept on disk. An expired one isn't sent: Claude Code renews it the next time it's used. One Anthropic
+     refused (401, 403) isn't sent again.
+   - One address, HTTPS only, no redirects, 15 s and 256 KiB at most.
+   - A window the answer gives as `null` isn't applied to the account right now, and the page says *no 5-hour limit
+     right now*. Claude Code's status line leaves such a window out, so a status-line report without it says the
+     same. An answer that is missing a window, or can't be read, is set aside: nothing is made `0` or *none*
+     (R10).
 
 ---
 
@@ -341,7 +361,7 @@ These continue ADR-001's R1–R4. Each is enforced in code and checked by a test
 | Rule | Protects | Enforcement | Required test |
 | --- | --- | --- | --- |
 | **R5 — Only signed, pinned packages run** | Anti-goal 2 | `samo-domain::extensions`: `verify_catalog(bytes, sig, key)`, `verify_package(bytes, sha256, size)` and `validate_entries(entries)`. Entries are rejected if they are absolute, contain `..`, are symlinks, hardlinks or devices, sit outside `<id>/`, exceed 2,000 files or exceed 100 MB unpacked. The manifest `id`/`version` must equal the catalog's, and `helper` must resolve inside the folder. Unsigned code loads only from `SAMO_EXT_DEV_DIR` and is tagged `dev`. | `domain::tests::extension_rejects_bad_signature_hash_and_unsafe_entries` |
-| **R6 — The network only on a click** | Anti-goal 6 | gpui already brings an HTTP stack (`gpui_http_client`, `zed-reqwest`, hyper, rustls, tokio) into `samo-gpui` *transitively*. So the gate checks **direct** dependencies and **call sites**: only `samo-extensions` may list an HTTP client in `[dependencies]`; `samo-gpui` must not call gpui's built-in client (`http_client(`); the download functions require a `&UserAction`; and `UserAction::clicked()` may appear only in `apps/samo-gpui/src/extensions_page.rs`. There are no timers. `samo-claude` has no HTTP or socket dependency and no `std::net`. | `xtask` gate `network` (direct-dependency and call-site checks) |
+| **R6 — The network only on a click** | Anti-goal 6 | gpui already brings an HTTP stack (`gpui_http_client`, `zed-reqwest`, hyper, rustls, tokio) into `samo-gpui` *transitively*. So the gate checks **direct** dependencies and **call sites**: only `samo-extensions` may list an HTTP client in `[dependencies]`; `samo-gpui` must not call gpui's built-in client (`http_client(`); the download functions require a `&UserAction`; and `UserAction::clicked()` may appear only in `apps/samo-gpui/src/extensions_page.rs`. There are no timers. `samo-claude` has no socket dependency and no `std::net`; amended 2026-11-06, it may list `ureq` for C3 item 6, used only in `extensions/claude-sessions/src/online.rs`, whose only address is `https://api.anthropic.com/api/oauth/usage`, and only while its switch is on. | `xtask` gate `network` (direct-dependency and call-site checks; `claude_sessions_goes_online_only_in_one_file_to_one_address`) |
 | **R7 — Everything an extension changes is declared, backed up and undone** | Anti-goal 3 | A package without `[[changes]]` won't install, and those lines are shown before install. Claude Sessions' `settings` module is pure: `connect`, `disconnect`, `set_statusline`, `clear_statusline` over a `serde_json::Value` (`preserve_order`). `connect` is idempotent. `disconnect` removes only Samo's entries. An existing `statusLine` is never replaced. The backup is written once before the first change. Writes go through a symlink to its target (dotfile managers link `settings.json`), via a temp file in the target's folder, then a rename, and only if the file is unchanged since it was read. Output is 2-space pretty JSON. "Restored" means equal JSON (same keys, values and order), not identical bytes. Remove runs `uninstall` before deleting. | `connect_then_disconnect_is_equal_json`, `disconnect_keeps_user_hooks`, `never_replaces_statusline`, `connect_twice_adds_once`, `write_refused_if_changed_since_read`, `symlinked_settings_stay_a_symlink` |
 | **R8 — An extension can't slow, hang or crash Samo** | Anti-goal 1 | Out of process only; no dynamic loading, and `unsafe` stays forbidden. Caps: lines up to 64 KB (longer ones are dropped and logged); 20 messages/s, beyond which only the latest `view` is kept; 200 rows per view. Pop-ups at least 3 s apart per extension (a newer one replaces the shown one), and no more than 10 a minute; the rest are dropped and logged. The helper is stopped if it averages over 10 % of one core for 60 s or uses over 150 MB RSS, sampled every 10 s for its pid only, on a `sysinfo::System` nothing else refreshes (devlog 0012). A helper stopped for going over a limit starts again after 1 minute, then 2; the third time within an hour it stays Stopped. `samo-extensions` uses `sysinfo` directly, because the layer gate rejects a same-rank dependency on `samo-macos`. Restarts back off, and the helper is Stopped after 5 crashes in 10 minutes. All helper I/O runs on the supervisor thread. | `domain::tests::crash_backoff_and_stop`, `extensions::tests::oversize_and_flood_are_dropped_not_buffered` (with a fake helper from `samo-testkit`) |
 | **R9 — Claude Sessions never gets in Claude Code's way** | Anti-goal 4 | Every hook is `async: true`. Claude Code doesn't enforce `timeout` on a running async hook, so the real limit is the hook's own: it exits within 500 ms whatever happens. `hook` and `statusline` always exit 0. `hook` never writes stdout (Claude Code adds hook stdout to Claude's context on some events), never exits 2 (which blocks), and does one file write: no transcript reads, no network. | `hook_is_silent_and_exits_zero_on_bad_input` (garbage stdin, missing or read-only data folder), `hook_exits_within_500_ms` |
@@ -469,8 +489,8 @@ bar and dot, the Windows build and Start with Windows.
 
 - **[call]** `SAMO_EXT_DEV_DIR`: load unpacked extensions from a folder, unsigned, tagged `dev`.
 - **[call]** `SAMO_EXT_CATALOG_URL`: use another catalog (for testing). It must still verify against the built-in key.
-- **[call]** Claude Sessions' switches: **Connect to Claude Code**, **Plan limits**, **Pop-up when a session needs
-  you**, **Pop-up when a turn finishes**.
+- **[call]** Claude Sessions' switches: **Connect to Claude Code**, **Plan limits**, **Ask Anthropic for limits**
+  (added 2026-11-06), **Pop-up when a session needs you**, **Pop-up when a turn finishes**.
 
 ---
 

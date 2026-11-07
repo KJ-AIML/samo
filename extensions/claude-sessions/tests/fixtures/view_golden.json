@@ -68,7 +68,7 @@
       "state": "unsupported",
       "reason": "not_reported"
     },
-    "note": "not reported by Claude Code yet"
+    "note": "no weekly limit right now · as of t1000"
   },
   {
     "widget": "note",
@@ -93,6 +93,13 @@
     "label": "Plan limits",
     "on": true,
     "note": "Sets Claude Code's status line to show your limits. Claude Code then hides some footer hints."
+  },
+  {
+    "widget": "switch",
+    "key": "ask_anthropic",
+    "label": "Ask Anthropic for limits",
+    "on": false,
+    "note": "Every 5 minutes, with Claude Code's sign-in, so the figures stay current outside a terminal too. Samo only reads the sign-in; it never renews or changes it."
   },
   {
     "widget": "switch",

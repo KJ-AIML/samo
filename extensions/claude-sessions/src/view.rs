@@ -2,6 +2,7 @@
 //! including how to write a time of day.
 
 use crate::limits::{Limits, observed_at, reading};
+use crate::online::Problem;
 use crate::sessions::{Row, State};
 use crate::usage::Tokens;
 use samo_ext_protocol::{BadgeMeter, Lamp, NoteKind, RowItem, Widget};
@@ -16,6 +17,15 @@ pub struct Switches {
     pub other_statusline: bool,
     pub popup_needs_you: bool,
     pub popup_finished: bool,
+    /// Ask Anthropic for limits.
+    pub ask_anthropic: bool,
+}
+
+/// The last time Samo asked Anthropic for the limits, and what went wrong, if anything.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Asked {
+    pub at_ms: i64,
+    pub problem: Option<Problem>,
 }
 
 pub struct Input<'a> {
@@ -26,7 +36,12 @@ pub struct Input<'a> {
     /// Today's transcripts are still being read, so the figure isn't complete yet.
     pub counting: bool,
     pub limits: Option<Limits>,
+    /// `limits` holds a report (from the status line), not only limits reached: a window it leaves out isn't
+    /// applied to the account right now.
+    pub reported: bool,
     pub switches: Switches,
+    /// The last time Samo asked Anthropic, while Ask Anthropic for limits is on.
+    pub asked: Option<Asked>,
     /// The last thing that went wrong (a setting that couldn't be changed), said once on the page.
     pub problem: Option<String>,
     pub now_ms: i64,
@@ -95,14 +110,22 @@ pub fn badge(rows: &[(Row, Option<Tokens>)]) -> (u32, String) {
     )
 }
 
-/// The quick panel's load bar: the 5-hour window's use, while Plan limits is on. Unknown until Claude Code
-/// reports it, and after it resets.
+/// The quick panel's load bar, while Plan limits is on: the 5-hour window's use, or the weekly's while Anthropic
+/// applies no 5-hour limit (KJ's account near its weekly limit, 2026-11-06). Unknown until Claude Code reports
+/// it, and after it resets.
 pub fn badge_meter(plan_limits: bool, limits: Option<&Limits>, now_ms: i64) -> Option<BadgeMeter> {
-    plan_limits.then(|| BadgeMeter {
-        label: "5h".into(),
-        fraction: match limits {
-            Some(l) => reading(l.five_hour.as_ref(), l.observed_at_ms, now_ms),
-            None => Reading::unsupported(UnsupportedReason::NotReported),
+    plan_limits.then(|| match limits {
+        Some(l) if l.five_hour.is_none() && l.seven_day.is_some() => BadgeMeter {
+            label: "wk".into(),
+            fraction: reading(l.seven_day.as_ref(), l.observed_at_ms, now_ms),
+        },
+        Some(l) => BadgeMeter {
+            label: "5h".into(),
+            fraction: reading(l.five_hour.as_ref(), l.observed_at_ms, now_ms),
+        },
+        None => BadgeMeter {
+            label: "5h".into(),
+            fraction: Reading::unsupported(UnsupportedReason::NotReported),
         },
     })
 }
@@ -137,8 +160,10 @@ fn age(ms: i64) -> String {
     }
 }
 
+/// One window's meter. `name` is how its note says it: `5-hour`, `weekly`.
 fn limit_meter(
     label: &str,
+    name: &str,
     window: Option<&crate::limits::Window>,
     limits: &Limits,
     input: &Input,
@@ -162,12 +187,56 @@ fn limit_meter(
             "reset at {}; waiting for Claude Code to report again",
             (input.clock)(w.resets_at.saturating_mul(1_000))
         ),
+        // Claude Code reports a window whenever Anthropic sends it, so a report without it means there is none.
+        (_, None) if input.reported => format!(
+            "no {name} limit right now · as of {}",
+            (input.clock)(limits.observed_at_ms)
+        ),
         _ => "not reported by Claude Code yet".to_string(),
     };
     Widget::Meter {
         label: label.into(),
         fraction,
         note: Some(note),
+    }
+}
+
+/// What the page says about asking Anthropic, while the switch is on.
+fn asked_note(input: &Input) -> Widget {
+    let plain = |text: String| Widget::Note {
+        text,
+        kind: NoteKind::Plain,
+    };
+    let Some(asked) = &input.asked else {
+        return plain("Asking Anthropic for your limits…".into());
+    };
+    let at = (input.clock)(asked.at_ms);
+    let text = match &asked.problem {
+        None => {
+            return plain(
+                "Samo asks Anthropic for these every 5 minutes, with Claude Code's sign-in. A limit reached in any \
+                 session shows here at once."
+                    .into(),
+            );
+        }
+        Some(Problem::NoSignIn) => format!(
+            "Couldn't ask Anthropic at {at}: Claude Code isn't signed in with a Claude account. Samo tries again \
+             in 5 minutes."
+        ),
+        Some(Problem::Expired) => format!(
+            "Couldn't ask Anthropic at {at}: Claude Code's sign-in has expired. Samo never renews it; it asks again \
+             once Claude Code has, the next time you use it."
+        ),
+        Some(Problem::Refused { .. }) => format!(
+            "Anthropic didn't accept Claude Code's sign-in at {at}. Samo asks again once Claude Code signs in anew."
+        ),
+        Some(Problem::Failed(why)) => {
+            format!("Couldn't ask Anthropic at {at}: {why}. Samo tries again in 15 minutes.")
+        }
+    };
+    Widget::Note {
+        text,
+        kind: NoteKind::Error,
     }
 }
 
@@ -237,18 +306,35 @@ pub fn build(input: &Input) -> Vec<Widget> {
         title: "PLAN LIMITS".into(),
         about: None,
     });
-    match (s.plan_limits, input.limits) {
+    match (s.plan_limits || s.ask_anthropic, input.limits) {
         (true, Some(limits)) => {
-            view.push(limit_meter("5-hour", limits.five_hour.as_ref(), &limits, input));
-            view.push(limit_meter("Weekly", limits.seven_day.as_ref(), &limits, input));
-            view.push(Widget::Note {
-                text: "Claude Code reports your limits only when it replies in a terminal. In Cursor, VS \
-                       Code, the desktop app or claude -p it doesn't, so the figures say how old they are. A \
-                       limit reached in any session shows here at once."
-                    .into(),
-                kind: NoteKind::Plain,
+            view.push(limit_meter(
+                "5-hour",
+                "5-hour",
+                limits.five_hour.as_ref(),
+                &limits,
+                input,
+            ));
+            view.push(limit_meter(
+                "Weekly",
+                "weekly",
+                limits.seven_day.as_ref(),
+                &limits,
+                input,
+            ));
+            view.push(if s.ask_anthropic {
+                asked_note(input)
+            } else {
+                Widget::Note {
+                    text: "Claude Code reports your limits only when it replies in a terminal. In Cursor, VS \
+                           Code, the desktop app or claude -p it doesn't, so the figures say how old they are. A \
+                           limit reached in any session shows here at once."
+                        .into(),
+                    kind: NoteKind::Plain,
+                }
             });
         }
+        (true, None) if s.ask_anthropic => view.push(asked_note(input)),
         (true, None) => view.push(Widget::Note {
             text: "Waiting for Claude Code to report your limits. They come with its next reply in a terminal \
                    (Pro and Max plans)."
@@ -284,6 +370,16 @@ pub fn build(input: &Input) -> Vec<Widget> {
             "Sets Claude Code's status line to show your limits. Claude Code then hides some footer hints."
                 .into()
         }),
+    });
+    view.push(Widget::Switch {
+        key: "ask_anthropic".into(),
+        label: "Ask Anthropic for limits".into(),
+        on: s.ask_anthropic,
+        note: Some(
+            "Every 5 minutes, with Claude Code's sign-in, so the figures stay current outside a terminal too. Samo \
+             only reads the sign-in; it never renews or changes it."
+                .into(),
+        ),
     });
     view.push(Widget::Switch {
         key: "popup_needs_you".into(),
@@ -354,6 +450,7 @@ mod tests {
                 cache_write: 200_000,
                 cache_read: 1_013_567,
             },
+            reported: true,
             limits: Some(Limits {
                 five_hour: Some(Window {
                     used_percentage: 34.0,
@@ -369,7 +466,9 @@ mod tests {
                 other_statusline: false,
                 popup_needs_you: true,
                 popup_finished: false,
+                ask_anthropic: false,
             },
+            asked: None,
             problem: None,
             now_ms: 1_500_000,
             clock: &clock,
@@ -419,10 +518,12 @@ mod tests {
             counting: false,
             split: Tokens::default(),
             limits: Some(limits),
+            reported: true,
             switches: Switches {
                 plan_limits: true,
                 ..Switches::default()
             },
+            asked: None,
             problem: None,
             now_ms: now,
             clock: &clock,
@@ -473,6 +574,176 @@ mod tests {
         assert_eq!(
             badge_meter(true, Some(&limits), 2_000_001).map(|m| m.fraction),
             Some(Reading::stopped(2_000_000))
+        );
+    }
+
+    /// KJ's report of 2026-11-06 22:47: near the weekly limit, Anthropic sent no 5-hour window at all.
+    #[test]
+    fn a_report_without_a_window_says_there_is_none() {
+        let minute = 60_000;
+        let now = 1_000 * minute;
+        let clock = |ms: i64| format!("t{}", ms / minute);
+        let weekly_only = Limits {
+            five_hour: None,
+            seven_day: Some(Window {
+                used_percentage: 94.0,
+                resets_at: 9_000 * 60,
+                observed_at_ms: None,
+            }),
+            observed_at_ms: now - 2 * minute,
+        };
+        let notes = |limits: Limits, reported: bool| -> Vec<String> {
+            let input = Input {
+                rows: &[],
+                tokens: Reading::unsupported(UnsupportedReason::NotReported),
+                counting: false,
+                split: Tokens::default(),
+                limits: Some(limits),
+                reported,
+                switches: Switches {
+                    plan_limits: true,
+                    ..Switches::default()
+                },
+                asked: None,
+                problem: None,
+                now_ms: now,
+                clock: &clock,
+            };
+            build(&input)
+                .into_iter()
+                .filter_map(|w| match w {
+                    Widget::Meter { note, .. } => note,
+                    _ => None,
+                })
+                .collect()
+        };
+        assert_eq!(
+            notes(weekly_only, true),
+            vec![
+                "no 5-hour limit right now · as of t998".to_string(),
+                "resets t9000 · as of t998".to_string(),
+            ]
+        );
+        // Only a limit reached, from a transcript, with no report: nothing is known about the other window.
+        let reached = Limits {
+            five_hour: Some(Window {
+                used_percentage: 100.0,
+                resets_at: 1_100 * 60,
+                observed_at_ms: Some(now - minute),
+            }),
+            seven_day: None,
+            observed_at_ms: now - minute,
+        };
+        assert_eq!(
+            notes(reached, false)[1],
+            "not reported by Claude Code yet".to_string()
+        );
+
+        // The quick panel shows the weekly while there's no 5-hour limit.
+        let meter = badge_meter(true, Some(&weekly_only), now);
+        assert_eq!(meter.as_ref().map(|m| m.label.as_str()), Some("wk"));
+        assert_eq!(
+            meter.map(|m| m.fraction),
+            Some(Reading::available(0.94, now - 2 * minute))
+        );
+    }
+
+    #[test]
+    fn asking_anthropic_says_how_it_went() {
+        let minute = 60_000;
+        let now = 1_000 * minute;
+        let clock = |ms: i64| format!("t{}", ms / minute);
+        let page = |limits: Option<Limits>, asked: Option<Asked>| -> Vec<Widget> {
+            let input = Input {
+                rows: &[],
+                tokens: Reading::unsupported(UnsupportedReason::NotReported),
+                counting: false,
+                split: Tokens::default(),
+                limits,
+                reported: limits.is_some(),
+                switches: Switches {
+                    ask_anthropic: true,
+                    ..Switches::default()
+                },
+                asked,
+                problem: None,
+                now_ms: now,
+                clock: &clock,
+            };
+            build(&input)
+        };
+        let notes = |page: Vec<Widget>| -> Vec<(String, NoteKind)> {
+            page.into_iter()
+                .filter_map(|w| match w {
+                    Widget::Note { text, kind } => Some((text, kind)),
+                    _ => None,
+                })
+                .collect()
+        };
+        // On, before the first answer: limits show without the status line, and it says it's asking.
+        let first = notes(page(None, None));
+        assert_eq!(first[1].0, "Asking Anthropic for your limits…");
+        let answer = Limits {
+            five_hour: None,
+            seven_day: Some(Window {
+                used_percentage: 95.0,
+                resets_at: 9_000 * 60,
+                observed_at_ms: None,
+            }),
+            observed_at_ms: now,
+        };
+        let answered = page(
+            Some(answer),
+            Some(Asked {
+                at_ms: now,
+                problem: None,
+            }),
+        );
+        assert!(
+            answered
+                .iter()
+                .any(|w| matches!(w, Widget::Meter { note: Some(n), .. }
+            if n == "no 5-hour limit right now · as of t1000"))
+        );
+        assert!(
+            notes(answered)[1]
+                .0
+                .starts_with("Samo asks Anthropic for these every 5 minutes")
+        );
+        let expired = notes(page(
+            Some(answer),
+            Some(Asked {
+                at_ms: now,
+                problem: Some(Problem::Expired),
+            }),
+        ));
+        assert_eq!(expired[1].1, NoteKind::Error);
+        assert!(
+            expired[1]
+                .0
+                .contains("sign-in has expired. Samo never renews it")
+        );
+        let failed = notes(page(
+            None,
+            Some(Asked {
+                at_ms: now,
+                problem: Some(Problem::Failed("Anthropic answered 500".into())),
+            }),
+        ));
+        assert_eq!(
+            failed[1].0,
+            "Couldn't ask Anthropic at t1000: Anthropic answered 500. Samo tries again in 15 minutes."
+        );
+        // Its own switch, and the quick panel's bar, follow it with Plan limits off.
+        assert!(
+            page(None, None)
+                .iter()
+                .any(|w| matches!(w, Widget::Switch { key, on: true, .. }
+            if key == "ask_anthropic"))
+        );
+        assert_eq!(
+            badge_meter(true, Some(&answer), now).map(|m| m.label),
+            Some("wk".to_string())
         );
     }
 

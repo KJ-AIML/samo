@@ -4,12 +4,14 @@
 //! both write a small file into the extension's data folder and exit at once. Samo runs `samo-claude serve`,
 //! which watches those files and the day's transcripts and sends Samo the page, the badge and pop-ups.
 //!
-//! Everything here is built on Claude Code's documented hooks and status line. It never goes online.
+//! Everything here is built on Claude Code's documented hooks and status line. It goes online only while Ask
+//! Anthropic for limits is on, and only in `online`.
 
 pub mod ancestry;
 pub mod connection;
 pub mod hook;
 pub mod limits;
+pub mod online;
 pub mod paths;
 pub mod popups;
 pub mod serve;
