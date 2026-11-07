@@ -2,6 +2,7 @@
 // Samo, and none can take it down when closed (ADR-006).
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
+mod app_icons;
 mod appearance;
 mod art;
 mod assets;
