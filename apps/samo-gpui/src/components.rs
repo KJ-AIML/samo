@@ -27,14 +27,6 @@ fn shadow(y: f32, blur: f32, spread: f32, color: Hsla) -> BoxShadow {
     }
 }
 
-/// `--shadow-card`: soft, tinted with Ink, never black on white.
-pub fn shadow_card() -> Vec<BoxShadow> {
-    vec![
-        shadow(1.0, 2.0, 0.0, p().shade_2),
-        shadow(14.0, 30.0, -18.0, p().shade_3),
-    ]
-}
-
 /// `--shadow-pop`: a dialog, a lifted card.
 pub fn shadow_pop() -> Vec<BoxShadow> {
     vec![
@@ -216,7 +208,8 @@ pub fn tip(text: SharedString, cx: &mut App) -> AnyView {
     cx.new(|_| Tooltip(text)).into()
 }
 
-/// A white card with a hairline ring and `--shadow-card`.
+/// A card: its own surface and a hairline ring. No shadow: a ring already lifts it, and only what floats (a menu, a
+/// dialog, a tooltip) casts one.
 pub fn card() -> Div {
     let pal = p();
     div()
@@ -229,7 +222,6 @@ pub fn card() -> Div {
         .bg(pal.card)
         .border_1()
         .border_color(pal.hairline)
-        .shadow(shadow_card())
 }
 
 /// A card's head: its `h2`, then (pushed right) a count and anything else that belongs to it.

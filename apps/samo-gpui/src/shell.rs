@@ -5,7 +5,7 @@
 
 use crate::art::{
     Mood, Who, cell, dashed_rule, dial_chip, dither_block, dot_number, dot_width, led_meter,
-    logo_mark, measure_grid,
+    logo_mark,
 };
 use crate::charts::LineChart;
 use crate::components::*;
@@ -386,8 +386,6 @@ impl SamoWorkspaceApp {
                     .px(px(10.0))
                     .rounded(px(R_SHELL - 2.0))
                     .bg(pal.shell)
-                    .border_1()
-                    .border_color(pal.hairline)
                     .child(row(
                         Who::Samo,
                         samo_mood(frame),
@@ -469,10 +467,7 @@ impl SamoWorkspaceApp {
                     .flex_col()
                     .rounded(px(R_STAGE))
                     .bg(pal.stage)
-                    .border_1()
-                    .border_color(pal.hairline)
                     .overflow_hidden()
-                    .child(measure_grid(320.0))
                     .child(
                         div()
                             .flex_shrink_0()
@@ -1152,7 +1147,6 @@ pub(crate) fn glass_panel() -> Div {
         .bg(pal.glass)
         .border_1()
         .border_color(pal.glass_line)
-        .shadow(shadow_card())
         .flex()
         .flex_col()
         .overflow_hidden()
