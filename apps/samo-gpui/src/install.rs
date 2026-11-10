@@ -189,19 +189,41 @@ mod windows {
         let dir = install_dir().ok_or("Windows didn't say where this user's programs go")?;
         fs::create_dir_all(&dir).map_err(|e| format!("couldn't make {}: {e}", dir.display()))?;
         let to = dir.join("Samo.exe");
-        fs::copy(&exe, &to).map_err(|e| format!("couldn't copy Samo to {}: {e}", dir.display()))?;
+        copy_replacing(&exe, &to)
+            .map_err(|e| format!("couldn't copy Samo to {}: {e}", dir.display()))?;
         if let Some(release) = exe
             .parent()
             .map(|p| p.join("release.toml"))
             .filter(|p| p.is_file())
         {
-            let _ = fs::copy(release, dir.join("release.toml"));
+            let _ = copy_replacing(&release, &dir.join("release.toml"));
         }
         let shortcut = shortcut_from(|name| std::env::var_os(name))
             .ok_or_else(|| "no Start menu folder".to_string())
             .and_then(|lnk| make_shortcut(&lnk, &to))
             .err();
         Ok((to, shortcut))
+    }
+
+    /// Copies `from` over `to`, read-only or not. Run straight from its zip, Samo is a read-only copy Explorer put in
+    /// Temp, and `fs::copy` keeps that flag: the install it made could then never be replaced ("Access is denied").
+    pub fn copy_replacing(from: &Path, to: &Path) -> std::io::Result<()> {
+        if to.exists() {
+            writable(to)?;
+        }
+        fs::copy(from, to)?;
+        writable(to)
+    }
+
+    /// Clears Windows' read-only flag. (Clippy's lint is about Unix, where this would let anyone write.)
+    #[allow(clippy::permissions_set_readonly_false)]
+    fn writable(path: &Path) -> std::io::Result<()> {
+        let mut perms = fs::metadata(path)?.permissions();
+        if perms.readonly() {
+            perms.set_readonly(false);
+            fs::set_permissions(path, perms)?;
+        }
+        Ok(())
     }
 
     /// Makes the shortcut at `lnk` to `target`, through PowerShell's `WScript.Shell` (by full path, script on stdin).
@@ -424,5 +446,37 @@ mod tests {
         );
         assert_eq!(after_from(&args(&["Samo.exe"])), None);
         assert_eq!(after_from(&args(&["Samo.exe", AFTER, "x", "1"])), None);
+    }
+
+    /// Run straight from its zip, Samo is a read-only copy Explorer put in Temp. Installed from there, it must
+    /// replace an earlier read-only install, and leave one the next install can replace.
+    #[cfg(windows)]
+    #[test]
+    fn a_read_only_samo_installs_over_a_read_only_one() -> Result<(), String> {
+        let dir = tempfile::tempdir().map_err(|e| e.to_string())?;
+        let read_only = |path: &Path, text: &str| -> Result<(), String> {
+            std::fs::write(path, text).map_err(|e| e.to_string())?;
+            let mut perms = std::fs::metadata(path)
+                .map_err(|e| e.to_string())?
+                .permissions();
+            perms.set_readonly(true);
+            std::fs::set_permissions(path, perms).map_err(|e| e.to_string())
+        };
+        let (from, to) = (dir.path().join("new.exe"), dir.path().join("Samo.exe"));
+        read_only(&from, "0.6.0")?;
+        read_only(&to, "0.5.0")?;
+
+        copy_replacing(&from, &to).map_err(|e| e.to_string())?;
+
+        assert_eq!(
+            std::fs::read_to_string(&to).map_err(|e| e.to_string())?,
+            "0.6.0"
+        );
+        let installed = std::fs::metadata(&to).map_err(|e| e.to_string())?;
+        assert!(
+            !installed.permissions().readonly(),
+            "the next install can replace it"
+        );
+        Ok(())
     }
 }
