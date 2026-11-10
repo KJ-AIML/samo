@@ -36,6 +36,91 @@ fn ring_buffer(sample_interval_ms: u64) -> TelemetryRingBuffer {
     .with_gap_after(GAP_AFTER_MS)
 }
 
+/// A core's kind, as Windows reports it (`EfficiencyClass`, read through `gdt-cpus`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Kind {
+    Performance,
+    /// Efficiency cores, the low-power ones too.
+    Efficiency,
+    Unknown,
+}
+
+/// Which of the CPUs Samo measures (`sysinfo`'s, in Windows' order) make up each performance and each efficiency
+/// core. A performance core can run two threads; Samo shows a core's load, as the Mac does.
+#[derive(Clone, Debug, Default, PartialEq)]
+struct CoreKinds {
+    performance: Vec<Vec<usize>>,
+    efficiency: Vec<Vec<usize>>,
+}
+
+/// Groups logical processors `(Windows' number, core, kind)` into cores, in Windows' order. None if anything is
+/// unknown: a kind Windows didn't name, a core whose threads disagree, or processors that aren't exactly the
+/// `measured` CPUs numbered 0 to `measured - 1`. Never a guess (R28).
+fn core_kinds_from(lps: &[(usize, u16, Kind)], measured: usize) -> Option<CoreKinds> {
+    if lps.is_empty() || lps.len() != measured {
+        return None;
+    }
+    let mut numbers: Vec<usize> = lps.iter().map(|lp| lp.0).collect();
+    numbers.sort_unstable();
+    if !numbers.iter().copied().eq(0..measured) {
+        return None;
+    }
+    // Cores in the order their first thread comes, each with its kind and threads.
+    let mut cores: Vec<(u16, Kind, Vec<usize>)> = Vec::new();
+    for &(number, core, kind) in lps {
+        if kind == Kind::Unknown {
+            return None;
+        }
+        match cores.iter_mut().find(|c| c.0 == core) {
+            Some(c) if c.1 != kind => return None,
+            Some(c) => c.2.push(number),
+            None => cores.push((core, kind, vec![number])),
+        }
+    }
+    let mut kinds = CoreKinds::default();
+    for (_, kind, threads) in cores {
+        match kind {
+            Kind::Performance => kinds.performance.push(threads),
+            _ => kinds.efficiency.push(threads),
+        }
+    }
+    Some(kinds)
+}
+
+/// Each core's load: the average of its threads'. None if a thread has no reading: unknown is never 0 (R3).
+fn core_loads(cores: &[Vec<usize>], usage: &[f32]) -> Option<Vec<f32>> {
+    cores
+        .iter()
+        .map(|threads| {
+            let loads = threads
+                .iter()
+                .map(|&t| usage.get(t).copied())
+                .collect::<Option<Vec<f32>>>()?;
+            (!loads.is_empty()).then(|| loads.iter().sum::<f32>() / loads.len() as f32)
+        })
+        .collect()
+}
+
+/// What Windows says about this PC's cores, for the `measured` CPUs `sysinfo` reads.
+fn detect_core_kinds(measured: usize) -> Option<CoreKinds> {
+    let info = gdt_cpus::CpuInfo::detect().ok()?;
+    let lps: Vec<(usize, u16, Kind)> = info
+        .lps
+        .iter()
+        .map(|lp| {
+            let kind = match lp.kind {
+                gdt_cpus::CoreKind::Performance => Kind::Performance,
+                gdt_cpus::CoreKind::Efficiency | gdt_cpus::CoreKind::LpEfficiency => {
+                    Kind::Efficiency
+                }
+                _ => Kind::Unknown,
+            };
+            (usize::from(lp.os_id), lp.core, kind)
+        })
+        .collect();
+    core_kinds_from(&lps, measured)
+}
+
 pub struct SystemCollector {
     sys: System,
     networks: Networks,
@@ -45,6 +130,8 @@ pub struct SystemCollector {
     last_sample_ms: Option<i64>,
     system_summary: SystemSummary,
     self_pid: u32,
+    /// Which CPUs make up each performance and each efficiency core; none if Windows didn't say.
+    core_kinds: Option<CoreKinds>,
 }
 
 impl SystemCollector {
@@ -53,7 +140,15 @@ impl SystemCollector {
         sys.refresh_all();
         let networks = Networks::new_with_refreshed_list();
         let disks = Disks::new_with_refreshed_list();
-        let system_summary = detect_system_summary(&sys);
+        let core_kinds = detect_core_kinds(sys.cpus().len());
+        let mut system_summary = detect_system_summary(&sys);
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let count = |cores: fn(&CoreKinds) -> &Vec<Vec<usize>>| match &core_kinds {
+            Some(kinds) => Reading::available(cores(kinds).len() as u32, now_ms),
+            None => Reading::unsupported(UnsupportedReason::SensorUnavailable),
+        };
+        system_summary.perf_cores = count(|k| &k.performance);
+        system_summary.eff_cores = count(|k| &k.efficiency);
         let mut collector = Self {
             sys,
             networks,
@@ -63,6 +158,7 @@ impl SystemCollector {
             last_sample_ms: None,
             system_summary,
             self_pid: std::process::id(),
+            core_kinds,
         };
         collector.sample_tick();
         collector
@@ -91,13 +187,25 @@ impl SystemCollector {
             let avg = cpus.iter().map(|c| c.cpu_usage()).sum::<f32>() / (cpus.len() as f32);
             Reading::available(avg, now_ms)
         };
+        let usage: Vec<f32> = cpus.iter().map(|c| c.cpu_usage()).collect();
+        let loads = |cores: &[Vec<usize>]| match core_loads(cores, &usage) {
+            Some(loads) => Reading::available(loads, now_ms),
+            None => Reading::unsupported(UnsupportedReason::SensorUnavailable),
+        };
+        let (cpu_perf_cores_pct, cpu_eff_cores_pct) = match &self.core_kinds {
+            Some(kinds) => (loads(&kinds.performance), loads(&kinds.efficiency)),
+            None => (
+                Reading::unsupported(UnsupportedReason::SensorUnavailable),
+                Reading::unsupported(UnsupportedReason::SensorUnavailable),
+            ),
+        };
 
         let point = TelemetryPoint {
             timestamp_ms: now_ms,
             generation: self.generation,
             cpu_overall_pct,
-            cpu_perf_cores_pct: not_on_windows(),
-            cpu_eff_cores_pct: not_on_windows(),
+            cpu_perf_cores_pct,
+            cpu_eff_cores_pct,
             memory: Reading::available(build_memory_breakdown(&self.sys), now_ms),
             disk_io: Reading::available(build_disk_io_rates(&self.disks, elapsed_secs), now_ms),
             network: Reading::available(build_network_rates(&self.networks, elapsed_secs), now_ms),
@@ -351,6 +459,80 @@ mod tests {
         assert_eq!(stopped, 1);
     }
 
+    /// KJ's i7-1255U, as Windows reports it: two performance cores of two threads each, then eight efficiency cores.
+    fn i7_1255u() -> Vec<(usize, u16, Kind)> {
+        let mut lps = vec![
+            (0, 0, Kind::Performance),
+            (1, 0, Kind::Performance),
+            (2, 1, Kind::Performance),
+            (3, 1, Kind::Performance),
+        ];
+        lps.extend((4..12).map(|lp| (lp, lp as u16 - 2, Kind::Efficiency)));
+        lps
+    }
+
+    #[test]
+    fn a_hybrid_cpus_threads_are_grouped_into_its_cores() {
+        let cores = core_kinds_from(&i7_1255u(), 12);
+        assert_eq!(
+            cores,
+            Some(CoreKinds {
+                performance: vec![vec![0, 1], vec![2, 3]],
+                efficiency: (4..12).map(|lp| vec![lp]).collect(),
+            })
+        );
+    }
+
+    #[test]
+    fn a_cores_load_is_its_threads_average() -> Result<(), String> {
+        let cores = core_kinds_from(&i7_1255u(), 12).ok_or("no cores")?;
+        let usage = [
+            100.0, 50.0, 0.0, 20.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0,
+        ];
+        assert_eq!(
+            core_loads(&cores.performance, &usage),
+            Some(vec![75.0, 10.0])
+        );
+        assert_eq!(
+            core_loads(&cores.efficiency, &usage),
+            Some(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0])
+        );
+        // A thread with no reading: the loads are unknown, never 0.
+        assert_eq!(core_loads(&cores.efficiency, &usage[..6]), None);
+        Ok(())
+    }
+
+    /// Never a guess (R28): a kind Windows didn't name, or processors that don't line up with the CPUs Samo measures,
+    /// and it is said unknown.
+    #[test]
+    fn what_windows_didnt_say_isnt_guessed() {
+        let mut unknown = i7_1255u();
+        unknown[5].2 = Kind::Unknown;
+        assert_eq!(core_kinds_from(&unknown, 12), None);
+        // Fewer processors than CPUs measured, or numbered otherwise.
+        assert_eq!(core_kinds_from(&i7_1255u(), 16), None);
+        let mut renumbered = i7_1255u();
+        renumbered[0].0 = 40;
+        assert_eq!(core_kinds_from(&renumbered, 12), None);
+        // A core whose threads disagree.
+        let mut mixed = i7_1255u();
+        mixed[1].2 = Kind::Efficiency;
+        assert_eq!(core_kinds_from(&mixed, 12), None);
+        assert_eq!(core_kinds_from(&[], 0), None);
+    }
+
+    /// A CPU of one kind (most desktops and servers) has only performance cores, each with its load.
+    #[test]
+    fn a_cpu_of_one_kind_has_performance_cores_only() -> Result<(), String> {
+        let lps: Vec<(usize, u16, Kind)> = (0..8)
+            .map(|lp| (lp, lp as u16 / 2, Kind::Performance))
+            .collect();
+        let cores = core_kinds_from(&lps, 8).ok_or("no cores")?;
+        assert_eq!(cores.performance.len(), 4);
+        assert!(cores.efficiency.is_empty());
+        Ok(())
+    }
+
     #[test]
     fn readings_are_real_or_said_unsupported() -> Result<(), String> {
         let mut collector = SystemCollector::new(1000);
@@ -361,12 +543,23 @@ mod tests {
         assert!(says_unsupported(&memory.wired_bytes));
         assert!(says_unsupported(&memory.compressed_bytes));
         assert!(says_unsupported(&memory.cached_bytes));
-        assert!(says_unsupported(&point.cpu_perf_cores_pct));
-        assert!(says_unsupported(&point.cpu_eff_cores_pct));
 
         let snapshot = collector.snapshot(true, "", "cpu");
-        assert!(says_unsupported(&snapshot.system.perf_cores));
-        assert!(says_unsupported(&snapshot.system.eff_cores));
+        // Cores of each kind: as many loads as Windows said cores, or said unknown together.
+        let per_core = [
+            (&snapshot.system.perf_cores, &point.cpu_perf_cores_pct),
+            (&snapshot.system.eff_cores, &point.cpu_eff_cores_pct),
+        ];
+        for (count, loads) in per_core {
+            match (count.as_value(), loads.as_value()) {
+                (Some(&n), Some(loads)) => {
+                    assert_eq!(loads.len(), n as usize);
+                    assert!(loads.iter().all(|l| (0.0..=100.0).contains(l)));
+                }
+                (None, None) => {}
+                other => return Err(format!("count and loads disagree: {other:?}")),
+            }
+        }
         assert!(snapshot.system.logical_cores > 0);
         assert!(snapshot.processes.iter().any(|p| p.is_self));
         // Paths leave samo-windows in the one shape (ADR-006 R26).

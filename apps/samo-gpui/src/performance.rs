@@ -9,7 +9,7 @@ use crate::shell::{Head, Page};
 use crate::theme::*;
 use crate::{Frame, SamoWorkspaceApp};
 use gpui::{Div, FontWeight, IntoElement, ParentElement, Styled, div, prelude::*, px};
-use samo_primitives::Reading;
+use samo_primitives::{Reading, UnsupportedReason};
 
 /// History window shown in the CPU chart (samples arrive every ~1.2 s).
 const CPU_WINDOW: usize = 120;
@@ -160,6 +160,14 @@ impl SamoWorkspaceApp {
             Reading::Available { value, .. } => value.clone(),
             _ => Vec::new(),
         };
+        // Not "not sampled yet": Windows was asked and couldn't tell (Windows' collector says it once, at start).
+        let cores_unknown = matches!(
+            t.system.perf_cores,
+            Reading::Unsupported {
+                reason: UnsupportedReason::SensorUnavailable
+                    | UnsupportedReason::PlatformNotSupported
+            }
+        );
 
         let cpu_card = card()
             .child(card_head(
@@ -204,9 +212,12 @@ impl SamoWorkspaceApp {
                 None,
                 Some(mono_label("load, %", pal.text_2).into_any_element()),
             ))
-            .child(if p_cores.is_empty() && e_cores.is_empty() && cfg!(windows) {
-                // Windows doesn't say which cores are which, so this never fills in (ADR-006 R28).
-                empty("Windows doesn't say which cores are for performance and which for efficiency; the CPU chart above covers all of them.")
+            .child(if p_cores.is_empty() && e_cores.is_empty() && cfg!(windows) && cores_unknown {
+                // Windows didn't tell this PC's cores apart (or not in a way Samo could match): said, not guessed
+                // (ADR-006 R28).
+                empty("Windows didn't say which cores are for performance and which for efficiency; the CPU chart above covers all of them.")
+            } else if p_cores.is_empty() && e_cores.is_empty() && cfg!(windows) {
+                loading("Waiting for this PC to report load per core…")
             } else if p_cores.is_empty() && e_cores.is_empty() {
                 loading("Waiting for this Mac to report load per core…")
             } else {
