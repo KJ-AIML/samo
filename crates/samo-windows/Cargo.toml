@@ -23,6 +23,10 @@ trash = { version = "5.2.9", default-features = false, features = ["coinit_apart
 winapi-util = "0.1.11"
 filesize = "0.2"
 windows-registry = "0.5.3"
+# Which cores are for performance and which for efficiency (Windows' EfficiencyClass), for the Cores card. KJ chose it
+# on 2026-11-10: a safe crate over GetLogicalProcessorInformationEx, whose own dependencies (windows, raw-cpuid,
+# bitflags) were already in the lockfile. Pinned, as it is young.
+gdt-cpus = { version = "=0.2606.1", default-features = false }
 
 [dev-dependencies]
 tempfile.workspace = true
