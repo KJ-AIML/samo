@@ -10,6 +10,8 @@ pub fn clamp_sample_interval_ms(interval_ms: u64) -> u64 {
 pub struct TelemetryRingBuffer {
     capacity: usize,
     expected_interval_ms: i64,
+    /// A sample later than this after the one before means the sensor stopped.
+    gap_after_ms: i64,
     points: VecDeque<TelemetryPoint>,
 }
 
@@ -20,16 +22,25 @@ impl TelemetryRingBuffer {
         Self {
             capacity: cap,
             expected_interval_ms: interval,
+            gap_after_ms: interval.saturating_mul(2),
             points: VecDeque::with_capacity(cap),
         }
     }
 
-    /// R3: Appends a telemetry sample, inserting an explicit `Reading::Stopped` gap point if
-    /// more than `2 * expected_interval_ms` elapsed since the previous sample.
+    /// Waits `gap_after_ms` (at least twice the interval) before calling a late sample a gap, for a platform whose
+    /// readings can take seconds when the computer is busy. A late sample is still a measurement.
+    pub fn with_gap_after(mut self, gap_after_ms: u64) -> Self {
+        let gap_after = i64::try_from(gap_after_ms).unwrap_or(i64::MAX);
+        self.gap_after_ms = gap_after.max(self.expected_interval_ms.saturating_mul(2));
+        self
+    }
+
+    /// R3: Appends a telemetry sample, inserting an explicit `Reading::Stopped` gap point if more than the gap's
+    /// time (`2 * expected_interval_ms` unless `with_gap_after` says longer) elapsed since the previous sample.
     pub fn append_sample(&mut self, point: TelemetryPoint) {
         if let Some(last) = self.points.back() {
             let delta = point.timestamp_ms.saturating_sub(last.timestamp_ms);
-            if delta > self.expected_interval_ms.saturating_mul(2) {
+            if delta > self.gap_after_ms {
                 let gap_ts = last.timestamp_ms.saturating_add(self.expected_interval_ms);
                 let gap_point = TelemetryPoint {
                     timestamp_ms: gap_ts,
@@ -106,5 +117,20 @@ mod tests {
             items[0].cpu_perf_cores_pct,
             Reading::unsupported(UnsupportedReason::SensorUnavailable)
         );
+    }
+
+    #[test]
+    fn a_buffer_can_wait_longer_before_calling_it_a_gap() {
+        let cpu = |ts| dummy_point(ts, 1, Reading::available(50.0, ts));
+        let mut buf = TelemetryRingBuffer::new(100, 1000).with_gap_after(5_000);
+        buf.append_sample(cpu(1_000));
+        // 3.3 s later: late, but measured.
+        buf.append_sample(cpu(4_300));
+        assert_eq!(buf.len(), 2, "a late sample is not a gap");
+        // 6 s later: the sensor stopped.
+        buf.append_sample(cpu(10_300));
+        let items = buf.snapshot_vec();
+        assert_eq!(items.len(), 4);
+        assert_eq!(items[2].cpu_overall_pct, Reading::stopped(5_300));
     }
 }

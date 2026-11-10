@@ -22,6 +22,20 @@ fn is_loopback(interface: &str) -> bool {
     interface.to_ascii_lowercase().contains("loopback")
 }
 
+/// How long Samo waits for a sample before the charts show a gap. With every core busy, one reading here took up to
+/// 2.1 s, so samples came about 3.3 s apart. Under the Mac's rule (twice the interval, 2 s), nearly every sample
+/// became a gap and the charts went blank. A late sample is still a measurement, since `sysinfo` averages over the
+/// time since the last one. Sleep, or a sampler that stopped, is a gap.
+const GAP_AFTER_MS: u64 = 5_000;
+
+fn ring_buffer(sample_interval_ms: u64) -> TelemetryRingBuffer {
+    TelemetryRingBuffer::new(
+        MAX_RING_BUFFER_SAMPLES,
+        sample_interval_ms.max(DEFAULT_SAMPLE_INTERVAL_MS),
+    )
+    .with_gap_after(GAP_AFTER_MS)
+}
+
 pub struct SystemCollector {
     sys: System,
     networks: Networks,
@@ -44,10 +58,7 @@ impl SystemCollector {
             sys,
             networks,
             disks,
-            ring_buffer: TelemetryRingBuffer::new(
-                MAX_RING_BUFFER_SAMPLES,
-                sample_interval_ms.max(DEFAULT_SAMPLE_INTERVAL_MS),
-            ),
+            ring_buffer: ring_buffer(sample_interval_ms),
             generation: 0,
             last_sample_ms: None,
             system_summary,
@@ -309,6 +320,35 @@ mod tests {
                 reason: UnsupportedReason::PlatformNotSupported
             }
         )
+    }
+
+    /// With every core busy, a reading here took up to 2.1 s, so samples came 3.3 s apart: under the old 2 s rule
+    /// nearly every one was called a gap, and the charts went blank. A late sample is still measured.
+    #[test]
+    fn a_late_sample_on_a_busy_pc_is_not_a_gap() {
+        let point = |ts: i64| TelemetryPoint {
+            timestamp_ms: ts,
+            generation: 1,
+            cpu_overall_pct: Reading::available(97.0, ts),
+            cpu_perf_cores_pct: not_on_windows(),
+            cpu_eff_cores_pct: not_on_windows(),
+            memory: not_on_windows(),
+            disk_io: not_on_windows(),
+            network: not_on_windows(),
+        };
+        let mut buffer = ring_buffer(DEFAULT_SAMPLE_INTERVAL_MS);
+        for ts in [0, 3_300, 6_600, 9_900] {
+            buffer.append_sample(point(ts));
+        }
+        assert_eq!(buffer.len(), 4, "no gaps between late samples");
+        // Asleep, or Samo stopped sampling: that is a gap.
+        buffer.append_sample(point(9_900 + 6_000));
+        let stopped = buffer
+            .snapshot_vec()
+            .iter()
+            .filter(|p| matches!(p.cpu_overall_pct, Reading::Stopped { .. }))
+            .count();
+        assert_eq!(stopped, 1);
     }
 
     #[test]
