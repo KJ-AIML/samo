@@ -746,7 +746,7 @@ impl SamoWorkspaceApp {
                         // Its app's icon (a helper wears its app's), so "com.apple.WebKit…" is told apart at a glance.
                         .children(crate::processes::app_icon(
                             &self.hub.icons,
-                            samo_domain::app_bundle_of(&proc_row.executable_path),
+                            samo_domain::app_of_on(&proc_row.executable_path, cfg!(windows)),
                             20.0,
                         ))
                         .child(

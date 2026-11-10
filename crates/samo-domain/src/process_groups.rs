@@ -24,6 +24,44 @@ pub fn app_name_of(bundle: &str) -> &str {
     name.strip_suffix(".app").unwrap_or(name)
 }
 
+/// The app an executable belongs to, on either OS. On the Mac it is the `.app` folder the executable sits in
+/// (`app_bundle_of`). On Windows it is the `.exe` itself, in Samo's one path shape (`C:/…/Arc.exe`, R26), so all
+/// the processes one program runs (a browser's eight) roll up into it. Windows has no folder that holds an app, so
+/// helpers that run other `.exe` files stay apart.
+pub fn app_of_on(executable_path: &str, windows: bool) -> Option<&str> {
+    if !windows {
+        return app_bundle_of(executable_path);
+    }
+    let bytes = executable_path.as_bytes();
+    let on_a_drive =
+        bytes.len() > 3 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && bytes[2] == b'/';
+    let file = executable_path.rsplit('/').next().unwrap_or("");
+    let is_exe = file.len() > ".exe".len()
+        && file
+            .get(file.len() - ".exe".len()..)
+            .is_some_and(|ext| ext.eq_ignore_ascii_case(".exe"));
+    (on_a_drive && is_exe).then_some(executable_path)
+}
+
+/// An app's name on either OS: the Mac's folder without `.app`, Windows' file without `.exe` (`Arc.exe` is `Arc`).
+/// Windows' own description of the program, where it has one, is the icons worker's to add.
+pub fn app_name_of_on(app: &str, windows: bool) -> &str {
+    if !windows {
+        return app_name_of(app);
+    }
+    let file = app.rsplit('/').next().unwrap_or(app);
+    match file.len().checked_sub(".exe".len()) {
+        Some(stem)
+            if file
+                .get(stem..)
+                .is_some_and(|e| e.eq_ignore_ascii_case(".exe")) =>
+        {
+            file.get(..stem).unwrap_or(file)
+        }
+        _ => file,
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum GroupKey {
     /// All the processes of one app, by the app's folder.
@@ -65,17 +103,30 @@ fn energy_rank(e: EnergyImpact) -> u8 {
 /// leaves every group a background one). Every row lands in exactly one group, and every total covers all of the
 /// group's members, which is why `rows` must be every process and not only the busiest.
 pub fn group_processes(rows: &[ProcessRow], application_pids: &HashSet<u32>) -> Vec<ProcessGroup> {
+    group_processes_on(rows, application_pids, false)
+}
+
+/// `group_processes` on either OS: apps are the Mac's `.app` folders, or Windows' `.exe` files (`app_of_on`).
+/// `application_pids` is, on Windows, the processes with a window on the taskbar.
+pub fn group_processes_on(
+    rows: &[ProcessRow],
+    application_pids: &HashSet<u32>,
+    windows: bool,
+) -> Vec<ProcessGroup> {
     let mut groups: Vec<ProcessGroup> = Vec::new();
     let mut at: HashMap<GroupKey, usize> = HashMap::new();
     for (i, row) in rows.iter().enumerate() {
-        let bundle = app_bundle_of(&row.executable_path);
+        let bundle = app_of_on(&row.executable_path, windows);
         let key = bundle.map_or(GroupKey::Process(row.identity.pid), |b| {
             GroupKey::App(b.to_string())
         });
         let g = *at.entry(key.clone()).or_insert_with(|| {
             groups.push(ProcessGroup {
                 key,
-                name: bundle.map_or_else(|| row.name.clone(), |b| app_name_of(b).to_string()),
+                name: bundle.map_or_else(
+                    || row.name.clone(),
+                    |b| app_name_of_on(b, windows).to_string(),
+                ),
                 bundle: bundle.map(str::to_string),
                 application: false,
                 members: Vec::new(),
@@ -224,6 +275,69 @@ mod tests {
         assert_eq!(app_name_of("/Applications/Grok Bot.app"), "Grok Bot");
         assert_eq!(app_name_of("Finder.app"), "Finder");
         assert_eq!(app_name_of("/odd/folder"), "folder");
+    }
+
+    const ARC: &str = "C:/Users/kj/AppData/Local/Programs/Arc/Arc.exe";
+    const SVCHOST: &str = "C:/Windows/System32/svchost.exe";
+
+    #[test]
+    fn on_windows_an_app_is_its_exe() {
+        assert_eq!(app_of_on(ARC, true), Some(ARC));
+        assert_eq!(
+            app_of_on("D:/Tools/WEIRD.EXE", true),
+            Some("D:/Tools/WEIRD.EXE")
+        );
+        for path in [
+            "",
+            // no exe: a protected process Windows doesn't show the path of
+            "C:/Windows/System32/ntoskrnl",
+            "C:/Users/kj/notes.exe.txt",
+            // not in Samo's one path shape
+            "Arc.exe",
+            "/Applications/Arc.app/Contents/MacOS/Arc",
+            "C:/.exe",
+        ] {
+            assert_eq!(app_of_on(path, true), None, "{path:?}");
+        }
+        // The Mac's rule is the Mac's: nothing changes there (R25).
+        assert_eq!(app_of_on(GROK, false), Some("/Applications/Grok Bot.app"));
+        assert_eq!(app_of_on(ARC, false), None);
+    }
+
+    #[test]
+    fn on_windows_an_app_is_named_by_its_exe() {
+        assert_eq!(app_name_of_on(ARC, true), "Arc");
+        assert_eq!(app_name_of_on("D:/Tools/WEIRD.EXE", true), "WEIRD");
+        assert_eq!(
+            app_name_of_on("/Applications/Grok Bot.app", false),
+            "Grok Bot"
+        );
+    }
+
+    #[test]
+    fn on_windows_the_processes_of_one_exe_roll_up() {
+        let rows = vec![
+            row(4100, "Arc.exe", ARC, 10.0, 600),
+            row(4200, "Arc.exe", ARC, 5.0, 400),
+            row(900, "svchost.exe", SVCHOST, 0.5, 50),
+            row(4, "System", "", 1.0, 10),
+            row(901, "svchost.exe", SVCHOST, 0.5, 70),
+        ];
+        let groups = group_processes_on(&rows, &HashSet::from([4200]), true);
+        assert_eq!(groups.len(), 3, "Arc, svchost, System");
+        assert_eq!(groups[0].key, GroupKey::App(ARC.into()));
+        assert_eq!(groups[0].name, "Arc");
+        assert_eq!(groups[0].bundle.as_deref(), Some(ARC));
+        assert_eq!(groups[0].members, vec![0, 1]);
+        assert_eq!(groups[0].memory_bytes, 1_000);
+        assert!(groups[0].application, "one of its processes has a window");
+        assert_eq!(groups[1].members, vec![2, 4]);
+        assert!(!groups[1].application);
+        // A process with no exe path stays alone, under its own name.
+        assert_eq!(groups[2].key, GroupKey::Process(4));
+        assert_eq!(groups[2].name, "System");
+        // The Mac's grouping of the same rows is unchanged: no `.app`, so every process alone.
+        assert_eq!(group_processes(&rows, &HashSet::new()).len(), 5);
     }
 
     fn sample() -> Vec<ProcessRow> {

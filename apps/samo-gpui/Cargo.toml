@@ -44,6 +44,10 @@ objc2-foundation = { workspace = true, features = ["NSArray", "NSData", "NSStrin
 [target.'cfg(windows)'.dependencies]
 samo-windows.workspace = true
 windows-registry = "0.5.3"
+# Processes' app icons (app_icons.rs, exe_icon.rs): an .exe's own icon decoded from its resources (`ico`, image's
+# own decoder, no new crate), and which processes have a window on the taskbar (winsafe, as samo-extensions has).
+image = { workspace = true, features = ["ico"] }
+winsafe = { version = "0.0.29", features = ["user", "dwm"] }
 
 [dev-dependencies]
 tempfile.workspace = true

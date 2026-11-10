@@ -17,7 +17,7 @@ pub use packing::{PackInput, pack_circles};
 pub use paths::{is_absolute_path, normalize_path, scan_root_on};
 pub use process::{filter_and_sort_processes, verify_identity};
 pub use process_groups::{
-    GroupKey, ProcessGroup, app_bundle_of, app_name_of, group_processes, row_matches, sort_groups,
-    visible_members,
+    GroupKey, ProcessGroup, app_bundle_of, app_name_of, app_name_of_on, app_of_on, group_processes,
+    group_processes_on, row_matches, sort_groups, visible_members,
 };
 pub use telemetry::{TelemetryRingBuffer, clamp_sample_interval_ms};

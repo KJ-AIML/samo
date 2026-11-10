@@ -4615,6 +4615,7 @@ dependencies = [
  "tempfile",
  "tray-icon",
  "windows-registry 0.5.3",
+ "winsafe 0.0.29",
 ]
 
 [[package]]
