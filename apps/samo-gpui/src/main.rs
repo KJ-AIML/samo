@@ -9,6 +9,8 @@ mod assets;
 mod charts;
 mod components;
 mod disk_view;
+#[cfg(windows)]
+mod exe_icon;
 mod ext_view;
 mod extensions_page;
 mod finish_update;

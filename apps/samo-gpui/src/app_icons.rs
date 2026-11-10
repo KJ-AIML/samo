@@ -1,10 +1,12 @@
-//! The icons of apps, and which processes are applications in the Dock (macOS). Both are things only the OS knows,
-//! so AppKit is asked, through safe bindings (R29: no `unsafe`), on a worker thread of this module's own and never
-//! on the UI thread: a first icon takes a few milliseconds and the list of applications more. The page asks
-//! `icon()` and gets what is ready, or nothing and a load queued; the worker wakes the UI when something arrives.
+//! The icons of apps, and which processes are applications (the Mac's Dock; Windows' taskbar). Both are things only
+//! the OS knows, so it is asked, through safe bindings (R29: no `unsafe`), on a worker thread of this module's own
+//! and never on the UI thread: a first icon takes a few milliseconds and the list of applications more. The page
+//! asks `icon()` and gets what is ready, or nothing and a load queued; the worker wakes the UI when something
+//! arrives.
 //!
-//! Windows has none of this yet. `ON_THIS_OS` says so and the page draws no icons there (ADR-006 R28: said, never
-//! faked).
+//! - **The Mac:** AppKit, for an app's `.app` folder.
+//! - **Windows:** the `.exe`'s own icon, or its Store package's logo (`exe_icon`), and its description as the app's
+//!   name. Applications are the processes with a window on the taskbar.
 
 use futures::channel::mpsc::UnboundedSender;
 use gpui::Image;
@@ -12,14 +14,14 @@ use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 
-/// Whether this OS can supply icons and the Dock's applications.
-pub const ON_THIS_OS: bool = cfg!(target_os = "macos");
+/// Whether this OS can supply icons and its applications.
+pub const ON_THIS_OS: bool = cfg!(any(target_os = "macos", windows));
 
-/// More than a Mac has apps running; the cache stops growing here so it can't grow without end.
+/// More than a computer has apps running; the cache stops growing here so it can't grow without end.
 const MAX_ICONS: usize = 512;
 
-// `Ready` and `Missing` are set by the macOS worker; nothing sets them where there isn't one.
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+// `Ready` and `Missing` are set by the OS's worker; nothing sets them where there isn't one.
+#[cfg_attr(not(any(target_os = "macos", windows)), allow(dead_code))]
 #[derive(Clone)]
 enum Slot {
     /// Asked for; the worker has it.
@@ -31,6 +33,8 @@ enum Slot {
 
 struct State {
     icons: HashMap<String, Slot>,
+    /// What an app says it is, where the OS tells (Windows: the `.exe`'s description). Set with its icon.
+    titles: HashMap<String, String>,
     /// PIDs of the OS's applications (the Dock's).
     applications: Arc<HashSet<u32>>,
     /// The first answer has arrived, so an empty `applications` means "none" and not "not known yet".
@@ -44,12 +48,14 @@ pub struct AppIcons {
 }
 
 impl AppIcons {
-    /// Starts the worker (on the Mac). `wake` is how the UI hears that something arrived.
+    /// Starts the worker (on the Mac and Windows). `wake` is how the UI hears that something arrived.
     pub fn start(wake: UnboundedSender<()>) -> Self {
         let (this, jobs) = Self::unstarted();
         #[cfg(target_os = "macos")]
         mac::spawn(this.state.clone(), jobs, wake);
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(windows)]
+        win::spawn(this.state.clone(), jobs, wake);
+        #[cfg(not(any(target_os = "macos", windows)))]
         let _ = (jobs, wake);
         this
     }
@@ -58,6 +64,7 @@ impl AppIcons {
         let (jobs, rx) = std::sync::mpsc::channel();
         let state = Arc::new(Mutex::new(State {
             icons: HashMap::new(),
+            titles: HashMap::new(),
             applications: Arc::new(HashSet::new()),
             known: false,
         }));
@@ -82,6 +89,12 @@ impl AppIcons {
         None
     }
 
+    /// What the app says it is, once its icon was looked for (Windows: "Antimalware Service Executable" for
+    /// `MsMpEng.exe`). The Mac's apps are named by their folder, so there it is always none.
+    pub fn title(&self, app: &str) -> Option<String> {
+        self.state.lock().ok()?.titles.get(app).cloned()
+    }
+
     /// Whether the OS had no icon for this app (so a gear stands in), as opposed to one still on its way.
     pub fn is_missing(&self, bundle: &str) -> bool {
         self.state
@@ -101,6 +114,118 @@ impl AppIcons {
     fn set_icon(&self, bundle: &str, slot: Slot) {
         if let Ok(mut state) = self.state.lock() {
             state.icons.insert(bundle.to_string(), slot);
+        }
+    }
+}
+
+#[cfg(windows)]
+mod win {
+    use super::{Slot, State};
+    use futures::channel::mpsc::UnboundedSender;
+    use gpui::{Image, ImageFormat};
+    use std::collections::HashSet;
+    use std::path::Path;
+    use std::sync::mpsc::{Receiver, RecvTimeoutError};
+    use std::sync::{Arc, Mutex};
+    use std::time::Duration;
+    use winsafe::co;
+    use winsafe::prelude::Handle;
+
+    pub fn spawn(state: Arc<Mutex<State>>, jobs: Receiver<String>, wake: UnboundedSender<()>) {
+        let _ = std::thread::Builder::new()
+            .name("samo-icons".into())
+            .spawn(move || run(&state, &jobs, &wake));
+    }
+
+    fn run(state: &Mutex<State>, jobs: &Receiver<String>, wake: &UnboundedSender<()>) {
+        refresh_applications(state, wake);
+        loop {
+            // A job, or two seconds of quiet, which is when the taskbar's applications are looked at again.
+            match jobs.recv_timeout(Duration::from_secs(2)) {
+                Ok(exe) => {
+                    let path = Path::new(&exe);
+                    let slot = crate::exe_icon::icon_png(path).map_or(Slot::Missing, |png| {
+                        Slot::Ready(Arc::new(Image::from_bytes(ImageFormat::Png, png)))
+                    });
+                    let title = crate::exe_icon::description(path);
+                    if let Ok(mut s) = state.lock() {
+                        if let Some(title) = title {
+                            s.titles.insert(exe.clone(), title);
+                        }
+                        s.icons.insert(exe, slot);
+                    }
+                    let _ = wake.unbounded_send(());
+                }
+                Err(RecvTimeoutError::Timeout) => refresh_applications(state, wake),
+                Err(RecvTimeoutError::Disconnected) => break,
+            }
+        }
+    }
+
+    fn refresh_applications(state: &Mutex<State>, wake: &UnboundedSender<()>) {
+        let mut pids = HashSet::new();
+        let listed = winsafe::EnumWindows(|hwnd: winsafe::HWND| {
+            if on_the_taskbar(&hwnd) {
+                pids.insert(hwnd.GetWindowThreadProcessId().1);
+            }
+            true
+        });
+        if listed.is_err() {
+            return;
+        }
+        let Ok(mut s) = state.lock() else { return };
+        if !s.known || *s.applications != pids {
+            s.applications = Arc::new(pids);
+            s.known = true;
+            drop(s);
+            let _ = wake.unbounded_send(());
+        }
+    }
+
+    /// A window the taskbar shows, as Task Manager's "Apps" are counted: visible, owned by no other window, with a
+    /// title, not a tool window, and not cloaked (a Store app keeps hidden frames that are "visible").
+    fn on_the_taskbar(hwnd: &winsafe::HWND) -> bool {
+        if !hwnd.IsWindowVisible() || hwnd.GetWindowTextLength().unwrap_or(0) <= 0 {
+            return false;
+        }
+        if hwnd
+            .GetWindow(co::GW::OWNER)
+            .is_ok_and(|owner| owner != winsafe::HWND::NULL)
+        {
+            return false;
+        }
+        let ex_style = hwnd.GetWindowLongPtr(co::GWLP::EXSTYLE) as u32;
+        if ex_style & co::WS_EX::TOOLWINDOW.raw() != 0 {
+            return false;
+        }
+        !matches!(
+            hwnd.DwmGetWindowAttribute(co::DWMWA::CLOAKED),
+            Ok(winsafe::DwmAttr::Cloaked(c)) if c.raw() != 0
+        )
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        /// Asks the real window manager, so it is `--ignored` (a CI runner has no desktop):
+        /// `cargo test -p samo-gpui -- --ignored taskbar`.
+        #[test]
+        #[ignore = "asks Windows for its windows; run by hand on a desktop"]
+        fn the_taskbar_has_applications() {
+            let state = Mutex::new(State {
+                icons: Default::default(),
+                titles: Default::default(),
+                applications: Arc::new(HashSet::new()),
+                known: false,
+            });
+            let (wake, _rx) = futures::channel::mpsc::unbounded();
+            refresh_applications(&state, &wake);
+            let s = state.lock().map_err(|_| "poisoned");
+            let (known, count) = s
+                .map(|s| (s.known, s.applications.len()))
+                .unwrap_or((false, 0));
+            assert!(known && count > 0, "known {known}, {count} applications");
         }
     }
 }

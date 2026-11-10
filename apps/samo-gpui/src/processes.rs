@@ -1,6 +1,7 @@
-//! Processes: a live table of apps. Helpers are rolled up into the app they belong to ("Grok Bot", 11 processes),
-//! each app has its icon (macOS), apps in the Dock are set apart from background processes, and a search box
-//! narrows it all. Only the rows on screen are built (a virtualised list under a sticky header), columns step
+//! Processes: a live table of apps. Helpers are rolled up into the app they belong to ("Grok Bot", 11 processes; on
+//! Windows, every process of one .exe), each app has its icon, apps in the Dock (Windows: on the taskbar) are set
+//! apart from background processes, and a search box narrows it all. Only the rows on screen are built (a
+//! virtualised list under a sticky header), columns step
 //! away as the window narrows, and while the pointer is over the table its rows hold still, so a row can't move
 //! under a click. Quitting is the one irreversible act here, so it reads in Signal, is offered for one process at a
 //! time (never for a whole app), and Samo re-checks the process's identity (PID + start time) before sending it.
@@ -15,7 +16,7 @@ use gpui::{
     AnyElement, Context, Div, Entity, FontWeight, IntoElement, ObjectFit, ParentElement,
     SharedString, Stateful, Styled, Subscription, div, img, prelude::*, px, uniform_list,
 };
-use samo_domain::{GroupKey, ProcessGroup, group_processes, sort_groups, visible_members};
+use samo_domain::{GroupKey, ProcessGroup, group_processes_on, sort_groups, visible_members};
 use samo_primitives::{EnergyImpact, ProcessIdentity};
 use std::collections::HashSet;
 use std::ops::Range;
@@ -160,9 +161,9 @@ fn cell_right(width: f32) -> Div {
         .justify_end()
 }
 
-/// An app's icon, `size` points square, for a row (macOS). Its app is in folder `bundle`; a process in no app, and an
-/// app the OS has no icon for, gets a gear. While an icon loads its place is empty, so rows don't shift when it
-/// arrives. Windows draws none (`None`): said, never faked.
+/// An app's icon, `size` points square, for a row. Its app is folder `bundle` (the Mac) or that .exe (Windows); a
+/// process in no app, and an app the OS has no icon for, gets a gear. While an icon loads its place is empty, so
+/// rows don't shift when it arrives. An OS that can't tell draws none (`None`): said, never faked.
 pub(crate) fn app_icon(icons: &AppIcons, bundle: Option<&str>, size: f32) -> Option<AnyElement> {
     if !app_icons::ON_THIS_OS {
         return None;
@@ -526,7 +527,19 @@ impl SamoWorkspaceApp {
         let query = self.proc_ui.search.read(cx).text().to_string();
         let searching = !query.trim().is_empty();
         let (applications, apps_known) = self.hub.icons.applications();
-        let mut groups = group_processes(&rows.processes, &applications);
+        let mut groups = group_processes_on(&rows.processes, &applications, cfg!(windows));
+        if cfg!(windows) {
+            // Windows names a program in its .exe ("Antimalware Service Executable" for MsMpEng.exe). Asking for
+            // every app's icon now loads every name too, so the list sorts by them, not only the rows on screen.
+            for group in &mut groups {
+                if let Some(app) = group.bundle.as_deref() {
+                    let _ = self.hub.icons.icon(app);
+                    if let Some(title) = self.hub.icons.title(app) {
+                        group.name = title;
+                    }
+                }
+            }
+        }
         sort_groups(&mut groups, &rows.processes, self.proc_sort.as_str());
         let visible: Vec<Vec<usize>> = groups
             .iter()
