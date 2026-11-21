@@ -11,7 +11,9 @@ use crate::charts::LineChart;
 use crate::components::*;
 use crate::overview::cpu_series;
 use crate::theme::*;
-use crate::{Frame, NavSection, NoticeKind, PendingTrashConfirm, SamoWorkspaceApp, locations};
+use crate::{
+    Frame, NavSection, NoticeAction, NoticeKind, PendingTrashConfirm, SamoWorkspaceApp, locations,
+};
 use gpui::{
     Animation, AnimationExt, AnyElement, ClickEvent, Context, Corner, Div, ElementId, FontWeight,
     IntoElement, ParentElement, PathPromptOptions, SharedString, Stateful, Styled, Window,
@@ -637,7 +639,17 @@ impl SamoWorkspaceApp {
                         .text_color(color)
                         .child(notice.text),
                 )
-                .when(frame.has_undo, |el| {
+                .when_some(notice.action.clone(), |el, action| {
+                    let icon = match action {
+                        NoticeAction::UndoTrash => Some("undo"),
+                        NoticeAction::ForceQuit(..) => Some("power"),
+                    };
+                    el.child(
+                        button("notice-action", action.label(), icon, Variant::Link, true)
+                            .on_click(cx.listener(|this, _, _, cx| this.run_notice_action(cx))),
+                    )
+                })
+                .when(notice.action.is_none() && frame.has_undo, |el| {
                     el.child(
                         button("notice-undo", "Undo", Some("undo"), Variant::Link, true)
                             .on_click(cx.listener(|this, _, _, cx| this.undo_last_trash(cx))),
@@ -907,6 +919,55 @@ impl SamoWorkspaceApp {
     ) -> impl IntoElement {
         let pal = p();
         let user = crate::places::user_name();
+        let needed_bytes = conf
+            .offer
+            .map(|offer| u64::from(offer.needed_mb).saturating_mul(1024 * 1024));
+        let title = if conf.refusal.is_some() {
+            format!("Can't move “{}” to the {}", conf.label, crate::words::TRASH)
+        } else {
+            format!("Move “{}” to the {}?", conf.label, crate::words::TRASH)
+        };
+        let message = if let Some(why) = conf.refusal.as_deref() {
+            format!("Samo can't move it: {why}.")
+        } else if let Some(offer) = conf.offer {
+            let needed = needed_bytes.map(format_bytes).unwrap_or_default();
+            let current = offer
+                .current_mb
+                .map(|mb| format_bytes(u64::from(mb).saturating_mul(1024 * 1024)));
+            match (offer.turned_off, current) {
+                (true, _) => format!(
+                    "It is {}. This drive's {} is turned off, so Windows would delete it for good. Samo can turn it on and give it {needed} of room, and Undo still works.",
+                    format_bytes(conf.bytes),
+                    crate::words::TRASH
+                ),
+                (false, Some(current)) => match offer.used_bytes {
+                    Some(used) => format!(
+                        "It is {}, and this drive's {} holds {} of its {current}. Samo can raise it to {needed} so it can take it, and Undo still works. Windows keeps it in the {} until you empty it.",
+                        format_bytes(conf.bytes),
+                        crate::words::TRASH,
+                        format_bytes(used),
+                        crate::words::TRASH
+                    ),
+                    None => format!(
+                        "It is {}, and this drive's {} is set to {current}. Samo can raise it to {needed} so it can take it, and Undo still works. Windows keeps it in the {} until you empty it.",
+                        format_bytes(conf.bytes),
+                        crate::words::TRASH,
+                        crate::words::TRASH
+                    ),
+                },
+                (false, None) => format!(
+                    "It is {}. This drive has no explicit {} size yet. Samo can set it to {needed} so it can take it, and Undo still works.",
+                    format_bytes(conf.bytes),
+                    crate::words::TRASH
+                ),
+            }
+        } else {
+            format!(
+                "Samo suggested it; the decision is yours. It frees about {}, and you can undo it here or restore it from {}.",
+                format_bytes(conf.bytes),
+                crate::words::RESTORE_FROM
+            )
+        };
         div()
             .id("confirm-backdrop")
             .absolute()
@@ -952,18 +1013,14 @@ impl SamoWorkspaceApp {
                                     .flex()
                                     .flex_col()
                                     .gap(px(6.0))
-                                    .child(h2(format!("Move “{}” to the {}?", conf.label, crate::words::TRASH)))
+                                    .child(h2(title))
                                     .child(
                                         div()
                                             .font(body(FontWeight::NORMAL))
                                             .text_size(px(T_BODY))
                                             .line_height(px(20.0))
                                             .text_color(pal.text_2)
-                                            .child(format!(
-                                                "Samo suggested it; the decision is yours. It frees about {}, and you can undo it here or restore it from {}.",
-                                                format_bytes(conf.bytes),
-                                                crate::words::RESTORE_FROM
-                                            )),
+                                            .child(message),
                                     ),
                             ),
                     )
@@ -1006,10 +1063,24 @@ impl SamoWorkspaceApp {
                                     cx.notify();
                                 }),
                             ))
-                            .child(
-                                button("confirm-trash", format!("Move to {}", crate::words::TRASH), Some("trash"), Variant::Primary, false)
-                                    .on_click(cx.listener(|this, _, _, cx| this.execute_confirmed_trash(cx))),
-                            ),
+                            .when(conf.refusal.is_none(), |el| {
+                                let (label, icon) = match conf.offer {
+                                    Some(offer) if offer.turned_off => {
+                                        ("Turn on & move".to_string(), Some("power"))
+                                    }
+                                    Some(_) => ("Make room & move".to_string(), Some("trash")),
+                                    None => (
+                                        format!("Move to {}", crate::words::TRASH),
+                                        Some("trash"),
+                                    ),
+                                };
+                                el.child(
+                                    button("confirm-trash", label, icon, Variant::Primary, false)
+                                        .on_click(cx.listener(|this, _, _, cx| {
+                                            this.execute_confirmed_trash(cx)
+                                        })),
+                                )
+                            }),
                     ),
             )
     }

@@ -10,9 +10,10 @@ pub mod telemetry;
 mod tools;
 
 pub use cleanup::{
-    TrashOutcome, can_recycle, default_user_trash_dir, move_to_trash, restore_from_trash,
+    BinRaise, RecyclePlan, TrashOutcome, can_recycle, default_user_trash_dir, make_room,
+    move_to_trash, recycle_plan, restore_from_trash,
 };
 pub use identity::inspect_node_identity;
-pub use process::{inspect_process_identity, terminate_verified_process};
+pub use process::{inspect_process_identity, is_process_running, terminate_verified_process};
 pub use scanner::scan_directory;
 pub use telemetry::SystemCollector;

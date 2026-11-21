@@ -29,6 +29,12 @@ pub const RESTORE_FROM: &str = if cfg!(windows) {
 } else {
     "the Trash in Finder"
 };
+/// Ending a process that didn't close when asked, as this OS's own task manager names it.
+pub const FORCE_QUIT: &str = if cfg!(windows) {
+    "End task"
+} else {
+    "Force quit"
+};
 
 #[cfg(test)]
 mod tests {
@@ -36,7 +42,14 @@ mod tests {
 
     #[test]
     fn the_words_follow_the_os() {
-        let all = [TRASH, REVEAL, THIS_COMPUTER, COMPUTER, RESTORE_FROM];
+        let all = [
+            TRASH,
+            REVEAL,
+            THIS_COMPUTER,
+            COMPUTER,
+            RESTORE_FROM,
+            FORCE_QUIT,
+        ];
         if cfg!(windows) {
             for word in all {
                 assert!(
@@ -45,6 +58,7 @@ mod tests {
                 );
             }
             assert_eq!(TRASH, "Recycle Bin");
+            assert_eq!(FORCE_QUIT, "End task");
             // Windows has no signals: Quit asks the app to close.
             assert!(!QUIT_TIP.contains("SIG"), "{QUIT_TIP}");
         } else {
@@ -62,6 +76,7 @@ mod tests {
                     "the Trash in Finder"
                 )
             );
+            assert_eq!(FORCE_QUIT, "Force quit");
         }
     }
 }

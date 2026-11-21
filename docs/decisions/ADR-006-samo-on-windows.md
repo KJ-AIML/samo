@@ -136,11 +136,17 @@ These continue R1–R24.
   - **What Windows would delete for good is refused before anything moves.**
     - Cleanup runs only on a fixed NTFS volume that Samo can see, and only where its Recycle Bin is on (`NukeOnDelete`)
       and holds the item (`MaxCapacity`). Samo reads both from the volume's own settings.
+    - An item too big for the bin is offered its own room before the click: the dialog says the item's size, what
+      the bin already holds, and the limit Samo would set (their sum plus 5% headroom, at least 64 MB). Only after
+      the user agrees does Samo write `MaxCapacity`, and turn `NukeOnDelete` off if it was on. Undo still works, and
+      nothing already in the bin is pushed out for good.
     - Anything Samo can't tell is a no: other file systems (FAT has no stable file index, ReFS no unique 64-bit
       one), removable or unlisted drives, and settings it can't read.
   - **The moved item is found again by its identity**, not by its shown name (Windows hides known extensions), so
     Undo brings back that item under its real name.
-  - **Quit** ends only the verified process, never its tree.
+  - **Quit** ends only the verified process, never its tree. `taskkill` without `/F` says it succeeded even when an
+    app ignores the request, so Samo checks the process after 2 seconds and offers **Force quit** (`taskkill /F`,
+    after R4's check again) when it is still there.
 - **PR 3, the app:**
   - the tray and quick panel
   - keeps running after its window closes, as one instance

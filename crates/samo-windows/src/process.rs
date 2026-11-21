@@ -23,6 +23,13 @@ pub fn inspect_process_identity(pid: u32) -> Option<ProcessIdentity> {
     identity_in(&mut System::new(), pid)
 }
 
+/// Whether the process `identity` names is still the one running: same PID and same start time, so a recycled PID
+/// is not mistaken for it. Windows' `taskkill` without `/F` says it succeeded even when an app ignores the request;
+/// this is how Samo tells the difference before it offers Force quit.
+pub fn is_process_running(identity: ProcessIdentity) -> bool {
+    inspect_process_identity(identity.pid) == Some(identity)
+}
+
 /// R4: verifies that `requested` `(pid, start_time_secs)` still matches the live process right before closing it
 /// (`taskkill`, the TERM of Windows: it asks the app's windows to close) or ending it (`taskkill /F`, for
 /// `SIGKILL`). Only that process: its children were never verified.
@@ -97,6 +104,7 @@ mod tests {
             start_time_secs: live.start_time_secs + 1000,
         };
 
+        assert!(is_process_running(live));
         let refused = terminate_verified_process(recycled, "SIGKILL").map_err(|e| e.code);
         let still_running = matches!(child.try_wait(), Ok(None));
         let ended = terminate_verified_process(live, "SIGKILL");
@@ -116,6 +124,7 @@ mod tests {
         assert!(still_running, "a recycled PID must never be signalled");
         assert!(ended.is_ok(), "{ended:?}");
         assert!(exited, "the verified process should have ended");
+        assert!(!is_process_running(live), "an ended process is not running");
         Ok(())
     }
 }

@@ -22,6 +22,33 @@ pub struct TrashOutcome {
     pub reclaimed_bytes: u64,
 }
 
+/// What raising a drive's Recycle Bin to take one item would change. The user sees these figures before anything is
+/// written, and `make_room` writes them only after that click.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BinRaise {
+    pub item_bytes: u64,
+    /// What the bin already holds on this drive, as far as Samo can tell. `None` when it couldn't list it; the
+    /// capacity is then sized as if the bin were full, so nothing already in it is pushed out.
+    pub used_bytes: Option<u64>,
+    /// The limit Windows shows now, in MB; `None` when this drive has no explicit setting yet.
+    pub current_mb: Option<u32>,
+    /// The limit to set, in MB: this item, what the bin holds, and a little room.
+    pub needed_mb: u32,
+    /// "Don't move files to the Recycle Bin" is on for this drive (`NukeOnDelete`).
+    pub turned_off: bool,
+}
+
+/// Whether this drive's Recycle Bin can take `target_path` now, needs its limit raised, or can't take it at all.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RecyclePlan {
+    /// It fits, and the bin is on.
+    Fits,
+    /// Samo can make room by raising (and, if needed, turning on) this drive's bin.
+    Raise(BinRaise),
+    /// Samo can't offer a safe move, with the reason.
+    Refused(String),
+}
+
 /// Windows keeps a Recycle Bin on each drive, so there is no one folder to name; this is what it is called. Samo
 /// never uses it as a path on Windows.
 pub fn default_user_trash_dir() -> SamoResult<PathBuf> {
@@ -82,25 +109,54 @@ struct BinFacts {
     nuke_on_delete: Option<u32>,
     /// The most this volume's Recycle Bin holds, in MB (`MaxCapacity`).
     max_capacity_mb: Option<u32>,
+    /// The volume's GUID, which its Recycle Bin settings live under; `None` when it isn't mounted at a drive letter.
+    guid: Option<String>,
+    /// The mount point in the one shape (`C:/`), for telling which bin items are on this volume.
+    mount: Option<String>,
+    /// The volume's size: Windows gives a bin with no explicit setting 5% of it, so that is the safe floor when the
+    /// bin can't be listed.
+    volume_bytes: u64,
+}
+
+/// Why this drive's Recycle Bin can't take anything at all, if it can't. The caller may offer to change the
+/// settings only for a drive that passed these checks.
+fn refused_reason(facts: &BinFacts) -> Option<String> {
+    if !facts.listed {
+        return Some(
+            "Samo can't see this drive, so it can't be sure of its Recycle Bin".to_string(),
+        );
+    }
+    if facts.removable {
+        return Some("this is a removable drive, which has no Recycle Bin".to_string());
+    }
+    if !facts.file_system.eq_ignore_ascii_case("NTFS") {
+        return Some(format!(
+            "this drive is {}; Samo cleans only NTFS drives, where it can check a file is the one it measured",
+            facts.file_system
+        ));
+    }
+    if facts.guid.is_none() {
+        let at_drive_letter = facts
+            .mount
+            .as_deref()
+            .is_some_and(|mount| mount.len() == 3 && mount.ends_with(":/"));
+        return Some(if at_drive_letter {
+            "Samo can't read this drive's Recycle Bin settings; open the Recycle Bin's Properties once and try again"
+                .to_string()
+        } else {
+            "this drive isn't mounted at a drive letter, so Samo can't read its Recycle Bin settings"
+                .to_string()
+        });
+    }
+    None
 }
 
 /// R2 on Windows, before anything moves (ADR-006 R27). Windows deletes for good what its Recycle Bin can't take, so
 /// Samo cleans only on a fixed NTFS volume it can see (NTFS keeps a file's index stable, which R2's identity check
 /// needs), whose Recycle Bin is on and holds at least `bytes`. Anything Samo can't tell is a no.
 fn bin_verdict(facts: &BinFacts, bytes: u64) -> Result<(), String> {
-    if !facts.listed {
-        return Err(
-            "Samo can't see this drive, so it can't be sure of its Recycle Bin".to_string(),
-        );
-    }
-    if facts.removable {
-        return Err("this is a removable drive, which has no Recycle Bin".to_string());
-    }
-    if !facts.file_system.eq_ignore_ascii_case("NTFS") {
-        return Err(format!(
-            "this drive is {}; Samo cleans only NTFS drives, where it can check a file is the one it measured",
-            facts.file_system
-        ));
+    if let Some(why) = refused_reason(facts) {
+        return Err(why);
     }
     match (facts.nuke_on_delete, facts.max_capacity_mb) {
         (Some(0), Some(max_mb)) => {
@@ -119,6 +175,59 @@ fn bin_verdict(facts: &BinFacts, bytes: u64) -> Result<(), String> {
                 .to_string(),
         ),
     }
+}
+
+/// The most a bin may need to hold `item_bytes` plus what is already in it: their sum, rounded up to whole MB, plus
+/// 5% (at least 64 MB) so a later, smaller item doesn't push the oldest one out.
+fn needed_capacity_mb(item_bytes: u64, used_bytes: u64) -> u32 {
+    const MB: u64 = 1024 * 1024;
+    let total = item_bytes.saturating_add(used_bytes);
+    let mb = total.saturating_add(MB - 1) / MB;
+    let headroom = (mb / 20).max(64);
+    u32::try_from(mb.saturating_add(headroom).max(1)).unwrap_or(u32::MAX)
+}
+
+/// The plan for a drive Samo can change. `used_bytes` is `None` when the bin couldn't be listed; the capacity is
+/// then sized as if it were full, so raising it never pushes an item that is already there out for good.
+fn plan_from(facts: &BinFacts, bytes: u64, used_bytes: Option<u64>) -> RecyclePlan {
+    if let Some(why) = refused_reason(facts) {
+        return RecyclePlan::Refused(why);
+    }
+    let turned_off = matches!(facts.nuke_on_delete, Some(value) if value != 0);
+    if !turned_off
+        && let Some(max_mb) = facts.max_capacity_mb
+        && bytes <= u64::from(max_mb).saturating_mul(1024 * 1024)
+    {
+        return RecyclePlan::Fits;
+    }
+    let used = used_bytes.unwrap_or_else(|| {
+        let explicit = u64::from(facts.max_capacity_mb.unwrap_or(0)).saturating_mul(1024 * 1024);
+        // With no explicit limit, Windows gives the bin 5% of the volume, so that is the most it could hold.
+        let default = facts.volume_bytes.saturating_mul(5) / 100;
+        explicit.max(default)
+    });
+    RecyclePlan::Raise(BinRaise {
+        item_bytes: bytes,
+        used_bytes,
+        current_mb: facts.max_capacity_mb,
+        needed_mb: needed_capacity_mb(bytes, used),
+        turned_off,
+    })
+}
+
+/// What the Recycle Bin on `mount` already holds, each item once. `None` when Windows wouldn't list it, so the
+/// caller can size the bin as if it were full rather than guess low.
+fn bin_used_bytes(mount: &str) -> Option<u64> {
+    let items = on_own_thread(trash::os_limited::list).ok()?;
+    let mut total = 0u64;
+    for item in items {
+        let id = normalize_path(&item.id.to_string_lossy());
+        if !is_on(&id, mount) {
+            continue;
+        }
+        total = total.saturating_add(compute_path_allocated_bytes(Path::new(&item.id)));
+    }
+    Some(total)
 }
 
 /// The volume GUID (`{…}`) of drive `X:`, as Windows' own `mountvol X:\ /L` names it (`\\?\Volume{…}\`). The
@@ -169,21 +278,27 @@ fn bin_facts(path: &str) -> BinFacts {
             file_system: String::new(),
             nuke_on_delete: None,
             max_capacity_mb: None,
+            guid: None,
+            mount: None,
+            volume_bytes: 0,
         };
     };
     let at_drive_letter = mount.len() == 3 && mount.ends_with(":/");
-    let (nuke_on_delete, max_capacity_mb) = match mount.get(..2) {
-        Some(drive) if at_drive_letter => volume_guid(drive)
-            .map(|guid| bin_settings(&guid))
-            .unwrap_or((None, None)),
-        _ => (None, None),
+    let guid = match mount.get(..2) {
+        Some(drive) if at_drive_letter => volume_guid(drive),
+        _ => None,
     };
+    let (nuke_on_delete, max_capacity_mb) =
+        guid.as_deref().map(bin_settings).unwrap_or((None, None));
     BinFacts {
         listed: true,
         removable: disk.is_removable(),
         file_system: disk.file_system().to_string_lossy().into_owned(),
         nuke_on_delete,
         max_capacity_mb,
+        guid,
+        mount: Some(mount),
+        volume_bytes: disk.total_space(),
     }
 }
 
@@ -229,6 +344,94 @@ pub fn can_recycle(target_path: &Path) -> Result<(), String> {
         &bin_facts(&canonical),
         compute_path_allocated_bytes(&target),
     )
+}
+
+/// What it would take to move `target_path` to its drive's Recycle Bin, checked before the confirmation dialog so
+/// Samo can offer to make room instead of failing after the click (R2, R27). `bytes` is the size the scan measured.
+pub fn recycle_plan(
+    target_path: &Path,
+    scanned_identity: FileNodeIdentity,
+    bytes: u64,
+) -> RecyclePlan {
+    let Some(canonical) = canonical_path(target_path) else {
+        return RecyclePlan::Refused(format!("`{}` isn't there", target_path.display()));
+    };
+    let target = PathBuf::from(&canonical);
+    let Some(live_identity) = inspect_node_identity(&target) else {
+        return RecyclePlan::Refused(format!("`{canonical}` can't be read"));
+    };
+    if let Err(e) = validate_trash_target(&canonical, scanned_identity, Some(live_identity)) {
+        return RecyclePlan::Refused(e.to_string());
+    }
+    let facts = bin_facts(&canonical);
+    let refused = refused_reason(&facts);
+    let fits = refused.is_none()
+        && !matches!(facts.nuke_on_delete, Some(value) if value != 0)
+        && facts
+            .max_capacity_mb
+            .is_some_and(|max_mb| bytes <= u64::from(max_mb).saturating_mul(1024 * 1024));
+    let used_bytes = if fits || refused.is_some() {
+        None
+    } else {
+        facts.mount.as_deref().and_then(bin_used_bytes)
+    };
+    plan_from(&facts, bytes, used_bytes)
+}
+
+/// Makes room in the drive's Recycle Bin for an item of `needed_mb` (with what it already holds), after the user
+/// agreed in the dialog. Turns the bin back on if it was off, and writes the limit Windows' Properties shows, so
+/// Undo keeps working and nothing is deleted for good.
+pub fn make_room(target_path: &Path, needed_mb: u32) -> SamoResult<()> {
+    let Some(canonical) = canonical_path(target_path) else {
+        return Err(SamoError::new(
+            ErrorCode::NotFound,
+            format!("`{}` isn't there", target_path.display()),
+        ));
+    };
+    let facts = bin_facts(&canonical);
+    if let Some(why) = refused_reason(&facts) {
+        return Err(SamoError::new(ErrorCode::ProtectedPathDenied, why));
+    }
+    let Some(guid) = facts.guid else {
+        return Err(SamoError::new(
+            ErrorCode::InternalError,
+            "Samo can't read this drive's Recycle Bin settings".to_string(),
+        ));
+    };
+    let needed_mb = needed_mb.max(1);
+    let key_path =
+        format!(r"Software\Microsoft\Windows\CurrentVersion\Explorer\BitBucket\Volume\{guid}");
+    let key = windows_registry::CURRENT_USER
+        .create(&key_path)
+        .map_err(|e| {
+            SamoError::new(
+                ErrorCode::InternalError,
+                format!("Samo couldn't open this drive's Recycle Bin settings: {e}"),
+            )
+        })?;
+    key.set_u32("NukeOnDelete", 0).map_err(|e| {
+        SamoError::new(
+            ErrorCode::InternalError,
+            format!("Samo couldn't turn this drive's Recycle Bin on: {e}"),
+        )
+    })?;
+    key.set_u32("MaxCapacity", needed_mb).map_err(|e| {
+        SamoError::new(
+            ErrorCode::InternalError,
+            format!("Samo couldn't raise this drive's Recycle Bin size: {e}"),
+        )
+    })?;
+    match key.get_u32("MaxCapacity") {
+        Ok(read_back) if read_back >= needed_mb => Ok(()),
+        Ok(read_back) => Err(SamoError::new(
+            ErrorCode::InternalError,
+            format!("Windows kept this drive's Recycle Bin at {read_back} MB, not {needed_mb} MB"),
+        )),
+        Err(e) => Err(SamoError::new(
+            ErrorCode::InternalError,
+            format!("Samo couldn't read back this drive's Recycle Bin size: {e}"),
+        )),
+    }
 }
 
 pub fn move_to_trash(
@@ -423,6 +626,9 @@ mod tests {
             file_system: "NTFS".to_string(),
             nuke_on_delete: Some(0),
             max_capacity_mb: Some(7047),
+            guid: Some("{00000000-0000-0000-0000-000000000000}".to_string()),
+            mount: Some("C:/".to_string()),
+            volume_bytes: 0,
         };
         let gb = 1024 * 1024 * 1024;
         assert!(bin_verdict(&ok, gb).is_ok());
@@ -460,6 +666,166 @@ mod tests {
         for facts in refused {
             assert!(bin_verdict(&facts, 1024).is_err(), "{facts:?}");
         }
+    }
+
+    /// A too-big item is offered a bin size that holds it and what is already there, so raising it never pushes an
+    /// older item out for good.
+    #[test]
+    fn a_full_bin_is_sized_for_what_it_already_holds() -> Result<(), String> {
+        let gb = 1024 * 1024 * 1024;
+        let ok = BinFacts {
+            listed: true,
+            removable: false,
+            file_system: "NTFS".to_string(),
+            nuke_on_delete: Some(0),
+            max_capacity_mb: Some(21_029),
+            guid: Some("{00000000-0000-0000-0000-000000000000}".to_string()),
+            mount: Some("C:/".to_string()),
+            volume_bytes: 0,
+        };
+        assert_eq!(plan_from(&ok, 4 * gb, Some(0)), RecyclePlan::Fits);
+        let plan = plan_from(&ok, 26 * gb, Some(10 * gb));
+        let RecyclePlan::Raise(raise) = plan else {
+            return Err(format!("expected a raise, got {plan:?}"));
+        };
+        assert_eq!(raise.current_mb, Some(21_029));
+        assert_eq!(raise.item_bytes, 26 * gb);
+        assert_eq!(raise.used_bytes, Some(10 * gb));
+        assert!(raise.needed_mb >= 36 * 1024, "{}", raise.needed_mb);
+        assert!(!raise.turned_off);
+        Ok(())
+    }
+
+    /// When the bin can't be listed, its capacity is sized as if it were full: never low enough to push an item
+    /// that is already there out for good.
+    #[test]
+    fn an_unreadable_bin_is_sized_as_if_it_were_full() -> Result<(), String> {
+        let gb = 1024 * 1024 * 1024;
+        let ok = BinFacts {
+            listed: true,
+            removable: false,
+            file_system: "NTFS".to_string(),
+            nuke_on_delete: Some(0),
+            max_capacity_mb: Some(21_029),
+            guid: Some("{00000000-0000-0000-0000-000000000000}".to_string()),
+            mount: Some("C:/".to_string()),
+            volume_bytes: 0,
+        };
+        let plan = plan_from(&ok, 26 * gb, None);
+        let RecyclePlan::Raise(raise) = plan else {
+            return Err(format!("expected a raise, got {plan:?}"));
+        };
+        assert_eq!(raise.used_bytes, None);
+        assert!(raise.needed_mb >= 47 * 1024, "{}", raise.needed_mb);
+        Ok(())
+    }
+
+    /// A bin with no explicit limit and a listing that failed is still sized for what Windows' default (5% of the
+    /// volume) could hold, so raising it never pushes an older item out for good.
+    #[test]
+    fn an_unreadable_unset_bin_keeps_the_windows_default() -> Result<(), String> {
+        let tb = 1024u64 * 1024 * 1024 * 1024;
+        let unset = BinFacts {
+            listed: true,
+            removable: false,
+            file_system: "NTFS".to_string(),
+            nuke_on_delete: None,
+            max_capacity_mb: None,
+            guid: Some("{00000000-0000-0000-0000-000000000000}".to_string()),
+            mount: Some("C:/".to_string()),
+            volume_bytes: tb,
+        };
+        let plan = plan_from(&unset, 1024 * 1024, None);
+        let RecyclePlan::Raise(raise) = plan else {
+            return Err(format!("expected a raise, got {plan:?}"));
+        };
+        assert!(raise.needed_mb >= 51 * 1024, "{}", raise.needed_mb);
+        Ok(())
+    }
+
+    /// A bin that is off, or has no explicit setting yet, is offered back on with room for the item.
+    #[test]
+    fn a_bin_that_is_off_or_unset_is_offered_back_on() -> Result<(), String> {
+        let ok = BinFacts {
+            listed: true,
+            removable: false,
+            file_system: "NTFS".to_string(),
+            nuke_on_delete: Some(0),
+            max_capacity_mb: Some(21_029),
+            guid: Some("{00000000-0000-0000-0000-000000000000}".to_string()),
+            mount: Some("C:/".to_string()),
+            volume_bytes: 0,
+        };
+        let off = BinFacts {
+            nuke_on_delete: Some(1),
+            ..ok.clone()
+        };
+        let plan = plan_from(&off, 1024, Some(0));
+        let RecyclePlan::Raise(raise) = plan else {
+            return Err(format!("expected a raise, got {plan:?}"));
+        };
+        assert!(raise.turned_off);
+
+        let unset = BinFacts {
+            nuke_on_delete: None,
+            max_capacity_mb: None,
+            ..ok.clone()
+        };
+        let plan = plan_from(&unset, 1024, Some(0));
+        let RecyclePlan::Raise(raise) = plan else {
+            return Err(format!("expected a raise, got {plan:?}"));
+        };
+        assert_eq!(raise.current_mb, None);
+        assert!(!raise.turned_off);
+        Ok(())
+    }
+
+    /// What can't be made safe (a removable or unseen drive, another file system, no readable settings) is refused
+    /// even when the item is small.
+    #[test]
+    fn a_bin_samo_cannot_change_is_refused() {
+        let ok = BinFacts {
+            listed: true,
+            removable: false,
+            file_system: "NTFS".to_string(),
+            nuke_on_delete: Some(0),
+            max_capacity_mb: Some(21_029),
+            guid: Some("{00000000-0000-0000-0000-000000000000}".to_string()),
+            mount: Some("C:/".to_string()),
+            volume_bytes: 0,
+        };
+        let refused = [
+            BinFacts {
+                removable: true,
+                ..ok.clone()
+            },
+            BinFacts {
+                listed: false,
+                ..ok.clone()
+            },
+            BinFacts {
+                file_system: "FAT32".to_string(),
+                ..ok.clone()
+            },
+            BinFacts {
+                guid: None,
+                ..ok.clone()
+            },
+        ];
+        for facts in refused {
+            assert!(
+                matches!(plan_from(&facts, 1024, Some(0)), RecyclePlan::Refused(_)),
+                "{facts:?}"
+            );
+        }
+    }
+
+    /// The capacity keeps 5% (at least 64 MB) of room, so a later smaller item doesn't push the oldest one out.
+    #[test]
+    fn capacity_has_headroom() {
+        assert_eq!(needed_capacity_mb(0, 0), 64);
+        assert_eq!(needed_capacity_mb(1, 0), 65);
+        assert_eq!(needed_capacity_mb(2048 * 1024 * 1024, 0), 2150);
     }
 
     /// Undo never lands on something at the original path, not even a link that points nowhere.

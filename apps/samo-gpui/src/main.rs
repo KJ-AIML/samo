@@ -533,6 +533,23 @@ struct PendingTrashConfirm {
     target_path: String,
     bytes: u64,
     identity: FileNodeIdentity,
+    /// On Windows, what it would take for the drive's Recycle Bin to hold this item (ADR-006 R27); `None` when it
+    /// already fits, or on a platform without a size-limited bin.
+    offer: Option<TrashOffer>,
+    /// Why Samo can't move it at all, said in the dialog before the click rather than after it.
+    refusal: Option<String>,
+}
+
+/// The figures the Trash dialog shows when the item is bigger than the Recycle Bin's limit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct TrashOffer {
+    /// What the bin already holds on this drive; `None` when Windows wouldn't list it.
+    used_bytes: Option<u64>,
+    /// The limit Windows shows now, in MB; `None` when this drive has no explicit setting yet.
+    current_mb: Option<u32>,
+    /// The limit Samo would set, in MB.
+    needed_mb: u32,
+    turned_off: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -542,10 +559,30 @@ enum NoticeKind {
     Error,
 }
 
+/// What the notice line offers besides its text.
+#[derive(Debug, Clone)]
+enum NoticeAction {
+    /// Put the last trashed item back.
+    UndoTrash,
+    /// End a process that didn't close when asked (Windows; R4 still checks it first).
+    #[cfg_attr(not(windows), allow(dead_code))]
+    ForceQuit(ProcessIdentity, String),
+}
+
+impl NoticeAction {
+    fn label(&self) -> &'static str {
+        match self {
+            Self::UndoTrash => "Undo",
+            Self::ForceQuit(..) => crate::words::FORCE_QUIT,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 struct Notice {
     text: String,
     kind: NoticeKind,
+    action: Option<NoticeAction>,
 }
 
 impl Notice {
@@ -553,7 +590,15 @@ impl Notice {
         Some(Self {
             text: text.into(),
             kind,
+            action: None,
         })
+    }
+
+    fn with_action(self, action: NoticeAction) -> Self {
+        Self {
+            action: Some(action),
+            ..self
+        }
     }
 }
 
@@ -918,11 +963,33 @@ impl SamoWorkspaceApp {
         identity: FileNodeIdentity,
         cx: &mut Context<Self>,
     ) {
+        // ADR-006 R27: on Windows the Recycle Bin has a per-drive limit, and anything over it is deleted for good.
+        // Ask before the click, so the dialog can offer to make room instead of failing afterwards.
+        #[cfg(windows)]
+        let (offer, refusal) =
+            match samo_windows::recycle_plan(Path::new(&target_path), identity, bytes) {
+                samo_windows::RecyclePlan::Fits => (None, None),
+                samo_windows::RecyclePlan::Raise(raise) => (
+                    Some(TrashOffer {
+                        used_bytes: raise.used_bytes,
+                        current_mb: raise.current_mb,
+                        needed_mb: raise.needed_mb,
+                        turned_off: raise.turned_off,
+                    }),
+                    None,
+                ),
+                samo_windows::RecyclePlan::Refused(why) => (None, Some(why)),
+            };
+        #[cfg(not(windows))]
+        let (offer, refusal) = (None, None);
+
         self.pending_confirm = Some(PendingTrashConfirm {
             label,
             target_path,
             bytes,
             identity,
+            offer,
+            refusal,
         });
         cx.notify();
     }
@@ -931,6 +998,19 @@ impl SamoWorkspaceApp {
         let Some(confirm) = self.pending_confirm.take() else {
             return;
         };
+        // The dialog's "make room" path: raise (and if needed turn on) this drive's Recycle Bin first, so the move
+        // below keeps Undo and Windows never deletes the item for good (ADR-006 R27).
+        #[cfg(windows)]
+        if let Some(offer) = confirm.offer
+            && let Err(err) =
+                samo_windows::make_room(Path::new(&confirm.target_path), offer.needed_mb)
+        {
+            if let Ok(mut guard) = self.hub.shared.lock() {
+                guard.notice = Notice::new(NoticeKind::Error, err.message);
+            }
+            cx.notify();
+            return;
+        }
         let current_root = self
             .hub
             .shared
@@ -958,7 +1038,8 @@ impl SamoWorkspaceApp {
                             format_bytes(outcome.reclaimed_bytes),
                             words::TRASH
                         ),
-                    );
+                    )
+                    .map(|notice| notice.with_action(NoticeAction::UndoTrash));
                     guard.disk = guard.disk.as_deref().map(|view| {
                         Arc::new(DiskView::build(Arc::new(prune_trashed(
                             &view.snap,
@@ -1040,22 +1121,99 @@ impl SamoWorkspaceApp {
         signal: &'static str,
         cx: &mut Context<Self>,
     ) {
+        let force = signal == "SIGKILL";
         let notice = match terminate_verified_process(identity, signal) {
-            Ok(()) => Notice::new(
-                NoticeKind::Success,
-                // Windows has no signals: Quit asked the app to close (ADR-006 §3).
-                if cfg!(windows) {
-                    format!("Asked {name} to close (PID {})", identity.pid)
+            Ok(()) => {
+                // Windows has no signals: Quit asked the app to close (ADR-006 §3). `taskkill` without `/F` says
+                // it succeeded even when the app ignores the request, so check that it really ended before
+                // calling it done; if it didn't, offer Force quit (which still re-checks R4's identity).
+                let text = if cfg!(windows) {
+                    if force {
+                        format!("Force quit {name} (PID {})", identity.pid)
+                    } else {
+                        format!("Asked {name} to close (PID {})", identity.pid)
+                    }
                 } else {
                     format!("Sent {signal} to {name} (PID {})", identity.pid)
-                },
-            ),
+                };
+                #[cfg(windows)]
+                {
+                    let asked = text.clone();
+                    let name = name.clone();
+                    cx.spawn(async move |this, cx| {
+                        cx.background_executor()
+                            .timer(std::time::Duration::from_secs(2))
+                            .await;
+                        let alive = cx
+                            .background_executor()
+                            .spawn(async move { samo_windows::is_process_running(identity) })
+                            .await;
+                        if !alive {
+                            return;
+                        }
+                        let _ = this.update(cx, |this, cx| {
+                            if let Ok(mut guard) = this.hub.shared.lock() {
+                                let still = guard
+                                    .notice
+                                    .as_ref()
+                                    .is_some_and(|notice| notice.text == asked);
+                                if still {
+                                    guard.notice = if force {
+                                        Notice::new(
+                                            NoticeKind::Error,
+                                            format!(
+                                                "Windows couldn't end {name} (PID {}). It may need more permission.",
+                                                identity.pid
+                                            ),
+                                        )
+                                    } else {
+                                        Notice::new(
+                                            NoticeKind::Error,
+                                            format!(
+                                                "{name} (PID {}) didn't close. It may be waiting for you, or ignoring the request.",
+                                                identity.pid
+                                            ),
+                                        )
+                                        .map(|notice| {
+                                            notice.with_action(NoticeAction::ForceQuit(
+                                                identity,
+                                                name.clone(),
+                                            ))
+                                        })
+                                    };
+                                }
+                            }
+                            cx.notify();
+                        });
+                    })
+                    .detach();
+                }
+                Notice::new(NoticeKind::Success, text)
+            }
             Err(err) => Notice::new(NoticeKind::Error, err.message),
         };
         if let Ok(mut guard) = self.hub.shared.lock() {
             guard.notice = notice;
         }
         self.refresh_processes(cx);
+    }
+
+    /// Runs the button the notice line shows, if any: Undo a trash, or Force quit a process that didn't close.
+    fn run_notice_action(&mut self, cx: &mut Context<Self>) {
+        let action = self.hub.shared.lock().ok().and_then(|mut guard| {
+            guard
+                .notice
+                .as_mut()
+                .and_then(|notice| notice.action.take())
+        });
+        match action {
+            Some(NoticeAction::UndoTrash) => self.undo_last_trash(cx),
+            Some(NoticeAction::ForceQuit(identity, name)) => {
+                self.quit_process(identity, name, "SIGKILL", cx)
+            }
+            None => {}
+        }
+        cx.notify();
     }
 
     /// Ask the sampler for a list in the current sort; the table lets go of any held rows.
