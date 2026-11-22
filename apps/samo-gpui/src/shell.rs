@@ -14,11 +14,15 @@ use crate::theme::*;
 use crate::{
     Frame, NavSection, NoticeAction, NoticeKind, PendingTrashConfirm, SamoWorkspaceApp, locations,
 };
+#[cfg(not(windows))]
+use gpui::ClickEvent;
 use gpui::{
-    Animation, AnimationExt, AnyElement, ClickEvent, Context, Corner, Div, ElementId, FontWeight,
-    IntoElement, ParentElement, PathPromptOptions, SharedString, Stateful, Styled, Window,
-    anchored, deferred, div, ease_out_quint, prelude::*, px,
+    Animation, AnimationExt, AnyElement, Context, Corner, Div, ElementId, FontWeight, IntoElement,
+    ParentElement, PathPromptOptions, SharedString, Stateful, Styled, Window, anchored, deferred,
+    div, ease_out_quint, prelude::*, px,
 };
+#[cfg(windows)]
+use gpui::{WindowControlArea, svg};
 use samo_primitives::{MemoryPressure, Reading, ScanSnapshot};
 use std::time::Duration;
 use std::time::Instant;
@@ -96,6 +100,95 @@ pub(crate) struct Readout {
 }
 
 impl SamoWorkspaceApp {
+    // ---------------------------------------------------------------- Windows titlebar
+
+    /// Seamless Windows titlebar drawn in `pal.frame` with native `WindowControlArea` drag and caption controls.
+    /// When windowed, leaves 4 px along the top edge outside `Drag` so GPUI's `HTTOP` resize edge still catches.
+    #[cfg(windows)]
+    pub(crate) fn render_win_titlebar(&self, window: &Window) -> impl IntoElement {
+        let pal = p();
+        let active = window.is_window_active();
+        let maximized = window.is_maximized();
+        let glyph_color = if active {
+            pal.text_2
+        } else {
+            pal.text_2.opacity(0.45)
+        };
+
+        let caption_btn = |id: &'static str,
+                           icon_name: &'static str,
+                           area: WindowControlArea,
+                           hover_bg: gpui::Hsla,
+                           hover_fg: gpui::Hsla| {
+            div()
+                .id(id)
+                .group(id)
+                .w(px(46.0))
+                .h_full()
+                .flex()
+                .items_center()
+                .justify_center()
+                .window_control_area(area)
+                .hover(move |s| s.bg(hover_bg))
+                .child(
+                    svg()
+                        .path(SharedString::from(format!("icons/{icon_name}.svg")))
+                        .size(px(12.0))
+                        .flex_shrink_0()
+                        .text_color(glyph_color)
+                        .group_hover(id, move |s| s.text_color(hover_fg)),
+                )
+        };
+
+        div()
+            .id("win-titlebar")
+            .w_full()
+            .h(px(32.0))
+            .flex_shrink_0()
+            .bg(pal.frame)
+            .flex()
+            .flex_row()
+            .child(
+                div()
+                    .flex_1()
+                    .h_full()
+                    .when(!maximized, |el| el.pt(px(4.0)))
+                    .child(
+                        div()
+                            .size_full()
+                            .window_control_area(WindowControlArea::Drag),
+                    ),
+            )
+            .child(
+                div()
+                    .h_full()
+                    .flex_shrink_0()
+                    .flex()
+                    .flex_row()
+                    .child(caption_btn(
+                        "win-btn-min",
+                        "win-min",
+                        WindowControlArea::Min,
+                        pal.hover,
+                        pal.text,
+                    ))
+                    .child(caption_btn(
+                        "win-btn-max",
+                        if maximized { "win-restore" } else { "win-max" },
+                        WindowControlArea::Max,
+                        pal.hover,
+                        pal.text,
+                    ))
+                    .child(caption_btn(
+                        "win-btn-close",
+                        "win-close",
+                        WindowControlArea::Close,
+                        pal.signal,
+                        pal.thumb,
+                    )),
+            )
+    }
+
     // ---------------------------------------------------------------- the sidebar
 
     pub(crate) fn render_sidebar(&self, frame: &Frame, cx: &mut Context<Self>) -> AnyElement {
@@ -110,7 +203,7 @@ impl SamoWorkspaceApp {
             frame.telemetry.system.hostname.clone()
         };
 
-        div()
+        let bar = div()
             .w(px(SIDEBAR_W))
             .h_full()
             .flex_shrink_0()
@@ -118,69 +211,73 @@ impl SamoWorkspaceApp {
             .flex_col()
             .gap(px(S3))
             .px(px(14.0))
-            .pb(px(14.0))
-            .child(titlebar_band())
-            .child(
-                div()
-                    .px(px(6.0))
-                    .flex()
-                    .flex_row()
-                    .items_center()
-                    .gap(px(S3))
-                    .child(logo_mark(34.0))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w(px(0.0))
-                            .flex()
-                            .flex_col()
-                            .child(
-                                div()
-                                    .font(display())
-                                    .text_size(px(T_LEAD))
-                                    .line_height(px(20.0))
-                                    .text_color(pal.text)
-                                    .child("Samo"),
-                            )
-                            .child(line(sub, FontWeight::NORMAL, T_META, pal.text_2).w_full()),
-                    ),
-            )
-            .child(
-                div()
-                    .id("rail-scroll")
-                    .flex_1()
-                    .min_h(px(0.0))
-                    .overflow_y_scroll()
-                    .pt(px(S2))
-                    .flex()
-                    .flex_col()
-                    .gap(px(2.0))
-                    .child(rail_label("Monitor", true))
-                    .children(NavSection::ALL.into_iter().map(|section| {
-                        // Projects' count is its own; Processes' lives in the probe's line ("Watching 685 processes").
-                        let badge = match section {
-                            NavSection::Projects => project_count.map(|n| n.to_string()),
-                            _ => None,
-                        };
-                        self.nav_link(section, section.title().to_string(), badge, cx)
-                    }))
-                    .child(rail_label("Extensions", false))
-                    .children(frame.ext.extensions.iter().filter(|e| e.on).map(|e| {
-                        let badge = (e.badge > 0).then(|| format!("!{}", e.badge));
-                        self.nav_link(NavSection::Extension(e.slot), e.name.clone(), badge, cx)
-                    }))
-                    .child(self.nav_link(
-                        NavSection::Extensions,
-                        "All extensions".to_string(),
-                        updates_badge(frame),
-                        cx,
-                    ))
-                    // Settings is the only item here, so it has a gap above it, not a "SAMO" label.
-                    .child(div().h(px(S4)).flex_shrink_0())
-                    .child(self.nav_link(NavSection::Settings, "Settings".to_string(), None, cx)),
-            )
-            .child(self.side_foot(frame))
-            .into_any_element()
+            .pb(px(14.0));
+        #[cfg(not(windows))]
+        let bar = bar.child(titlebar_band());
+        #[cfg(windows)]
+        let bar = bar.pt(px(2.0));
+
+        bar.child(
+            div()
+                .px(px(6.0))
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap(px(S3))
+                .child(logo_mark(34.0))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w(px(0.0))
+                        .flex()
+                        .flex_col()
+                        .child(
+                            div()
+                                .font(display())
+                                .text_size(px(T_LEAD))
+                                .line_height(px(20.0))
+                                .text_color(pal.text)
+                                .child("Samo"),
+                        )
+                        .child(line(sub, FontWeight::NORMAL, T_META, pal.text_2).w_full()),
+                ),
+        )
+        .child(
+            div()
+                .id("rail-scroll")
+                .flex_1()
+                .min_h(px(0.0))
+                .overflow_y_scroll()
+                .pt(px(S2))
+                .flex()
+                .flex_col()
+                .gap(px(2.0))
+                .child(rail_label("Monitor", true))
+                .children(NavSection::ALL.into_iter().map(|section| {
+                    // Projects' count is its own; Processes' lives in the probe's line ("Watching 685 processes").
+                    let badge = match section {
+                        NavSection::Projects => project_count.map(|n| n.to_string()),
+                        _ => None,
+                    };
+                    self.nav_link(section, section.title().to_string(), badge, cx)
+                }))
+                .child(rail_label("Extensions", false))
+                .children(frame.ext.extensions.iter().filter(|e| e.on).map(|e| {
+                    let badge = (e.badge > 0).then(|| format!("!{}", e.badge));
+                    self.nav_link(NavSection::Extension(e.slot), e.name.clone(), badge, cx)
+                }))
+                .child(self.nav_link(
+                    NavSection::Extensions,
+                    "All extensions".to_string(),
+                    updates_badge(frame),
+                    cx,
+                ))
+                // Settings is the only item here, so it has a gap above it, not a "SAMO" label.
+                .child(div().h(px(S4)).flex_shrink_0())
+                .child(self.nav_link(NavSection::Settings, "Settings".to_string(), None, cx)),
+        )
+        .child(self.side_foot(frame))
+        .into_any_element()
     }
 
     fn nav_link(
@@ -260,7 +357,7 @@ impl SamoWorkspaceApp {
                     ))
             };
 
-        div()
+        let rail = div()
             .w(px(RAIL_W))
             .h_full()
             .flex_shrink_0()
@@ -268,9 +365,13 @@ impl SamoWorkspaceApp {
             .flex_col()
             .items_center()
             .gap(px(S2))
-            .pb(px(S3))
-            .child(titlebar_band())
-            .child(logo_mark(32.0))
+            .pb(px(S3));
+        #[cfg(not(windows))]
+        let rail = rail.child(titlebar_band());
+        #[cfg(windows)]
+        let rail = rail.pt(px(2.0));
+
+        rail.child(logo_mark(32.0))
             .child(
                 div()
                     .id("rail-scroll")
@@ -447,46 +548,50 @@ impl SamoWorkspaceApp {
                 |el, t| el.opacity(t),
             );
 
-        div()
+        let wrap = div()
             .flex_1()
             .min_w(px(0.0))
             .h_full()
-            .py(px(crate::layout::STAGE_INSET))
-            .pr(px(crate::layout::STAGE_INSET))
-            .child(
-                div()
-                    .size_full()
-                    .relative()
-                    .flex()
-                    .flex_col()
-                    .rounded(px(R_STAGE))
-                    .bg(pal.stage)
-                    .overflow_hidden()
-                    .child(
-                        div()
-                            .flex_shrink_0()
-                            .px(px(pad))
-                            .pt(px(S4))
-                            .child(self.readout_strip(frame, cx)),
-                    )
-                    .child(if fill {
-                        div()
-                            .flex_1()
-                            .min_h(px(0.0))
-                            .flex()
-                            .flex_col()
-                            .child(column)
-                            .into_any_element()
-                    } else {
-                        div()
-                            .id(SharedString::from(format!("page-{}", self.nav.key())))
-                            .flex_1()
-                            .min_h(px(0.0))
-                            .overflow_y_scroll()
-                            .child(column)
-                            .into_any_element()
-                    }),
-            )
+            .pr(px(crate::layout::STAGE_INSET));
+        #[cfg(not(windows))]
+        let wrap = wrap.py(px(crate::layout::STAGE_INSET));
+        #[cfg(windows)]
+        let wrap = wrap.pb(px(crate::layout::STAGE_INSET));
+
+        wrap.child(
+            div()
+                .size_full()
+                .relative()
+                .flex()
+                .flex_col()
+                .rounded(px(R_STAGE))
+                .bg(pal.stage)
+                .overflow_hidden()
+                .child(
+                    div()
+                        .flex_shrink_0()
+                        .px(px(pad))
+                        .pt(px(S4))
+                        .child(self.readout_strip(frame, cx)),
+                )
+                .child(if fill {
+                    div()
+                        .flex_1()
+                        .min_h(px(0.0))
+                        .flex()
+                        .flex_col()
+                        .child(column)
+                        .into_any_element()
+                } else {
+                    div()
+                        .id(SharedString::from(format!("page-{}", self.nav.key())))
+                        .flex_1()
+                        .min_h(px(0.0))
+                        .overflow_y_scroll()
+                        .child(column)
+                        .into_any_element()
+                }),
+        )
     }
 
     /// Samo's instrument cluster: four live figures in a dark window, phosphor-lit, on every page.
@@ -1341,11 +1446,11 @@ pub(crate) fn samo_status(frame: &Frame) -> String {
 }
 
 /// The title bar's band: the traffic lights live here, and a double click zooms as it does natively.
+#[cfg(not(windows))]
 fn titlebar_band() -> Stateful<Div> {
     div()
         .id("titlebar-band")
-        // The Mac's traffic lights sit in this band; Windows has its own titlebar above, so only a little air.
-        .h(px(if cfg!(windows) { 8.0 } else { 36.0 }))
+        .h(px(36.0))
         .w_full()
         .flex_shrink_0()
         .on_click(|event: &ClickEvent, window: &mut Window, _| {

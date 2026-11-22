@@ -349,13 +349,14 @@ fn open_main(cx: &mut App, nav: Option<NavSection>) {
     .detach();
 }
 
-/// The Mac's titlebar is see-through, with the traffic lights inside Samo's sidebar. Windows keeps its own, with its
-/// minimize, maximize and close buttons: a see-through one there has none and can't be dragged (ADR-006 §3).
+/// The Mac's titlebar is see-through, with the traffic lights inside Samo's sidebar. Windows also uses a see-through
+/// titlebar, drawn by `shell::render_win_titlebar` in `pal.frame` with native `WindowControlArea` drag and caption
+/// buttons so it blends with Samo's frame instead of showing an OS bar (ADR-006 §3).
 fn main_titlebar() -> TitlebarOptions {
     if cfg!(windows) {
         TitlebarOptions {
             title: Some(SharedString::from("Samo")),
-            appears_transparent: false,
+            appears_transparent: true,
             traffic_light_position: None,
         }
     } else {
@@ -1280,24 +1281,43 @@ impl Render for SamoWorkspaceApp {
             NavSection::Settings => self.render_settings(&frame, cx),
         };
 
-        div()
+        let root = div()
             .size_full()
             .relative()
             .flex()
-            .flex_row()
             .bg(pal.frame)
             .text_color(pal.text)
             .font(theme::body(FontWeight::NORMAL))
             .text_size(px(T_BODY))
             .track_focus(&self.focus)
-            .on_key_down(cx.listener(Self::on_key_down))
+            .on_key_down(cx.listener(Self::on_key_down));
+
+        #[cfg(windows)]
+        let root = root
+            .flex_col()
+            .child(self.render_win_titlebar(window))
+            .child(
+                div()
+                    .flex_1()
+                    .min_h(px(0.0))
+                    .w_full()
+                    .flex()
+                    .flex_row()
+                    .child(self.render_sidebar(&frame, cx))
+                    .child(self.render_stage(page, &frame, cx)),
+            );
+
+        #[cfg(not(windows))]
+        let root = root
+            .flex_row()
             .child(self.render_sidebar(&frame, cx))
-            .child(self.render_stage(page, &frame, cx))
-            .children(
-                self.pending_confirm
-                    .clone()
-                    .map(|conf| self.render_confirm_dialog(conf, cx)),
-            )
+            .child(self.render_stage(page, &frame, cx));
+
+        root.children(
+            self.pending_confirm
+                .clone()
+                .map(|conf| self.render_confirm_dialog(conf, cx)),
+        )
     }
 }
 

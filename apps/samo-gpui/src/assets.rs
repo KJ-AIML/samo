@@ -110,6 +110,16 @@ const ICONS: &[(&str, &str)] = &[
         "plug",
         r##"<path d="M6 1.75v3M10 1.75v3"/><path d="M3.75 4.75h8.5v2.5a4.25 4.25 0 0 1-8.5 0z"/><path d="M8 11.5v2.75"/>"##,
     ),
+    ("win-min", r##"<path d="M3 8h10"/>"##),
+    (
+        "win-max",
+        r##"<rect x="3.25" y="3.25" width="9.5" height="9.5" rx="1"/>"##,
+    ),
+    (
+        "win-restore",
+        r##"<rect x="2.75" y="5.25" width="8" height="8" rx="1"/><path d="M5.25 5.25V3.75a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-1.5"/>"##,
+    ),
+    ("win-close", r##"<path d="M3.5 3.5l9 9M12.5 3.5l-9 9"/>"##),
 ];
 
 impl AssetSource for Assets {
