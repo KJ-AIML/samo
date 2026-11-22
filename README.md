@@ -4,17 +4,18 @@
 
 # Samo
 
-**Where did my disk go, and what is my Mac doing right now?**<br>
-A native macOS instrument for both questions, built in Rust with GPUI.
+**Where did my disk go, and what is my computer doing right now?**<br>
+A native macOS and Windows instrument for both questions, built in Rust with GPUI.
 
-[![macOS 11+](https://img.shields.io/badge/macOS-11%2B-242A33?logo=apple&logoColor=white)](#install)
+[![macOS 11+](https://img.shields.io/badge/macOS-11%2B-242A33?logo=apple&logoColor=white)](#macos)
+[![Windows 10/11](https://img.shields.io/badge/Windows-10%2F11-243EB5?logo=windows11&logoColor=white)](#windows)
 [![Rust 1.99](https://img.shields.io/badge/Rust-1.99-243EB5?logo=rust&logoColor=white)](rust-toolchain.toml)
 [![GPUI](https://img.shields.io/badge/UI-GPUI%2C%20no%20web%20view-ABC0EF)](https://github.com/zed-industries/zed/tree/main/crates/gpui)
 [![License: MIT](https://img.shields.io/badge/license-MIT-199e70)](LICENSE)
 
 <br>
 
-<img src="docs/media/overview-dark.png" width="100%" alt="Samo's Overview in dark mode: the readout strip, a live CPU and memory chart beside the top processes, network, disk activity, memory and thermal cards, then the disk ring and what Samo suggests clearing">
+<img src="docs/media/overview-dark.png" width="100%" alt="Samo's Overview in dark mode on macOS: the readout strip, a live CPU and memory chart beside the top processes, network and disk activity">
 
 </div>
 
@@ -22,57 +23,71 @@ A native macOS instrument for both questions, built in Rust with GPUI.
 
 Samo measures a folder, shows you where the space went, and finds the build output you forgot about —
 `target`, `node_modules`, `.venv`, `.next`, `dist` — while keeping an eye on CPU, memory, network, disk and heat.
-It's a real Mac app: drawn on the GPU by [GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui) (the
+It's a real native app for **macOS** and **Windows**: drawn on the GPU by [GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui) (the
 framework behind Zed), no Electron, no web view, about 4 % of one core when idle.
 
 **Samo measures; you decide.** It never deletes anything on its own. What it *suggests* is drawn in dither, what
-is measured is solid, and anything you remove goes to the Trash, with Undo.
+is measured is solid, and anything you remove goes to the Trash (macOS) or Recycle Bin (Windows), with Undo.
 
 ## Highlights
 
-- **Live, at a glance.** A dark readout strip on every page: CPU, memory, free disk, and what you could reclaim.
+- **Live, at a glance.** A recessed readout strip on every page: CPU, memory, free disk, and what you could reclaim.
 - **Overview that's worth watching.** CPU and memory over 2 minutes, 10 minutes or an hour; the busiest processes;
-  network, disk activity, memory pressure and macOS's own thermal state. Point at a chart for the exact values.
+  network, disk activity, memory pressure, performance & efficiency cores, and thermal state. Point at a chart for the exact values.
 - **Space you can walk into.** A circle map of the folder, coloured by kind of file. Click a circle to go inside,
   *Up* to come back; recent folders open instantly.
 - **Build junk, found.** Every project under the folder, ranked by what Samo could clear, with the artifacts named.
-- **Processes.** Apps, not a flat list: each app's helpers are rolled up into it ("Grok Bot, 9 processes"), with its
-  icon, applications above background processes, a search box and a bar under CPU and Memory. A fast,
+- **Processes.** Apps, not a flat list: each app's helpers are rolled up into it, with its app icon,
+  applications above background processes, a search box and a bar under CPU and Memory. A fast,
   virtualised table you can sort; rows hold still under the pointer so a row can't move under a click.
-- **In the menu bar.** Samo's probe shows the CPU load beside it; click it for a quick panel without opening the
-  app. Close the window and Samo keeps running there.
-- **Honest readings.** A sensor that stopped leaves a gap in the chart, never a made-up line. Unknown is `--`, not `0`.
-- **Light and dark**, and at home in any window from 640 px wide to full screen.
+- **In the menu bar & system tray.** Samo stays quietly at hand: in the macOS menu bar with the CPU load beside its
+  probe, and in the Windows system tray with live CPU in the tooltip and a quick panel on click. Close the window and
+  Samo keeps running there.
+- **Honest readings.** A sensor that stopped leaves a gap in the chart, never a made-up line. Unknown is `--`, not `0`,
+  and anything an OS doesn't report (such as thermal state or wired memory on Windows) is said, never guessed.
+- **Light and dark**, Cobalt or Graphite style, native macOS titlebar and seamless Windows 11 custom titlebar with Snap Layouts, and at home in any window from 640 px wide to full screen.
 
 <table>
   <tr>
-    <td width="50%"><img src="docs/media/overview-light.png" alt="Samo's Overview in light mode: two minutes of CPU and memory, the top processes, network and disk activity"></td>
+    <td width="50%"><img src="docs/media/overview-light.png" alt="Samo's Overview in light mode on macOS: two minutes of CPU and memory, the top processes, network and disk activity"></td>
     <td width="50%"><img src="docs/media/projects-dark.png" alt="The Projects page: a Rust project whose target, node_modules and dist folders Samo suggests clearing, drawn as dithered chips"></td>
   </tr>
   <tr>
-    <td align="center"><sub><b>Overview</b>, light</sub></td>
+    <td align="center"><sub><b>macOS</b> — Overview, light</sub></td>
     <td align="center"><sub><b>Projects</b> — what each project's build output costs you</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/media/windows-overview-dark.png" alt="Samo's Overview in dark mode on Windows 11 with a seamless integrated titlebar, live CPU and memory chart, top processes and network/disk activity"></td>
+    <td width="50%"><img src="docs/media/windows-overview-light.png" alt="Samo's Overview in light mode on Windows 11 with a seamless integrated titlebar and recessed Cobalt readout"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub><b>Windows</b> — Overview, dark</sub></td>
+    <td align="center"><sub><b>Windows</b> — Overview, light</sub></td>
   </tr>
 </table>
 
-### In the menu bar
+### In the menu bar & system tray
 
 <table>
   <tr>
     <td width="50%"><img src="docs/media/menu-bar.png" alt="Samo in the menu bar: the probe icon with the CPU load beside it, and the quick panel open beneath it showing CPU, memory, free disk and reclaimable space, the busiest process, memory pressure, network rates and the folder being watched"></td>
     <td>
-      <p><b>The probe is the status.</b> Samo sits in the menu bar with the CPU load beside it, and its eyes are
+      <p><b>The probe is the status.</b> Samo sits in the menu bar (macOS) or system tray (Windows), and its eyes are
       the real state: dots when idle, a sweeping bar while it measures, an X when a scan failed.</p>
       <p><b>One click for the quick panel.</b> The same readout as the app, the busiest process, memory
       pressure, the network and the folder being watched. Click a figure to open that page; click anywhere
       else to close it.</p>
-      <p><b>Always there.</b> Close the window and Samo keeps running up here; <b>Open Samo</b> or
-      <b>⌘0</b> brings it back.</p>
+      <p><b>Always there.</b> Close the window and Samo keeps running there; <b>Open Samo</b>,
+      <b>⌘0</b> / <b>Ctrl+0</b>, or launching Samo again brings it back.</p>
     </td>
   </tr>
 </table>
 
 ## Install
+
+Pre-built downloads for macOS and Windows are published on [GitHub Releases](https://github.com/KJ-AIML/samo/releases), or you can build from source.
+
+### macOS
 
 You need macOS 11 or later, the Xcode Command Line Tools (`xcode-select --install`) and
 [rustup](https://rustup.rs). The Rust toolchain is pinned in `rust-toolchain.toml`, so rustup fetches the right one.
@@ -90,31 +105,36 @@ To run it straight from the source instead: `cargo run --release -p samo-gpui`.
 
 > Samo is tested on Apple Silicon. Intel Macs should build from source too, but haven't been tried.
 
-### On Windows
+### Windows
 
-Unpack `Samo-<version>-windows-x86_64.zip` anywhere and run `Samo\Samo.exe`. Then **Settings → This PC → Install
+Unpack `Samo-<version>-windows-x86_64.zip` from [GitHub Releases](https://github.com/KJ-AIML/samo/releases) anywhere and run `Samo\Samo.exe`. Then **Settings → This PC → Install
 for this user** copies it to `%LOCALAPPDATA%\Programs\Samo`, adds it to the Start menu and restarts it from there;
 no administrator rights are needed. From there it can **Start at sign-in**, and update itself. The zip isn't
 code-signed yet, so Windows SmartScreen asks once before the first run.
 
-To make the zip from the source (Windows 11, the MSVC Rust toolchain): `cargo run -p xtask -- samo-package`.
+To build and package from source (Windows 10/11, MSVC Rust toolchain + Visual Studio Build Tools):
+
+```powershell
+cargo run --release -p samo-gpui          # run straight from source
+cargo run -p xtask -- samo-package        # build target\samo-dist\Samo-<version>-windows-x86_64.zip
+```
 
 ## Using Samo
 
 | Page | What it answers |
 | --- | --- |
-| **Overview** | How the Mac is doing right now, and where this folder's space went |
+| **Overview** | How your Mac or PC is doing right now, and where this folder's space went |
 | **Projects** | Which projects carry the most build output, and what clearing it would give back |
-| **Storage** | The folder as a map: click into folders, reveal them in Finder, move them to the Trash |
-| **Processes** | Every process, grouped by app with its icon, by memory, CPU, disk or PID, with a search; quit one process (Samo checks it's still the same process first) |
-| **Performance** | CPU history, each core, memory in detail, disk and network rates |
+| **Storage** | The folder as a map: click into folders, reveal them in Finder / Explorer, move them to the Trash / Recycle Bin |
+| **Processes** | Every process, grouped by app with its icon, by memory, CPU, disk or PID, with a search; quit one process (or **End task** on Windows if it stays open — Samo checks it's still the same process first) |
+| **Performance** | CPU history, each core (with Performance & Efficiency core detection on both macOS and Windows), memory in detail, disk and network rates |
 
 - **Pick what to measure** from the folder menu in a page's header: your standard folders (Home, Desktop,
   Documents, Downloads, Developer, Applications) and any folder you add with **Choose folder…**. Added folders are
-  remembered in `~/Library/Application Support/Samo/locations.txt` and can be removed from the same menu.
-- **⌘0** brings the window back, **⌘Q** quits, **Esc** closes a menu or dialog.
+  remembered in `~/Library/Application Support/Samo/locations.txt` (`%APPDATA%\Samo\locations.txt` on Windows) and can be removed from the same menu.
+- **⌘0 / Ctrl+0** brings the window back, **⌘Q / Ctrl+Q** quits, **Esc** closes a menu or dialog.
 - **Look** is in **Settings → Appearance**: the mode (System, Light or Dark) and the style (Cobalt, Samo's own, or
-  Graphite, true greys). It shows at once, in the menu bar panel too, and is remembered in
+  Graphite, true greys). It shows at once, in the quick panel too, and is remembered in
   `~/Library/Application Support/Samo/appearance.txt` (`%APPDATA%\Samo\appearance.txt` on Windows).
 
 A few environment variables, handy for scripts and screenshots:
@@ -135,9 +155,11 @@ A few environment variables, handy for scripts and screenshots:
   listens on `127.0.0.1` only.
 - **Only what KJ signed.** The store's catalog is signed, and every package, image and Samo update is checked
   against it before it is used.
-- **The Trash, never `rm`.** Before moving anything Samo checks it is still the same file (device and inode) it
-  measured. Undo puts it back.
-- **The right process.** Quit checks the process's PID *and* start time, so a recycled PID never gets the signal.
+- **The Trash or Recycle Bin, never `rm`.** Before moving anything Samo checks it is still the same file (device and
+  inode on macOS; volume serial and file index on Windows) it measured. On Windows, Samo also checks the drive's
+  Recycle Bin room before the click and offers to safely raise its limit if an item won't fit, so Undo always works.
+- **The right process.** Quit (and End task on Windows) checks the process's PID *and* start time, so a recycled PID
+  never gets the signal.
 - **Readings carry their state.** Every sensor value is `Available`, `Unsupported` or `Stopped`, and the UI shows
   which.
 
@@ -148,7 +170,25 @@ runs as its own small program, so one that misbehaves is stopped without taking 
 page with its own parts. Turning one off undoes what it changed outside its own folder; turning it back on puts
 that back. The design is [ADR-002](docs/decisions/ADR-002-samo-extensions-design.md).
 
-**Claude Sessions** is the first: your Claude Code sessions at a glance, in the spirit of
+| Extension | macOS | Windows | What it does |
+| --- | :---: | :---: | --- |
+| **Claude Sessions** | ✓ | ✓ | Live Claude Code session status, today's tokens, and 5-hour / weekly plan limits |
+| **Clips** | ✓ | ✓ | Local clipboard history with secret filtering and quick paste (`⇧⌘C` / `Win+Alt+V`) |
+| **Shots** | ✓ | — | Frozen-screen screenshots, scrolling capture, editor, OCR, colour picker, ruler and pins |
+
+### The store
+
+Open **All extensions** in the sidebar on either **macOS** or **Windows**: every extension in Samo's store, and every
+one you have installed, with **All · Installed · Updates** and a search box. An extension's page shows its screenshots,
+what it does and *what it changes on your machine*, with **Install**, **Update** or **Uninstall**. Uninstalling first
+undoes what it changed, then deletes it (Claude Sessions keeps its one-time backup, `~/.claude/settings.json.samo-bak`).
+Extensions without a Windows build clearly show as *Mac only* on Windows. The store's listings live in
+[`samo-extensions`](https://github.com/KJ-AIML/samo-extensions): a teammate adds one with a pull request, and KJ reviews
+and signs it. The design is [ADR-003](docs/decisions/ADR-003-samo-extension-store.md).
+
+### Claude Sessions
+
+**Claude Sessions** (macOS & Windows) shows your Claude Code sessions at a glance, in the spirit of
 [Glance](https://github.com/whoisnaisu/glance) by whoisnaisu (none of its code is used; Claude Sessions is built on
 Claude Code's documented hooks and status line).
 
@@ -158,33 +198,28 @@ Claude Code's documented hooks and status line).
 - Today's tokens, per session and in all, read from Claude Code's transcripts (only today's part).
 - Your 5-hour and weekly plan limits, from Claude Code's status line, if you turn Plan limits on. Near the weekly
   limit Anthropic may apply no 5-hour limit; the page then says *no 5-hour limit right now*.
-- **Connect** adds Samo's hooks to `~/.claude/settings.json`, after backing it up to `settings.json.samo-bak`;
-  **Plan limits** sets Claude Code's status line, never replacing one you have. Both come out exactly when you
-  turn them off.
+- **Connect** adds Samo's hooks to `~/.claude/settings.json` (`%USERPROFILE%\.claude\settings.json` on Windows), after
+  backing it up to `settings.json.samo-bak`; **Plan limits** sets Claude Code's status line, never replacing one you
+  have (works in Git Bash and PowerShell on Windows). Both come out exactly when you turn them off.
 - **Ask Anthropic for limits**, off until you turn it on, keeps the limits current outside a terminal too: every 5
   minutes Samo asks Anthropic's usage page, as Claude Code's `/usage` does, with Claude Code's sign-in. Samo only
   reads the sign-in (the Keychain's `Claude Code-credentials`, or `~/.claude/.credentials.json`); it never renews,
   changes or keeps it. Otherwise Claude Sessions never goes online.
-- On Windows it runs from `SAMO_EXT_DEV_DIR` until the store comes (#10). `~/.claude` is `%USERPROFILE%\.claude`;
-  the hooks run Samo's helper with no shell (Claude Code 2.1.139 or newer), and the status line works in Git Bash
-  and PowerShell.
 
-### The store
+### Clips
 
-Open **All extensions** in the sidebar: every extension in Samo's store, and every one you have installed, with
-**All · Installed · Updates** and a search box. An extension's page shows its screenshots, what it does and
-*what it changes on your Mac*, with **Install**, **Update** or **Uninstall**. Uninstalling first undoes what it
-changed, then deletes it (Claude Sessions keeps its one-time backup, `~/.claude/settings.json.samo-bak`). The
-store's listings live in [`samo-extensions`](https://github.com/KJ-AIML/samo-extensions): a teammate adds one with
-a pull request, and KJ reviews and signs it. The design is [ADR-003](docs/decisions/ADR-003-samo-extension-store.md).
-
-On Windows the store works the same way: an extension with a Windows build installs it, and one without shows as
-*Mac only*. A Windows build is made on Windows (`cargo run -p xtask -- ext-package <folder>` writes
-`<id>-<version>-windows-x86_64.tar.gz`) and published from the Mac with the Mac's build, under one listing.
+**Clips** (macOS & Windows) is a local clipboard history in the store ([ADR-005](docs/decisions/ADR-005-samo-clips.md)),
+in the spirit of Maccy. Press **⇧⌘C** (macOS) or **Win+Alt+V** (Windows): everything you copied is listed, newest first,
+pins on top. Type to find it, then Return or ⌘1–⌘9 / Ctrl+1–9 pastes it into the app you were in (⌥Return / Alt+Return
+without formatting; ⌥P / Alt+P pins, ⌥⌫ / Alt+Backspace deletes). It keeps text, rich text, images and files, 200 by
+default, on your machine only; uninstalling deletes them. What password managers mark as secret (and on macOS, anything
+copied in 1Password, Bitwarden, Keychain Access or Passwords) is never kept, not even in memory. On macOS it asks for
+Paste from Other Apps and Accessibility for **Clips** alone; on Windows it listens natively and pastes with `Ctrl+V`
+only after you pick an item.
 
 ### Shots
 
-**Shots** is a screenshot extension in the store ([ADR-004](docs/decisions/ADR-004-samo-shots.md)). Press ⇧⌘2 and
+**Shots** (macOS) is a screenshot extension in the store ([ADR-004](docs/decisions/ADR-004-samo-shots.md)). Press ⇧⌘2 and
 drag: the screen is frozen at the shortcut, a magnifier and the size in pixels follow the pointer, and the shot is
 copied and saved to `~/Pictures/Shots` when you let go. Space picks a window instead; ⇧⌘1 takes the whole screen.
 Every shot then opens in Shots' editor, already copied and saved, so closing it loses nothing. The editor has arrows,
@@ -200,17 +235,6 @@ captures something longer than the screen: choose the area, then scroll it yours
 shot as you go, with a preview at the side, up to 30,000 px. Esc or a click outside the area finishes it. Shots asks macOS for Screen Recording as its own app, so no other extension gains it, and nothing it captures
 leaves your Mac. It opens its own windows, which the store says before you install it; an extension that opens windows
 without saying so is stopped.
-
-### Clips
-
-**Clips** is a clipboard history in the store ([ADR-005](docs/decisions/ADR-005-samo-clips.md)), in the spirit of
-Maccy. Press ⇧⌘C: everything you copied is listed at the pointer, newest first, pins on top. Type to find it, then
-Return or ⌘1–⌘9 pastes it into the app you were in (⌥Return without formatting; ⌥P pins, ⌥⌫ deletes). It keeps
-text, rich text, images and files, 200 by default, on this Mac only; uninstalling deletes them. What password
-managers mark as secret, and anything copied in 1Password, Bitwarden, Keychain Access or Passwords, is never kept,
-not even in memory. macOS asks for two permissions, for **Clips** alone: Paste from Other Apps (choose Always Allow),
-and Accessibility, so it can press ⌘V for you; without it, picking copies and you press ⌘V. It checks the clipboard
-for a new copy twice a second and does nothing else while idle.
 
 ### Developing an extension
 
@@ -233,17 +257,13 @@ $env:SAMO_EXT_DEV_DIR = "$PWD\target\ext-dev"; cargo run --release -p samo-gpui
 ## Updates
 
 **Settings → Updates** says which Samo you have and, when you open it, checks the store for a newer one. **Install
-and restart** downloads it, checks it (its signature in the catalog, then the app's id, version and code
-signature) before anything changes, then replaces Samo and opens the new one. The old app goes to the Trash, and if
-the swap fails it is put back. Samo 0.1.x has no updater: install 0.2.0 from its DMG once.
-
-On Windows it works the same way for an installed Samo: the download's hash is checked against the signed catalog,
-the zip is unpacked and checked (only `Samo\` inside, its version the catalog's), then the old Samo goes to the
-Recycle Bin and the new one takes its place, or the old one comes back.
+and restart** downloads it, checks it (its signature in the catalog, then the app's id, version and signature) before
+anything changes, then replaces Samo and opens the new one. The old app goes to the Trash (macOS) or Recycle Bin
+(Windows), and if the swap fails it is put back.
 
 ## Also in the box
 
-- **`samo-cli`** — the same measurements in a terminal:
+- **`samo-cli`** — the same measurements in a terminal on macOS and Windows:
   `cargo run -p samo-cli -- scan ~/Developer` (file types, projects and what they could give back, largest
   folders) and `cargo run -p samo-cli -- top`.
 - **`samo-server` + `ui/`** — a local web console (React and Vite) at `http://127.0.0.1:7420`:
@@ -258,20 +278,22 @@ pure, and runs the tests.
 | --- | --- | --- |
 | L0 | `samo-primitives` | Shared types; `Reading<T>` |
 | L1 | `samo-blueprint` | Limits and configuration |
+| L1 | `samo-ext-protocol` | What Samo and an extension agree on: the manifest, messages and widgets |
 | L2 | `samo-domain` | Pure rules: file classification, project bloat, circle packing, telemetry gaps |
 | L3 | `samo-store` | SQLite (WAL), the only database user |
 | L4 | `samo-engine` | Commands, access policy, audit log |
-| L5 | `samo-macos` | The filesystem scanner, the Trash mover, telemetry and process collection |
-| L1 | `samo-ext-protocol` | What Samo and an extension agree on: the manifest, messages and widgets |
+| L5 | `samo-macos`, `samo-windows` | OS-specific filesystem scanner, Trash / Recycle Bin mover, telemetry and process collection |
 | L5 | `samo-extensions` | Extensions on disk, the supervisor that runs their helpers, and the store: its HTTP client (only on a click), signed catalog, cache, installs and Samo's own update |
-| extensions | `claude-sessions`, `hello` | The Claude Sessions helper (`samo-claude`) and the example |
-| apps | `samo-gpui`, `samo-cli`, `samo-server` | The Mac app, the CLI, the local web server |
+| extensions | `claude-sessions`, `clips`, `clips-windows`, `shots`, `hello` | Out-of-process extension helpers and the example |
+| apps | `samo-gpui`, `samo-cli`, `samo-server` | The native macOS & Windows app, the CLI, the local web server |
 
-The workspace forbids `unsafe` and denies `unwrap`, `expect` and `panic!`. In the Mac app, sensors are read on
+The workspace forbids `unsafe` and denies `unwrap`, `expect` and `panic!`. In the desktop app, sensors are read on
 their own thread and scans run on theirs, so the UI thread only draws. Samo's look — the ring, the readout, the
 probe, the dither — is written down in [`apps/samo-gpui/DESIGN.md`](apps/samo-gpui/DESIGN.md).
 
 ## Development
+
+**macOS:**
 
 ```sh
 scripts/ci-local.sh              # rustfmt, clippy -D warnings, xtask verify (what CI runs)
@@ -279,34 +301,21 @@ cargo run --release -p samo-gpui # the Mac app; use --release, debug builds idle
 python3 scripts/make-icon.py     # redraw the app icon (needs Pillow)
 ```
 
-### Windows (in progress)
+**Windows:**
 
-Samo is coming to Windows 10/11 ([ADR-006](docs/decisions/ADR-006-samo-on-windows.md), tracked in #13).
-
-**The app runs on Windows:** `cargo run --release -p samo-gpui`.
-- **Pages:** Overview, Projects, Storage, Processes and Performance, with live readings. What Windows doesn't report
-  (thermal state, performance and efficiency cores, wired memory) is said, not guessed.
-- **Cleanup** goes to the Recycle Bin, with Undo. Samo refuses before anything moves when the bin can't take an item:
-  the bin is off on that drive, the item is bigger than the bin holds, or the drive isn't a fixed NTFS one.
-- **Quit** ends a process only after checking it is the same one.
-- **The tray:** closing the window leaves Samo running there, and the CPU figure is in the tray icon's tooltip.
-  Launching Samo again shows its window.
-- **Windows conventions:** the Windows titlebar, Ctrl shortcuts, Show in Explorer and the Recycle Bin, with your
-  folders kept in `%APPDATA%\Samo`.
-- **Coming later on Windows:** extensions, the store and updates (#9, #10). Their pages say so.
-
-`samo-cli` (`cargo run -p samo-cli -- scan C:\Users\you\source`, `-- top`) and the web console run on Windows too.
-
-- Use the MSVC toolchain and the Visual Studio Build Tools. If rustup's default host is GNU, set
+- Use the MSVC toolchain and Visual Studio Build Tools. If rustup's default host is GNU, set
   `RUSTUP_TOOLCHAIN=1.99.0-x86_64-pc-windows-msvc`.
-- Run `scripts/ci-windows.sh` (in Git Bash) before pushing. It is what the Windows CI job runs.
+- Run `scripts/ci-windows.sh` (in Git Bash) before pushing — it runs `rustfmt`, `clippy -D warnings`, the static
+  `xtask` gates, and the full workspace test suite.
+- Package a release zip with `cargo run -p xtask -- samo-package`, or an extension package with
+  `cargo run -p xtask -- ext-package <folder>`.
 
 ## Credits
 
 - [GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui) by Zed Industries (Apache-2.0).
 - [IBM Plex Mono](https://github.com/IBM/plex), bundled under the SIL Open Font License 1.1. Cabinet Grotesk and
   Switzer are used when installed; they aren't bundled.
-- [`tray-icon`](https://github.com/tauri-apps/tray-icon) for the menu bar item and
+- [`tray-icon`](https://github.com/tauri-apps/tray-icon) for the menu bar & system tray item and
   [`sysinfo`](https://github.com/GuillaumeGomez/sysinfo) for much of the telemetry.
 - The instrument-panel discipline is inspired by [TMOG](https://tmog.org/).
 
